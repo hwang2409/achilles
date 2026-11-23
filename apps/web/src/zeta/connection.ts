@@ -133,7 +133,7 @@ export class NoAnswer extends Error {}
 
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "session_history_backward", "list_sessions_paging", "projects", "projects-memory-v2", "state_read_v1", "agent_run_catalog_v1", "child_runs", "child_run_history", "child_run_events", "home_settings_v1", "mcp_management_v1"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "session_history_backward", "list_sessions_paging", "projects", "projects-memory-v2", "project_writes_v1", "state_read_v1", "agent_run_catalog_v1", "child_runs", "child_run_history", "child_run_events", "home_settings_v1", "mcp_management_v1"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
