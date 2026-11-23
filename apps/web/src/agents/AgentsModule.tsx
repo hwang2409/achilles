@@ -204,6 +204,6 @@ function RunHistory({ client, row }: { client: ZetaClient; row: AgentRun }) {
     {result.warning && <p role="status">{result.warning}</p>}
     {result.stale && <p role="status">run changed · refresh to read the latest stored history</p>}
     {!result.limited && <button type="button" disabled={result.loading} onClick={() => void owner.refresh()}>refresh transcript</button>}
-    {result.result && (result.progress?.complete && result.progress.messages === 0 ? <p>no stored messages</p> : <div className="transcript agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
+    {result.result && (result.progress?.complete && result.progress.messages === 0 ? <p>no stored messages</p> : <div className="agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
   </>;
 }
