@@ -1,0 +1,24 @@
+.accounts-place { max-width: 64rem; padding: 24px clamp(16px, 3vw, 40px); container-type: inline-size; }
+.accounts-place > h2 { font-size: 20px; margin: 0; text-wrap: balance; }
+.account-intro { color: var(--fulcrum-muted); margin: 8px 0 24px; max-width: 72ch; text-wrap: pretty; }
+.accounts-place .module-state { padding: 24px 0; border-top: 1px solid var(--fulcrum-border); }
+.account-rows { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--fulcrum-border); }
+.account-rows[data-stale="true"] { opacity: .68; }
+.account-rows > li { display: grid; gap: 16px; padding: 16px; border-bottom: 1px solid var(--fulcrum-border); border-inline-start: 2px solid transparent; overflow-wrap: anywhere; }
+.account-rows > li[data-default="true"] { border-inline-start-color: var(--fulcrum-warn); }
+.account-rows > li[data-available="false"] { border-inline-start-color: var(--fulcrum-danger); background: color-mix(in srgb, var(--fulcrum-danger) 5%, transparent); }
+.account-identity h3 { font-size: 1em; margin: 0; }
+.account-identity p { display: flex; gap: 4px 12px; flex-wrap: wrap; margin: 6px 0 0; }
+.account-identity p, .account-usage p, .account-window time { color: var(--fulcrum-muted); }
+.account-usage { display: grid; gap: 8px; }
+.account-usage p { margin: 0; }
+.account-default { color: var(--fulcrum-warn); }
+[data-available="false"] .account-availability, .account-usage [data-failed="true"] { color: var(--fulcrum-danger); }
+.account-window { display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
+.account-window > div { display: flex; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+.account-window meter { width: 100%; height: 8px; accent-color: var(--fulcrum-accent); }
+.account-window meter::-webkit-meter-bar { background: var(--fulcrum-border); border: 0; border-radius: 0; }
+.account-window meter::-webkit-meter-optimum-value { background: var(--fulcrum-accent); }
+@container (min-width: 35rem) {
+  .account-rows > li { grid-template-columns: 1fr 1fr; gap: 32px; }
+}

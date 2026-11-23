@@ -1,5 +1,6 @@
 // adapted from gamma@6cd69671 src/connection.ts
 import { createClient, webSocketTransport, ZetaError, type ZetaClient, type ZetaDiscovery, type ZetaRole } from "@fulcrum/zeta";
+import { ACCOUNT_LIST_IDLE_FEATURE } from "./accounts";
 import { teeRunEnds } from "./turnEnd";
 
 /**
@@ -133,7 +134,7 @@ export class NoAnswer extends Error {}
 
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "projects", "projects-memory-v2", "state_read_v1", "home_settings_v1", "mcp_management_v1"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "projects", "projects-memory-v2", "state_read_v1", "home_settings_v1", "mcp_management_v1", ACCOUNT_LIST_IDLE_FEATURE];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 

@@ -8,6 +8,7 @@ import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { ProjectsModule } from "../projects/ProjectsModule";
 import { McpModule } from "../mcp/McpModule";
 import { createMcpReads } from "../mcp/mcpReads";
+import { AccountsModule } from "../accounts/AccountsModule";
 import { SettingsModule } from "../settings/SettingsModule";
 import { HOME_SETTINGS_FEATURE } from "../settings/homeSettings";
 import { createConnection, isObserverPresentation, supportsFeature, supportsRequest, type Connection } from "../zeta";
@@ -26,8 +27,8 @@ export function SurfaceRouter() {
     const pathname = location.pathname;
     const route = matchSurfaceRoute(pathname);
     const readOnly = route !== undefined && route !== chatsRoute && route !== createRoute;
-    // library, project and settings tabs browse as observers and take control only when the user asks for it.
-    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" || route.id === "settings" ? "upgradable" : "locked";
+    // library, project, accounts and settings tabs browse as observers and take control only when the user asks for it.
+    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" || route.id === "settings" || route.id === "accounts" ? "upgradable" : "locked";
     return { route, pathname, connection: createConnection({ origin: location.origin, readOnly: mode }), readOnly };
   });
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
@@ -53,7 +54,7 @@ export function SurfaceRouter() {
     setLibraryControl(reason);
     return reason;
   };
-  const observerBanner = observer && <ObserverBanner connection={connection} readOnly={readOnly} />;
+  const observerBanner = observer && route?.id !== "accounts" && <ObserverBanner connection={connection} readOnly={readOnly} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!readOnly) {
     return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
@@ -75,6 +76,8 @@ export function SurfaceRouter() {
     content = <McpModule client={client} reads={mcpReads} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
   } else if (route.id === "settings") {
     content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
+  } else if (route.id === "accounts") {
+    content = <AccountsModule client={client} connecting={connecting} connection={connection} />;
   } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }

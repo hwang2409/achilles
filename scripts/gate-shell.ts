@@ -347,3 +347,28 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await capture("chat-off-rail", 1280);
 
 }
+
+export async function gateAccountsPlace(tab: Page, origin: string) {
+  const roles: unknown[] = [];
+  const reads: { role: unknown; params: unknown }[] = [];
+  const sockets: import("playwright").WebSocket[] = [];
+  tab.on("websocket", (socket) => {
+    sockets.push(socket);
+    let role: unknown;
+    socket.on("framesent", ({ payload }) => {
+      const { method, params } = JSON.parse(String(payload));
+      if (method === "hello") { role = params.role; roles.push(role); }
+      if (method === "account_list") reads.push({ role, params });
+    });
+  });
+  await tab.goto(`${origin}/accounts`);
+  const show = tab.getByRole("button", { name: "show accounts", exact: true });
+  await show.waitFor({ timeout: 10_000 });
+  if (reads.length || roles.join() !== "observer") throw new Error("accounts did not wait as an observer for the show accounts click");
+  await show.click({ timeout: 10_000 });
+  await tab.getByRole("heading", { name: "no model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
+  const controller = sockets[1];
+  if (!controller || roles.join() !== "observer,controller,observer" || JSON.stringify(reads) !== '[{"role":"controller","params":{}}]')
+    throw new Error("accounts did not borrow control for exactly one sessionless read");
+  if (!controller.isClosed()) await controller.waitForEvent("close", { timeout: 10_000 });
+}
