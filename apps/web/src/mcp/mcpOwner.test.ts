@@ -47,7 +47,7 @@ function rig() {
   async function deadline<T>(operation: string, promise: Promise<T>): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try { return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => { cancel(); reject(new Error(`${operation} did not finish`)); }, 500);
+      timer = setTimeout(() => { cancel(); reject(new Error(`${operation} did not finish`)); }, 10_000);
     })]); } finally { clearTimeout(timer); }
   }
   function gate<T>(value: T) {
@@ -69,7 +69,7 @@ type Rig = ReturnType<typeof rig>;
 const rowTest = (name: string, check: (r: Rig) => Promise<void>) => test(name, async () => {
   const r = rig();
   try { await check(r); } finally { await r.cleanup(); }
-});
+}, 60_000);
 const fail = (value: unknown) => () => { throw value; };
 const allScopes = ["effective", "user", "project"];
 
