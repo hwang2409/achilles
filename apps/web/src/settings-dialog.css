@@ -18,7 +18,7 @@
 .theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .theme-options button { display: flex; align-items: center; justify-content: space-between; min-width: 0; min-height: 44px; gap: 8px; padding: 7px 8px; color: var(--g1-fg); font: inherit; text-align: left; background: transparent; border: 1px solid var(--g1-control-border); }
 .theme-options button[data-selected] { font-weight: 700; background: var(--g1-selected); box-shadow: inset var(--g1-selection-width) 0 var(--g1-selection); }
-.theme-options button:focus-visible, .settings-segments button:focus-visible, .settings-toggle:focus-visible, .settings-link:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
+.theme-options button:focus-visible, .settings-segments button:focus-visible, .settings-link:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .settings-swatch { display: grid; grid-template-columns: repeat(6, 8px); height: 16px; padding: 1px; background: var(--g1-rule); }
 .settings-swatch > span { display: block; }
 .font-options { display: grid; grid-template-columns: 46px minmax(0, 1fr); align-items: center; gap: 8px 10px; }
@@ -27,6 +27,7 @@
 .settings-segments button { min-height: 40px; border-radius: 0; padding: 5px 10px; color: var(--g1-fg); font: inherit; background: transparent; border: 1px solid var(--g1-control-border); margin-inline-end: -1px; }
 .settings-segments button:focus-visible { z-index: 1; }
 .settings-segments button[aria-pressed="true"] { color: var(--g1-primary-text); font-weight: 700; background: var(--g1-primary); }
+.settings-segments button[aria-pressed="true"]:focus-visible { outline-color: var(--g1-primary-text); }
 .size-density { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; }
 .setting-explanation { display: flex; align-items: flex-start; gap: 12px; }
 .settings-toggle { position: relative; flex: 0 0 38px; width: 38px; min-width: 38px; max-width: 38px; height: 24px; background: var(--g1-surface); border: 1px solid var(--g1-control-border); padding: 4px; }
