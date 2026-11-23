@@ -6,6 +6,7 @@ import { PagesLanding } from "../page/PagesLanding";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { ProjectsModule } from "../projects/ProjectsModule";
+import { SessionsModule } from "../sessions/SessionsModule";
 import { McpModule } from "../mcp/McpModule";
 import { createMcpReads } from "../mcp/mcpReads";
 import { SettingsModule } from "../settings/SettingsModule";
@@ -78,7 +79,8 @@ export function SurfaceRouter() {
   } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
-  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}</CatalogShell>;
+  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}
+    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow() } : undefined}>{content}</CatalogShell>;
 }
 
 // library_read_v1 path when hello granted it; each exact method is checked, so a catalog can work without its read.
@@ -102,11 +104,13 @@ function BuildShell({ client, children, ...props }: BuildShellProps & { client: 
   return <AppShell {...props} activity={activity}>{children(activity)}</AppShell>;
 }
 
-function CatalogShell({ renderShell, route, connectionStatus, banner, children }: { renderShell: RenderShell; route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode }) {
+function CatalogShell({ renderShell, route, connectionStatus, banner, children, sessions }: { renderShell: RenderShell; route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode; sessions?: Pick<React.ComponentProps<typeof SessionsModule>, "client" | "connecting" | "retry"> }) {
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
+  const newChat = () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent);
   return renderShell({ current: route, nav, banner, connectionStatus,
-    newChat: { available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) },
-    children: () => route.id === "pages" ? <PagesLanding catalog={nav.pageCatalog} reload={nav.reloadPages} more={nav.morePages} /> : children,
+    newChat: { available: connectionStatus.connected, run: newChat },
+    children: () => route.id === "pages" ? <PagesLanding catalog={nav.pageCatalog} reload={nav.reloadPages} more={nav.morePages} />
+      : sessions ? <SessionsModule {...sessions} newChat={newChat} chats={nav.recentChats} /> : children,
   });
 }
 
