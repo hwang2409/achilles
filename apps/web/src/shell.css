@@ -26,7 +26,7 @@
 .brand-row button { width: 40px; height: 40px; margin-left: auto; color: var(--fulcrum-muted); }
 .brand-mark::after { content: ""; position: absolute; width: 11px; height: 11px; left: 5px; top: 5px; background: color-mix(in srgb, var(--fulcrum-accent) 55%, white); }
 .new-chat { justify-content: flex-start; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.chat-search { border: 1px solid var(--fulcrum-border); }
+.chat-search { border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); }
 .chat-search > span { color: var(--fulcrum-muted); font-size: 20px; }
 .chat-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
 .chat-search input::placeholder { color: var(--fulcrum-muted); }
@@ -39,7 +39,7 @@
    (36px list head + 36px group head) instead of hidden under them. useOnScreen reads it too: a build row under the heads is not on screen. */
 .chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-padding-top: 72px; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
-.transcript [data-part="timeline-scroll"]:focus-visible { outline: none; }
+.transcript [data-part="timeline-scroll"]:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
 /* the rows paint over an outline of the scroll box itself, so its focus ring is a layer of the frame above them */
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible) { position: relative; }
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible)::after { content: ""; position: absolute; inset: 0 -6px; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 2px var(--fulcrum-accent); }
@@ -71,7 +71,7 @@
    visually overlap .chat-actions; ellipsis alone keeps the title readable at whatever room remains. */
 .chat-heading strong { order: 1; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .chat-actions { display: flex; align-items: center; gap: 12px; white-space: nowrap; font-size: 14px; }
-.chat-actions button { min-height: 30px; padding: 6px 11px; border-color: var(--fulcrum-border); font-size: 12px; }
+.chat-actions button { min-height: 30px; padding: 6px 11px; border-color: var(--g1-control-border); font-size: 12px; }
 .approval-mode { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
 .approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
@@ -80,7 +80,8 @@
 .run-state, .page-chat-status { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 
 .chat-heading strong[role="button"] { cursor: text; border-radius: 2px; line-height: 40px; }
-.chat-heading strong[role="button"]:hover, .chat-heading strong[role="button"]:focus-visible { outline: 1px solid var(--fulcrum-border); }
+.chat-heading strong[role="button"]:hover { outline: 1px solid var(--g1-control-border); }
+.chat-heading strong[role="button"]:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 .chat-title-edit { flex: 1 1 160px; min-width: 160px; min-height: 40px; padding: 2px 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: 14px; color: inherit; }
 /* iOS Safari zooms the page when it focuses an input under 16px */
 @media (pointer: coarse) { .chat-row-edit, .chat-title-edit { font-size: 16px; } }
@@ -122,6 +123,13 @@
   .header-status .fold-mark::before { width: 7px; height: 7px; margin-right: 5px; }
 }
 /* on narrow headers, keep the named create marker visible and fold only the less important auto marker. */
+/* Keep the existing fold menu on screen at mobile widths under 200% zoom. */
+@container (max-width: 180px) {
+  .chat-actions { gap: 4px; }
+  .chat-heading { gap: 4px; }
+  .header-menu { min-width: min(210px, 100cqw); }
+  .header-menu button { white-space: normal; }
+}
 @container (max-width: 25em) {
   .fold-mark-approve { display: none; }
 }
@@ -143,7 +151,7 @@
 .page-chat { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; }
 .page-chat-surface { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
 /* The pane owns the transcript scroll area; page blocks and chat scroll separately. */
-.transcript { position: relative; font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); flex: 1 1 0; min-height: 0; overflow: hidden; padding: 0; }
+.transcript { position: relative; font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, var(--g1-font-ui)); flex: 1 1 0; min-height: 0; overflow: hidden; padding: 0; }
 html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript > [data-part="timeline-frame"] { width: 100%; max-width: none; height: 100%; margin: 0; }
 .transcript [data-part="timeline-scroll"] { scroll-behavior: auto; }
@@ -165,7 +173,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .main-pane [data-part="composer"] {
   width: min(880px, calc(100% - 32px));
   margin: 0 auto 24px;
-  border: 1px solid var(--fulcrum-border);
+  border: 1px solid var(--g1-control-border);
   background: var(--fulcrum-surface);
   container-type: inline-size;
 }
@@ -180,7 +188,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .main-pane [data-part="composer-hint"] { display: block; white-space: nowrap; font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
 .main-pane [data-part="composer-submit"],
 .main-pane [data-part="composer-stop"] { min-height: 32px; padding: 0 12px; font-size: 13px; }
-.main-pane [data-part="composer-submit"] { color: var(--fulcrum-bg); background: var(--fulcrum-accent); border-color: var(--fulcrum-accent); }
+.main-pane [data-part="composer-submit"] { color: var(--g1-primary-text); background: var(--g1-primary); border-color: var(--g1-primary); }
 .main-pane [data-part="composer-submit"][aria-disabled="true"] { color: var(--fulcrum-muted); background: transparent; border-color: var(--fulcrum-border); }
 .main-pane [data-part="composer-stop"] { color: var(--fulcrum-warn); border-color: var(--fulcrum-warn); }
 .main-pane [data-part="composer-reason"] { margin: 0; padding: 12px 14px; color: var(--fulcrum-muted); }

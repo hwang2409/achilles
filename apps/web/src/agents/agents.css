@@ -1,4 +1,4 @@
-.agents-frame { font: var(--achilles-ui-size, 14px)/1.5 var(--achilles-ui-font, "JetBrains Mono", monospace); }
+.agents-frame { font: var(--achilles-ui-size, 14px)/1.5 var(--achilles-ui-font, var(--g1-font-ui)); }
 .agents-frame > .agents-head { gap: 8px 16px; justify-content: space-between; flex-wrap: wrap; }
 .agents-head > span, .agents-elapsed { color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; font-size: .85em; }
 .agents-split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); flex: 1; min-height: 0; }
@@ -7,7 +7,7 @@
 .agents-filters { padding: 12px 16px; }
 .agents-filters > div { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .agents-filters label { color: var(--fulcrum-muted); flex: 0 1 auto; min-width: 0; font-size: .85em; }
-.agents-filters input, .agents-filters select, .agents-frame button { min-height: 40px; padding-inline: 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); color: var(--fulcrum-text); font: inherit; }
+.agents-filters input, .agents-filters select, .agents-frame button { min-height: 40px; padding-inline: 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); color: var(--fulcrum-fg); font: inherit; }
 .agents-filters select { display: block; max-width: min(18ch, 100%); }
 .agents-filters input { width: 100%; }
 .agents-filters button { margin-inline-start: auto; font-size: .85em; }
