@@ -1,0 +1,64 @@
+name: Set up browser checks
+description: Build Achilles with pinned Fulcrum and install pinned Zeta and Chromium
+runs:
+  using: composite
+  steps:
+    - id: pin
+      run: echo "sha=$(tr -d '[:space:]' < fulcrum.rev)" >> "$GITHUB_OUTPUT"
+      shell: bash
+    - uses: actions/checkout@v4
+      with:
+        repository: hwang2409/fulcrum
+        ref: ${{ steps.pin.outputs.sha }}
+        path: .cache/fulcrum
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.3.13
+    - run: bun install --frozen-lockfile
+      shell: bash
+      working-directory: .cache/fulcrum
+    - run: bun scripts/fulcrum.ts
+      shell: bash
+      env:
+        FULCRUM_DIR: ${{ github.workspace }}/.cache/fulcrum
+    - run: bun run build
+      shell: bash
+      working-directory: apps/web
+    - id: zeta-pin
+      run: echo "sha=$(tr -d '[:space:]' < zeta.rev)" >> "$GITHUB_OUTPUT"
+      shell: bash
+    - uses: actions/checkout@v4
+      with:
+        repository: hwang2409/zeta
+        ref: ${{ steps.zeta-pin.outputs.sha }}
+        path: .cache/zeta
+    - uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.8.17"
+        python-version: "3.12"
+    - run: uv sync --project .cache/zeta --frozen
+      shell: bash
+    - id: playwright
+      shell: bash
+      working-directory: apps/web
+      run: |
+        version=$(bun -e 'console.log(Bun.JSONC.parse(await Bun.file("bun.lock").text()).packages.playwright[0])')
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      id: chromium
+      with:
+        path: ~/.cache/ms-playwright
+        key: chromium-ubuntu-24.04-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+    - name: Install Chromium and system dependencies
+      if: steps.chromium.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: apps/web
+      run: bun node_modules/playwright/cli.js install --with-deps chromium
+    - name: Check cached Chromium system dependencies
+      if: steps.chromium.outputs.cache-hit == 'true'
+      shell: bash
+      working-directory: apps/web
+      run: |
+        if ! bun -e 'import { chromium } from "playwright"; const browser = await chromium.launch({ headless: true }); await browser.close();'; then
+          bun node_modules/playwright/cli.js install-deps chromium
+        fi

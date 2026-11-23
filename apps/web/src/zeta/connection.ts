@@ -237,7 +237,7 @@ export function createConnection({
     // The fallback is provisional: only an accepted observer hello changes future retries.
     const authority = transitionRole(roleState, "controller_busy").role;
     const fallback = await openRole(discovery, authority);
-    if (fallback.kind === "busy" && current()) roleState = transitionRole(roleState, "both_busy");
+    if (fallback.kind === "busy" && current() && roleState.role === first) roleState = transitionRole(roleState, "both_busy");
     return { opened: fallback, authority };
   };
   const adopt = (next: ZetaClient, discovery: ZetaDiscovery, authority: ZetaRole) => {
@@ -282,6 +282,12 @@ export function createConnection({
     if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
     // The process runs and the origin is allowed, so a refused upgrade means the token was refused.
     if (opened.kind === "rejected") return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
+    // A release during the hello makes this controller obsolete before it becomes visible to callers.
+    if (authority === "controller" && readOnly === "upgradable" && !holding) {
+      opened.client.close();
+      void attempt();
+      return;
+    }
     adopt(opened.client, discovery, authority);
   };
   void attempt();
@@ -335,11 +341,8 @@ export function createConnection({
     async releaseControl() {
       if (readOnly !== "upgradable") return;
       holding = false;
-      if (stopped) return;
-      if (state.phase !== "connected" || state.authority !== "controller" || !client || !liveDiscovery) {
-        roleState = transitionRole(roleState, "control_released");
-        return;
-      }
+      roleState = transitionRole(roleState, "control_released");
+      if (stopped || state.phase !== "connected" || state.authority !== "controller" || !client || !liveDiscovery) return;
       const controller = client;
       const discovery = liveDiscovery;
       const opened = await openRole(discovery, "observer");
@@ -347,7 +350,6 @@ export function createConnection({
         if (opened.kind === "connected") opened.client.close();
         return;
       }
-      roleState = transitionRole(roleState, "control_released");
       // without an observer slot, close the controller anyway: the reconnect opens as observer.
       if (opened.kind === "connected") adopt(opened.client, discovery, "observer");
       else controller.close();
