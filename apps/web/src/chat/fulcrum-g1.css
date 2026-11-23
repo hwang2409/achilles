@@ -8,8 +8,7 @@
 }
 [data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
   grid-template-columns: minmax(0, 1fr);
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
   padding: var(--g1-space-2) var(--g1-space-3);
   border: var(--g1-border-width) solid var(--g1-border);
   border-radius: var(--g1-radius-control);
@@ -27,12 +26,12 @@
 /* The same card skin applies in live chat and agent timelines. Leave the pinned
    per-tool viewers, syntax colors, and disclosure sizing in charge of their bodies. */
 :is([data-part="tool"], [data-part="approval"]) {
-  border-radius: var(--g1-radius-container);
+  border-width: var(--g1-border-width);
+  border-radius: var(--g1-radius-control);
   box-shadow: var(--g1-shadow-rest);
   font-family: var(--achilles-code-font, var(--g1-font-mono));
   font-size: var(--g1-type-small);
 }
-[data-part="tool"][data-state="done"] { --rail: var(--g1-ok); }
 [data-part="approval"][data-decision="approve"] { --rail: var(--g1-ok); }
 [data-part="approval"][data-decision="deny"] { --rail: var(--g1-danger); }
 [data-part="tool-header"] {
