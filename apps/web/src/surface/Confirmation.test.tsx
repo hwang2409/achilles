@@ -29,7 +29,16 @@ function review(execute: Extract<ConfirmationProps, { level: 2 }>["execute"], op
   return { opener, modal, dialog: within(modal), activity: within(activity) };
 }
 const cancel = (dialog: HTMLElement) => fireEvent(dialog, new Event("cancel", { cancelable: true }));
-const click = (button: HTMLElement) => act(async () => { fireEvent.click(button); });
+async function settle(operation: string, action: () => void) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      act(async () => { action(); }),
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`timed out: ${operation}`)), 1_000); }),
+    ]);
+  } finally { clearTimeout(timeout); }
+}
+const click = (button: HTMLElement) => settle(`click ${button.textContent}`, () => { fireEvent.click(button); });
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
@@ -60,7 +69,7 @@ test("inline pending locks only its row; success uses the returned value and tim
   expect(ui.getByRole("button", { name: "other row" }).hasAttribute("disabled")).toBe(false);
   expect(ui.getByText("saving…")).toBeTruthy();
   expect(ui.getByText("on")).toBeTruthy();
-  await act(async () => { pending.resolve({ status: "committed", value: text("off for new sessions"), receipt: text("github turned off") }); });
+  await settle("deliver inline receipt", () => { pending.resolve({ status: "committed", value: text("off for new sessions"), receipt: text("github turned off") }); });
   expect(document.activeElement).toBe(opener);
   expect(ui.getByText("off for new sessions")).toBeTruthy();
   expect(ui.getByText(/github turned off at/).querySelector("time")?.dateTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -71,7 +80,9 @@ test("inline known failure keeps the old value and announces a safe failure", as
   fireEvent.click(ui.getByRole("button", { name: "turn off" }));
   await click(within(ui.getByRole("group")).getByRole("button", { name: "turn off" }));
   expect(ui.getByText("on")).toBeTruthy();
-  expect(ui.getByRole("alert").textContent).toContain("refresh before trying again");
+  const result = ui.getByRole("alert");
+  expect(document.activeElement === result).toBe(true);
+  expect(result.textContent).toContain("refresh before trying again");
   expect(ui.container.querySelector("time")).toBeNull();
 });
 
@@ -104,17 +115,17 @@ test("pending and unknown lock dismissal and duplicate submit; only a read confi
   fireEvent.change(dialog.getByRole("textbox"), { target: { value: "paper" } });
   const submit = dialog.getByRole("button", { name: "cancel run" });
   const form = submit.closest("form")!;
-  await act(async () => { fireEvent.submit(form); fireEvent.submit(form); });
+  await settle("submit the review twice", () => { fireEvent.submit(form); fireEvent.submit(form); });
   expect(execute).toHaveBeenCalledTimes(1);
   cancel(modal);
   expect(dialog.getByText("finishing…")).toBeTruthy();
   expect(activity.queryByText(/paper cancelled/)).toBeNull();
-  await act(async () => { pending.reject(new Error("private transport body")); });
+  await settle("deliver unknown result", () => { pending.reject(new Error("private transport body")); });
   const check = dialog.getByRole("button", { name: "check now" });
   cancel(modal);
   fireEvent.submit(form);
   expect(modal.isConnected).toBe(true);
-  expect(document.activeElement).toBe(check);
+  expect(document.activeElement?.textContent).toMatch(/^result unknown\./);
   expect(dialog.queryByText(/private transport body/)).toBeNull();
   expect(execute).toHaveBeenCalledTimes(1);
   await click(check);
@@ -135,7 +146,9 @@ test("scope proof gates submit; a known failure leaves a recoverable dialog open
   expect(document.activeElement).toBe(scope);
   expect(dialog.queryByRole("textbox")).toBeNull();
   expect(submit.hasAttribute("disabled")).toBe(true);
+  expect(dialog.getByText("check the box to continue.").id).toBe(submit.getAttribute("aria-describedby"));
   fireEvent.click(scope);
+  expect(dialog.queryByText("check the box to continue.")).toBeNull();
   await click(submit);
   expect(execute).toHaveBeenCalledTimes(1);
   expect(modal.isConnected).toBe(true);
@@ -156,4 +169,38 @@ test("a refused failure says another tab has control, keeps the dialog open, and
   await click(dialog.getByRole("button", { name: "cancel run" }));
   expect(dialog.getByRole("alert").textContent).toBe("not changed. zeta refused this change: fixture");
   expect(execute).toHaveBeenCalledTimes(2);
+});
+
+const focusCases = ([1, 2] as const).flatMap(level => ([
+  "success", "refusal", "unknown", "keep", "Escape", "refusal then keep", "refusal then Escape",
+] as const).map(path => ({ level, path })));
+
+test.each(focusCases)("level $level focus: $path", async ({ level, path }: (typeof focusCases)[number]) => {
+  const execute: Inline["execute"] = async () => path === "success"
+    ? { status: "committed", value: text("off"), receipt: text("done") }
+    : path === "unknown" ? { status: "unknown" } : { status: "failed", reason: "denied" };
+  const action = level === 1 ? "turn off" : "cancel run";
+  const ui = level === 1 ? render(<Row execute={execute} />) : null;
+  const modal = level === 2 ? review(execute) : null;
+  const opener = modal?.opener ?? ui!.getByRole("button", { name: action });
+  if (ui) fireEvent.click(opener);
+  const surface = modal?.modal ?? ui!.getByRole("group");
+  const confirm = within(surface).getByRole("button", { name: action });
+  if (modal) fireEvent.change(modal.dialog.getByRole("textbox"), { target: { value: "paper" } });
+  if (path !== "keep" && path !== "Escape") await click(confirm);
+  // A level 1 refusal already closed the bar. Reopen it to exercise subsequent dismissal.
+  if (path.startsWith("refusal then") && level === 1) fireEvent.click(opener);
+  if (path.endsWith("keep")) {
+    const host = modal?.modal ?? ui!.getByRole("group");
+    const button = within(host).getByRole("button", { name: "keep current" });
+    button.focus();
+    fireEvent.click(button);
+  }
+  if (path.endsWith("Escape")) {
+    if (modal) cancel(modal.modal); // Native dialog Escape dispatches cancel.
+    else fireEvent.keyDown(ui!.getByRole("group"), { key: "Escape" });
+  }
+  const target = path === "refusal" ? within(modal?.modal ?? ui!.container).getByRole("alert")
+    : path === "unknown" ? within(surface).getByText(/^result unknown\./) : opener;
+  expect(document.activeElement === target).toBe(true);
 });
