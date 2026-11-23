@@ -30,13 +30,13 @@ export type McpOutcome =
   | { status: "committed"; restart: Restart | null }
   | { status: "stale" | "busy" | "unavailable" | "invalid" | "refused" | "unsupported" | "conflict" | "changed" | "cancelled" | "unknown" };
 export const mcpTestMethod = "mcp_server_test";
-type TestTarget = Pick<McpRow, "name" | "scope" | "trusted" | "config"> & { revision: string };
+export type ReviewedMcpTarget = Pick<McpRow, "name" | "scope" | "trusted" | "config"> & { revision: string };
 export type McpTestResult = { status: "ok" | "failed" | "untrusted" | "skipped-policy"; toolCount: number };
-type TestAttempt = { action: "test"; target: TestTarget };
+type TestAttempt = { action: "test"; target: ReviewedMcpTarget };
 type TestReply = { status: "tested"; result: McpTestResult };
 export type McpTestOutcome = TestReply | McpOutcome;
 
-export function needsMcpTestTrust({ scope, config, trusted }: TestTarget) {
+export function needsMcpTestTrust({ scope, config, trusted }: ReviewedMcpTarget) {
   return scope === "project" && config.transport === "stdio" && !trusted;
 }
 
@@ -177,19 +177,29 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     try { return signal.aborted ? CANCELLED : await perform(client); }
     finally { await release().catch(() => {}); }
   }
-  const auth = createMcpAuth({ withControl: withAcquiredControl, supports, failure: rpcFailure, liveObserver });
-  async function confirmTest(client: ZetaClient, target: TestTarget, signal: AbortSignal): Promise<McpTestOutcome> {
+  async function confirmCurrent(client: ZetaClient, target: ReviewedMcpTarget, signal: AbortSignal): Promise<McpOutcome | null> {
     if (live() !== client) return { status: "refused" };
-    if (!supports(client, mcpTestMethod)) return { status: "unsupported" };
     const current = await readMcpScope(client, target.scope, signal);
     if (signal.aborted) return CANCELLED;
     if (live() !== client || !("rows" in current)) return { status: "unavailable" };
     const row = current.rows.find(({ name }) => name === target.name);
     if (current.revision !== target.revision || !row || row.trusted !== target.trusted || !sameConfig(row.config, target.config)) return { status: "stale" };
-    // Zeta does not accept a revision on this RPC. This check narrows but cannot close the gap.
-    return sendTest(client, target, signal);
+    // These RPCs do not accept revisions. This check narrows but cannot close the gap.
+    return null;
   }
-  async function sendTest(client: ZetaClient, { name, scope }: TestTarget, signal: AbortSignal): Promise<McpTestOutcome> {
+  const auth = createMcpAuth({ supports, failure: rpcFailure, liveObserver,
+    withControl: (signal, send, attempt) => withAcquiredControl(signal, async (client) => {
+      const failure = attempt.action === "cancel" ? null : await confirmCurrent(client, attempt, signal);
+      return failure ?? send(client);
+    }),
+  });
+  async function confirmTest(client: ZetaClient, target: ReviewedMcpTarget, signal: AbortSignal): Promise<McpTestOutcome> {
+    if (live() !== client) return { status: "refused" };
+    if (!supports(client, mcpTestMethod)) return { status: "unsupported" };
+    const failure = await confirmCurrent(client, target, signal);
+    return failure ?? sendTest(client, target, signal);
+  }
+  async function sendTest(client: ZetaClient, { name, scope }: ReviewedMcpTarget, signal: AbortSignal): Promise<McpTestOutcome> {
     try {
       // Abort only stops waiting locally. Zeta owns initialize/list and transport cleanup.
       const result = await client.request(mcpTestMethod, { name, scope }, { signal });
@@ -201,7 +211,7 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
       return rpcFailure(error) ?? UNKNOWN;
     }
   }
-  const test = (form: string, target: TestTarget) => run(form, "mcp", JSON.stringify(target), { action: "test", target }, async (signal) => {
+  const test = (form: string, target: ReviewedMcpTarget) => run(form, "mcp", JSON.stringify(target), { action: "test", target }, async (signal) => {
     if (needsMcpTestTrust(target)) return { status: "tested", result: { status: "untrusted", toolCount: 0 } };
     const outcome = await withAcquiredControl(signal, (client) => confirmTest(client, target, signal));
     if (outcome.status === "stale") await refresh(signal);
@@ -223,7 +233,11 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
   return { reads, ...forms, test, auth,
     authAction: (form: string, attempt: AuthAttempt, check: boolean, deliver: (value: AuthOutcome) => void) => {
       forms.attach(form, (outcome) => { if (outcome.status !== "tested") deliver(outcome); });
-      return run(form, "mcp", JSON.stringify(attempt), attempt, (signal) => auth.run(attempt, check, signal));
+      return run(form, "mcp", JSON.stringify(attempt), attempt, async (signal) => {
+        const outcome = await auth.run(attempt, check, signal);
+        if (outcome.status === "stale") await refresh(signal);
+        return outcome;
+      });
     },
     attach: (form: string, deliver: (outcome: McpOutcome) => void) => forms.attach(form, (outcome) => {
       if (outcome.status !== "tested" && outcome.status !== "auth" && outcome.status !== "popup-blocked") deliver(outcome);

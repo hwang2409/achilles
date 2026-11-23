@@ -3,7 +3,9 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { authMethods as methods, createMcpAuth, type AuthAttempt } from "./mcpAuth";
 
 const target = { name: "fixture", scope: "user" } as const;
-const start = { ...target, action: "start" } as const;
+const reviewed = { ...target, revision: "a".repeat(64), trusted: true, config: { transport: "streamable-http",
+  commandProvided: false, urlProvided: true, args: 0, env: 0, headers: 0, oauth: { secretProvided: false } } } as const;
+const start = { ...reviewed, action: "start" } as const;
 const launchUrl = "http://127.0.0.1:12345/launch/fixture-canary";
 const data = (state: string) => ({ data: { state } });
 const pending = { data: { state: "pending", authorization_url: launchUrl } };
@@ -160,7 +162,7 @@ test("lost cancel settles through status, preserving a concurrent credential com
 
 test("a lost logout never uses attempt status as proof and is not resent", async () => {
   const h = harness({ logout: () => { throw new Error(launchUrl); } });
-  const logout = { ...target, action: "logout" } as const;
+  const logout = { ...reviewed, action: "logout" } as const;
   await h.run();
   expect(await h.run(logout)).toEqual(unknown);
   expect(await h.run(logout, true)).toEqual(unknown);

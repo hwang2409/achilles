@@ -46,8 +46,8 @@ function resultOf(outcome: AuthOutcome): Result<{ status: "committed"; receipt: 
 }
 
 type Review = { id: number; attempt: AuthAttempt; origin: HTMLButtonElement };
-export function McpAuth({ owner, row, online, heading }: {
-  owner: McpOwner; row: McpRow; online: boolean; heading: RefObject<HTMLHeadingElement | null>;
+export function McpAuth({ owner, row, revision, online, heading }: {
+  owner: McpOwner; row: McpRow; revision: string; online: boolean; heading: RefObject<HTMLHeadingElement | null>;
 }) {
   const { state, tracking, name } = useAuth(owner, row);
   const [review, setReview] = useState<Review | null>(null);
@@ -69,7 +69,7 @@ export function McpAuth({ owner, row, online, heading }: {
     return { execute: () => perform(false), checkResult: () => perform(true) };
   }
   const trigger = (action: "start" | "logout", disabled: boolean, surface: string) => <button type="button" disabled={disabled}
-    data-write-surface={surface} onClick={(event) => setReview({ id: ++reviewId.current, origin: event.currentTarget, attempt: { action, name: row.name, scope: row.scope } })}>{actions[action]}</button>;
+    data-write-surface={surface} onClick={(event) => setReview({ id: ++reviewId.current, origin: event.currentTarget, attempt: { action, name: row.name, scope: row.scope, trusted: row.trusted, config: row.config, revision } })}>{actions[action]}</button>;
 
   return <section className="mcp-auth" aria-label="OAuth sign-in">
     <p role="status" data-auth-state={state ?? "idle"}>{!online && ownPending ? "connection lost · sign-in result unknown until zeta reconnects" : captions[state ?? "idle"]}</p>

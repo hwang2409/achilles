@@ -82,9 +82,9 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
 
   const rowRead = detailOpen ? detailList : list;
   const revision = rowRead && "revision" in rowRead ? rowRead.revision : undefined;
-  const testScope = row && snapshot?.[row.scope];
-  const testRow = testScope && "rows" in testScope ? testScope.rows.find(({ name }) => name === row?.name) : null;
-  const testRevision = testScope && "revision" in testScope ? testScope.revision : null;
+  const reviewScope = row && snapshot?.[row.scope];
+  const reviewRow = reviewScope && "rows" in reviewScope ? reviewScope.rows.find(({ name }) => name === row?.name) : null;
+  const reviewRevision = reviewScope && "revision" in reviewScope ? reviewScope.revision : null;
   const offline = !connected;
   const retained = offline && snapshot && mcpScopes.some((view) => "rows" in snapshot[view]);
   const shadows = (item: McpRow) => {
@@ -113,8 +113,8 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
               activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
             <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
               detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure}>
-              {testRow?.config.transport && testRevision && <McpTest key={JSON.stringify([testRow.scope, testRow.name])} owner={owner} row={testRow} revision={testRevision} online={supported} heading={detailHeading} />}
-              {row?.config.oauth && <McpAuth key={JSON.stringify(["auth", row.scope, row.name])} owner={owner} row={row} online={supported} heading={detailHeading} />}
+              {reviewRow?.config.transport && reviewRevision && <McpTest key={JSON.stringify([reviewRow.scope, reviewRow.name])} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading} />}
+              {reviewRow?.config.oauth && reviewRevision && <McpAuth key={JSON.stringify(["auth", reviewRow.scope, reviewRow.name])} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading} />}
               <McpActions key={`${path}:${scope}`} owner={owner} heading={detailHeading} row={row ?? null} revision={revision} online={supported} />
             </ConnectionDetail>
           </div>

@@ -1,11 +1,11 @@
 import type { ZetaClient } from "@fulcrum/zeta";
-import type { McpOutcome } from "./mcpOwner";
+import type { McpOutcome, ReviewedMcpTarget } from "./mcpOwner";
 import type { McpRow } from "./mcpReads";
 
 export const authMethods = { start: "mcp_auth_start", cancel: "mcp_auth_cancel", logout: "mcp_auth_logout", status: "mcp_auth_status" } as const;
 export type AuthAction = Exclude<keyof typeof authMethods, "status">;
 type Target = Pick<McpRow, "name" | "scope">;
-export type AuthAttempt = Target & { action: AuthAction };
+export type AuthAttempt = (Target & { action: "cancel" }) | (ReviewedMcpTarget & { action: Exclude<AuthAction, "cancel"> });
 type State = "idle" | "pending" | "succeeded" | "failed" | "cancelled";
 type Report = Target & { state: State | "unknown" | "unauthorized" };
 export type AuthOutcome = McpOutcome | { status: "auth"; state: State | "unauthorized" } | { status: "popup-blocked" };
@@ -42,7 +42,7 @@ function launch(popup: Popup, url: unknown) {
 }
 
 export function createMcpAuth({ withControl, supports, failure, liveObserver, open = () => window.open("about:blank", "_blank"), timers = clock }: {
-  withControl: (signal: AbortSignal, send: (client: ZetaClient) => Promise<AuthOutcome>) => Promise<AuthOutcome>;
+  withControl: (signal: AbortSignal, send: (client: ZetaClient) => Promise<AuthOutcome>, attempt: AuthAttempt) => Promise<AuthOutcome>;
   liveObserver: () => ZetaClient | null;
   supports: (client: ZetaClient, method: string) => boolean;
   failure: (error: unknown) => McpOutcome | null;
@@ -175,7 +175,7 @@ export function createMcpAuth({ withControl, supports, failure, liveObserver, op
     let outcome: AuthOutcome = UNKNOWN;
     try {
       resetReads();
-      outcome = await withControl(signal, (client) => send(client, attempt, popup));
+      outcome = await withControl(signal, (client) => send(client, attempt, popup), attempt);
     } finally {
       if (outcome.status !== "auth" || outcome.state !== "pending") {
         try { popup?.close(); } catch { /* The popup may already be gone. */ }

@@ -435,7 +435,7 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test",
   } };
 }
 
-function mcpOAuth(action: "start" | "cancel" | "logout"): Row {
+function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
   const name = "fixture-oauth";
   const sentinel = "http://127.0.0.1:31234/launch/browser-only-fixture";
   const roles: string[] = [];
@@ -444,7 +444,13 @@ function mcpOAuth(action: "start" | "cancel" | "logout"): Row {
   return { kind: "visible", options: { path: `/connections/user/${name}`, observerBanner: false, roles, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", "mcp_auth_status", ...(params.role === "controller" ? ["mcp_auth_start", "mcp_auth_cancel", "mcp_auth_logout"] : [])] } } }),
-    mcp_server_list: ({ scope }) => ({ result: { revision: "a".repeat(64), data: { items: scope === "project" ? [] : [fixture] } } }),
+    mcp_server_list: ({ scope }) => {
+      const edited = changed && roles.includes("controller");
+      const revision = (edited && action === "start" ? "b" : "a").repeat(64);
+      const row = edited && action === "logout" ? { ...fixture,
+        config: { ...fixture.config, auth: { type: "oauth", client_secret: "<redacted>" } } } : fixture;
+      return { result: { revision, data: { items: scope === "project" ? [] : [row] } } };
+    },
     mcp_auth_start: () => ({ result: { data: { state: "pending", authorization_url: sentinel } } }),
     mcp_auth_status: () => ({ result: { data: { state: "pending" } } }),
     mcp_auth_cancel: () => ({ result: { data: { state: "cancelled" } } }),
@@ -488,6 +494,14 @@ function mcpOAuth(action: "start" | "cancel" | "logout"): Row {
         expect(replacements).toEqual([]);
         return;
       }
+      if (changed) {
+        expect(writes, `${action}: stale review must not send an OAuth write`).toEqual([]);
+        expect(app.getByRole("alert").textContent).toContain("configuration changed elsewhere");
+        expect(roles.slice(initial)).toEqual(["controller", "observer"]);
+        expect(replacements).toEqual([]);
+        if (action === "start") expect(popup.closed).toBe(true);
+        return;
+      }
       if (action === "cancel") {
         await click(select(app, tag("mcp.auth-cancel")));
         const group = app.getByRole("group", { name: /started saving the credential/ });
@@ -503,6 +517,11 @@ function mcpOAuth(action: "start" | "cancel" | "logout"): Row {
     } finally { open.mockRestore(); consoleCalls.forEach(spy => spy.mockRestore()); }
   } };
 }
+
+test.each(["start", "logout"] as const)("OAuth %s refuses a stale review after borrowing control", async (action) => {
+  const row = mcpOAuth(action, true);
+  await withApp("controller", row.options ?? {}, (app, writes, requests) => row.check(app, "controller", writes, requests));
+});
 
 function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
   const spawning = id === "agents.spawn";
