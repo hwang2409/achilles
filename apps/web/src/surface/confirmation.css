@@ -43,6 +43,13 @@
 .confirmation-name input { width: 100%; padding: 8px 12px; border: 1px solid var(--fulcrum-border); background: transparent; }
 .confirmation-scope { display: flex; gap: 10px; align-items: center; width: fit-content; cursor: pointer; }
 .confirmation-scope input { accent-color: var(--fulcrum-accent); margin: 0; }
+/* Keep feedback visible when the review body reflows after a result. */
+.confirmation-dialog form > .confirmation-status:not(:empty) {
+  flex: none;
+  max-height: 50dvh;
+  overflow-y: auto;
+  margin: 8px 16px;
+}
 .confirmation-dialog footer { border-top: 1px solid var(--fulcrum-border); }
 .confirmation-actions, .confirmation-row, .confirmation-activity {
   display: flex;

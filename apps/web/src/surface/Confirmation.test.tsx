@@ -29,7 +29,16 @@ function review(execute: Extract<ConfirmationProps, { level: 2 }>["execute"], op
   return { opener, modal, dialog: within(modal), activity: within(activity) };
 }
 const cancel = (dialog: HTMLElement) => fireEvent(dialog, new Event("cancel", { cancelable: true }));
-const click = (button: HTMLElement) => act(async () => { fireEvent.click(button); });
+async function settle(operation: string, action: () => void) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      act(async () => { action(); }),
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`timed out: ${operation}`)), 1_000); }),
+    ]);
+  } finally { clearTimeout(timeout); }
+}
+const click = (button: HTMLElement) => settle(`click ${button.textContent}`, () => { fireEvent.click(button); });
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
@@ -60,8 +69,8 @@ test("inline pending locks only its row; success uses the returned value and tim
   expect(ui.getByRole("button", { name: "other row" }).hasAttribute("disabled")).toBe(false);
   expect(ui.getByText("saving…")).toBeTruthy();
   expect(ui.getByText("on")).toBeTruthy();
-  await act(async () => { pending.resolve({ status: "committed", value: text("off for new sessions"), receipt: text("github turned off") }); });
-  expect(document.activeElement).toBe(opener);
+  await settle("deliver inline receipt", () => { pending.resolve({ status: "committed", value: text("off for new sessions"), receipt: text("github turned off") }); });
+  expect(document.activeElement?.textContent).toMatch(/^github turned off at/);
   expect(ui.getByText("off for new sessions")).toBeTruthy();
   expect(ui.getByText(/github turned off at/).querySelector("time")?.dateTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 });
@@ -71,7 +80,9 @@ test("inline known failure keeps the old value and announces a safe failure", as
   fireEvent.click(ui.getByRole("button", { name: "turn off" }));
   await click(within(ui.getByRole("group")).getByRole("button", { name: "turn off" }));
   expect(ui.getByText("on")).toBeTruthy();
-  expect(ui.getByRole("alert").textContent).toContain("refresh before trying again");
+  const result = ui.getByRole("alert");
+  expect(document.activeElement === result).toBe(true);
+  expect(result.textContent).toContain("refresh before trying again");
   expect(ui.container.querySelector("time")).toBeNull();
 });
 
@@ -104,27 +115,29 @@ test("pending and unknown lock dismissal and duplicate submit; only a read confi
   fireEvent.change(dialog.getByRole("textbox"), { target: { value: "paper" } });
   const submit = dialog.getByRole("button", { name: "cancel run" });
   const form = submit.closest("form")!;
-  await act(async () => { fireEvent.submit(form); fireEvent.submit(form); });
+  await settle("submit the review twice", () => { fireEvent.submit(form); fireEvent.submit(form); });
   expect(execute).toHaveBeenCalledTimes(1);
   cancel(modal);
   expect(dialog.getByText("finishing…")).toBeTruthy();
   expect(activity.queryByText(/paper cancelled/)).toBeNull();
-  await act(async () => { pending.reject(new Error("private transport body")); });
+  await settle("deliver unknown result", () => { pending.reject(new Error("private transport body")); });
   const check = dialog.getByRole("button", { name: "check now" });
   cancel(modal);
   fireEvent.submit(form);
   expect(modal.isConnected).toBe(true);
-  expect(document.activeElement).toBe(check);
+  expect(document.activeElement?.textContent).toMatch(/^result unknown\./);
   expect(dialog.queryByText(/private transport body/)).toBeNull();
   expect(execute).toHaveBeenCalledTimes(1);
   await click(check);
   expect(checkResult).toHaveBeenCalledTimes(1);
   expect(execute).toHaveBeenCalledTimes(1);
   expect(modal.isConnected).toBe(false);
-  expect(document.activeElement).toBe(opener);
-  expect(activity.getByText(/paper cancelled at/).querySelector("time")).toBeTruthy();
+  const receipt = activity.getByText(/paper cancelled at/);
+  expect(document.activeElement === receipt).toBe(true);
+  expect(receipt.querySelector("time")).toBeTruthy();
   fireEvent.click(activity.getByRole("button", { name: "dismiss receipt" }));
   expect(activity.queryByText(/paper cancelled/)).toBeNull();
+  expect(document.activeElement).toBe(opener);
 });
 
 test("scope proof gates submit; a known failure leaves a recoverable dialog open", async () => {

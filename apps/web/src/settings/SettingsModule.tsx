@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { DisplaySettings } from "../AppShell";
-import { Confirmation, reviewText, type ReviewText } from "../surface/Confirmation";
+import { Confirmation, focusConfirmationResult, reviewText, type ReviewText } from "../surface/Confirmation";
 import { ModuleFrame } from "../surface/ModuleState";
 import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
@@ -108,8 +108,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   }, [load.kind]);
   useEffect(() => {
     if (!change) return;
-    status.current?.focus({ preventScroll: true });
-    status.current?.parentElement?.scrollIntoView({ block: "nearest" });
+    focusConfirmationResult(status.current, status.current?.parentElement);
   }, [change]);
   useLayoutEffect(() => {
     if (load.kind !== "ready" || landing.current === null) return;
@@ -181,7 +180,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   return <Row id="telemetry" title="telemetry" detail={RECORDS}>
     {control}
     <div ref={setActivity} className="sp-activity" />
-    {note && <p ref={noteRef} className="sp-note sp-result" tabIndex={-1} role="status">{note}</p>}
+    {note && <p ref={noteRef} className="sp-note sp-result" tabIndex={-1} role={stale ? "alert" : "status"}>{note}</p>}
     {/* another tab turned it on: no receipt, this tab wrote nothing and no zeta checked this install */}
     {note && stale && load.kind === "ready" && load.settings.telemetry === "on" && <p className="sp-note sp-result">{NEEDS_OTEL}</p>}
     {change && <div className="sp-receipt">

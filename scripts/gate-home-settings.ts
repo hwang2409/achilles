@@ -36,12 +36,19 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     const refused = `not changed. zeta cannot record telemetry on this computer: ${MISSING_OTEL}`;
     await waitFor(async () => await refusal.textContent().catch(() => "") === refused, "telemetry on refused with zeta's start error");
     if ((await bytes()) !== seeded) throw new Error("a refused telemetry change wrote settings.toml");
-    if (screenshotDir) {
-      await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-1440x900.png") });
-      await tab.setViewportSize({ width: 390, height: 844 });
-      await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-390x844.png") });
-      await tab.setViewportSize({ width: 1440, height: 900 });
-    }
+    if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-1440x900.png") });
+    // Resize after the result arrives: focus alone does not keep a scroll target in view after reflow.
+    await tab.setViewportSize({ width: 390, height: 844 });
+    await refusal.evaluate((node) => {
+      const footer = node.closest("dialog")!.querySelector("footer")!;
+      const alert = node.getBoundingClientRect();
+      const footerTop = footer.getBoundingClientRect().top;
+      if (document.activeElement !== node || alert.top < 0 || alert.bottom > footerTop || node.scrollHeight > node.clientHeight) {
+        throw new Error(`expected the focused telemetry refusal to fit above the footer after resize: alert [${alert.top}, ${alert.bottom}], footer ${footerTop}`);
+      }
+    }, undefined, { timeout: 5_000 });
+    if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-390x844.png") });
+    await tab.setViewportSize({ width: 1440, height: 900 });
     await dialog.getByRole("button", { name: "keep it off", exact: true }).click();
     if (!await turnOn.isVisible()) throw new Error("a refused telemetry change did not keep the row off");
     const sha = createHash("sha256").update(seeded).digest("hex");

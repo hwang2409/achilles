@@ -55,6 +55,10 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await resetKeeps(false);
   await page.getByRole("switch", { name: "auto-approve default" }).click();
   await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
+  const approvalResult = settingsDialog.getByText(/^on\. (new chats allow|the server forces ask mode)/);
+  if (!await approvalResult.evaluate((node) => node === document.activeElement, undefined, { timeout: 5_000 })) {
+    throw new Error("confirmed auto-approve did not focus the saved result");
+  }
   await page.getByRole("option", { name: /gruvbox-light/ }).click();
   await resetKeeps(true);
   await page.getByRole("button", { name: "esc" }).click();

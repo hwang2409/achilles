@@ -53,6 +53,11 @@ export type ConfirmationProps = Inline | Review;
 type Phase = "idle" | "review" | "pending" | "unknown" | "checking";
 type Receipt = { text: ReviewText; at: Date };
 
+export function focusConfirmationResult(result: HTMLElement | null, context = result) {
+  result?.focus({ preventScroll: true });
+  context?.scrollIntoView({ block: "nearest" });
+}
+
 export function Confirmation(props: ConfirmationProps) {
   const id = useId();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -66,7 +71,7 @@ export function Confirmation(props: ConfirmationProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const initial = useRef<HTMLElement | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
-  const retryCheck = useRef<HTMLButtonElement>(null);
+  const receiptText = useRef<HTMLParagraphElement>(null);
   const returnFocus = useRef(false);
   const open = phase !== "idle";
   const locked = open && phase !== "review";
@@ -76,7 +81,7 @@ export function Confirmation(props: ConfirmationProps) {
 
   useLayoutEffect(() => {
     if (!open) {
-      if (returnFocus.current) opener.current?.focus();
+      if (returnFocus.current && !failure && !receipt) opener.current?.focus();
       returnFocus.current = false;
       return;
     }
@@ -89,13 +94,9 @@ export function Confirmation(props: ConfirmationProps) {
 
   useLayoutEffect(() => {
     if (phase === "pending" || phase === "checking") status.current?.focus();
-    if (phase === "unknown") retryCheck.current?.focus();
-    if (phase === "review" && failure) {
-      status.current?.focus({ preventScroll: true });
-      // the whole reason, not only its first lines, when the dialog body scrolls (200% zoom)
-      status.current?.scrollIntoView({ block: "nearest" });
-    }
-  }, [phase, failure]);
+    if (phase === "unknown" || failure) focusConfirmationResult(status.current);
+    if (receipt) focusConfirmationResult(receiptText.current);
+  }, [phase, failure, receipt]);
 
   const start = () => {
     setAttempt(props);
@@ -136,11 +137,11 @@ export function Confirmation(props: ConfirmationProps) {
         : phase === "unknown" ? "result unknown. check what happened before trying again. the request will not be sent twice."
         : failure ? failure.message ?? failureCopy[failure.reason] : null}
     </p>;
-  const checkButton = phase === "unknown" && <button ref={retryCheck} type="button" onClick={() => void run(true)}>check now</button>;
+  const checkButton = phase === "unknown" && <button type="button" onClick={() => void run(true)}>check now</button>;
   const confirmButton = <button ref={node => { if (attempt.level === 1) initial.current = node; }} type={attempt.level === 1 ? "button" : "submit"} onClick={attempt.level === 1 ? () => void run(false) : undefined}
     className="confirmation-primary" disabled={locked || !proved || failure?.final}>{attempt.action}</button>;
   const notice = <div className="confirmation-activity">
-    <div role="status">{receipt && <p>{receipt.text} at <time dateTime={receipt.at.toISOString()}>
+    <div role="status">{receipt && <p ref={receiptText} tabIndex={-1}>{receipt.text} at <time dateTime={receipt.at.toISOString()}>
       {receipt.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></p>}</div>
     {receipt && props.level === 2 && <button type="button" onClick={() => { setReceipt(null); opener.current?.focus(); }}>dismiss receipt</button>}
   </div>;
@@ -154,12 +155,12 @@ export function Confirmation(props: ConfirmationProps) {
     {open && <div role="group" className="confirmation-bar" aria-labelledby={`${id}-effect`}
       onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keep(); } }}>
       <p id={`${id}-effect`}>{attempt.effect}</p>
-      <div className="confirmation-actions">
-        {!locked && confirmButton}
-        {!locked && <button type="button" onClick={keep}>{attempt.keep}</button>}
-        {checkButton}
-      </div>
+      {!locked && <div className="confirmation-actions">
+        {confirmButton}
+        <button type="button" onClick={keep}>{attempt.keep}</button>
+      </div>}
       {feedback}
+      {checkButton}
     </div>}
     {!open && feedback}
     {notice}
@@ -205,8 +206,8 @@ export function Confirmation(props: ConfirmationProps) {
               onChange={event => setProof(event.currentTarget.checked ? "checked" : "")} disabled={locked} />
             {attempt.proof.label ?? "i reviewed the scope"}
           </label>}
-          {feedback}
         </div>
+        {feedback}
         <footer className="confirmation-actions">
           {locked ? checkButton : <button type="button" onClick={keep}>{attempt.keep}</button>}
           {confirmButton}

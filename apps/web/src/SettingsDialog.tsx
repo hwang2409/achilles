@@ -12,7 +12,7 @@ import {
   type UiFont,
 } from "./settings";
 import { wrapTab } from "./keyboard";
-import "./surface/confirmation.css";
+import { focusConfirmationResult } from "./surface/Confirmation";
 import { WRITE_SURFACE } from "./writeSurfaces";
 import "./settings-dialog.css";
 
@@ -75,25 +75,33 @@ function Row({ title, description, children }: { title: string; description: str
 }
 
 // turning the default on lets new chats run tools without asking, so it goes through a confirm; turning it off does not.
-// the switch stays mounted in both states, so focus stays on it; the confirm bar opens below it.
+// the confirm bar opens below the switch. cancel returns to the switch; success focuses the updated explanation.
 function AutoApprove({ open, on, canWrite, serverForcesAsk }: { open: boolean; on: boolean; canWrite: boolean; serverForcesAsk: boolean }) {
   const toggle = useRef<HTMLButtonElement>(null);
   const allow = useRef<HTMLButtonElement>(null);
   const bar = useRef<HTMLDivElement>(null);
+  const result = useRef<HTMLSpanElement>(null);
+  const confirmed = useRef(false);
   const [asking, setAsking] = useState(false);
   const effectId = useId();
-  useLayoutEffect(() => { if (!open || on) setAsking(false); }, [open, on]);
+  useLayoutEffect(() => {
+    if (!open || on) setAsking(false);
+    if (open && on && confirmed.current) focusConfirmationResult(result.current);
+    if (!open || on) confirmed.current = false;
+  }, [open, on]);
   // at 390 px the bar opens below the fold; bring "keep asking" into view too
   useLayoutEffect(() => { if (asking) { allow.current?.focus(); bar.current?.scrollIntoView({ block: "nearest" }); } }, [asking]);
   const close = (allowTools: boolean) => {
-    if (allowTools && canWrite) updateSettings({ autoApproveDefault: true });
+    if (allowTools && canWrite) {
+      confirmed.current = true;
+      updateSettings({ autoApproveDefault: true });
+    } else toggle.current?.focus();
     setAsking(false);
-    toggle.current?.focus();
   };
-  const explanation = serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : on ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls.";
+  const explanation = serverForcesAsk ? `${on ? "on" : "off"}. the server forces ask mode, so new chats still ask for approval.` : on ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls.";
   const effect = serverForcesAsk ? "new chats allow tool calls without asking once the server stops forcing ask mode." : "new chats allow tool calls without asking.";
   return <div className="settings-auto-approve">
-    <div className="setting-explanation"><Toggle ref={toggle} label="auto-approve default" checked={on} disabled={!canWrite} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(next) => { if (!canWrite) return; if (next) setAsking(true); else updateSettings({ autoApproveDefault: false }); }} /><span>{explanation}</span></div>
+    <div className="setting-explanation"><Toggle ref={toggle} label="auto-approve default" checked={on} disabled={!canWrite} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(next) => { if (!canWrite) return; if (next) setAsking(true); else updateSettings({ autoApproveDefault: false }); }} /><span ref={result} tabIndex={-1}>{explanation}</span></div>
     {asking && !on && canWrite && <div ref={bar} className="confirmation-inline"><div role="group" className="confirmation-bar" aria-labelledby={effectId}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(false); } }}>
       <p id={effectId}>{effect}</p>
