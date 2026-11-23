@@ -75,12 +75,11 @@
    visually overlap .chat-actions; ellipsis alone keeps the title readable at whatever room remains. */
 .chat-heading strong { order: 1; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .chat-actions { display: flex; align-items: center; gap: 12px; white-space: nowrap; font-size: 14px; }
-.chat-actions button { min-height: 30px; padding: 6px 11px; border-color: var(--g1-control-border); font-size: 12px; }
+.chat-actions button { min-height: 30px; padding: var(--g1-space-1) var(--g1-space-2); border-color: transparent; color: var(--g1-muted); font-size: var(--g1-type-meta); }
 .approval-mode { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
 .approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
-.approval-mode.mode-allow { color: var(--fulcrum-warn); }
-.approval-mode.mode-allow::before { background: var(--fulcrum-warn); }
+.approval-mode.mode-allow::before { border: 1px solid currentColor; }
 .run-state, .page-chat-status { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 
 .chat-heading strong[role="button"] { cursor: text; border-radius: 2px; line-height: 40px; }
@@ -184,6 +183,8 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
   display: block; width: 100%; min-height: 64px; resize: none; padding: 12px 14px;
   border: 0; outline: 0; background: transparent; line-height: 22px;
 }
+.main-pane [data-part="composer-field"] textarea::placeholder,
+.vim-composer [data-part="composer-field"] .cm-content::before { font-family: var(--achilles-ui-font, var(--g1-font-ui)); }
 .main-pane [data-part="composer-bar"] { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 6px 8px 8px 14px; }
 .main-pane [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; }
 .main-pane [data-part="composer-hint"] { display: block; white-space: nowrap; font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
