@@ -1,6 +1,9 @@
 :root {
   font-family: var(--achilles-ui-font, var(--g1-font-ui));
-  font-size: var(--achilles-ui-size, var(--g1-type-ui));
+  font-size: var(--achilles-ui-size, var(--g1-type-chat));
+  line-height: var(--g1-leading-chat);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
   color: var(--fulcrum-fg);
   background: var(--fulcrum-bg);
@@ -11,16 +14,25 @@ body { margin: 0; }
 button, input, textarea, select { color: inherit; font: inherit; }
 .sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 button, input, textarea, select { border-radius: var(--g1-radius-control); }
-body button { background: transparent; border: var(--g1-border-width) solid var(--g1-control-border); cursor: pointer; }
+:where(button, .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }
+:where(.ui-icon-button) { display: inline-grid; place-items: center; min-width: var(--g1-icon-height); min-height: var(--g1-icon-height); padding: 0; }
+:is(.primary, .ui-button-primary) { background: var(--g1-primary); color: var(--g1-primary-text); }
+:where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):active { background: var(--g1-selected); color: var(--g1-fg); }
+:where(.ui-card, [data-part="composer"]) { border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); background: var(--g1-panel); }
+:where(.ui-empty) { padding: var(--g1-space-4) 0; }
+:where(.ui-empty) p { margin: var(--g1-space-2) 0; color: var(--g1-muted); text-wrap: pretty; }
+:where(.ui-meta, .ui-status) { color: var(--g1-muted); font-size: var(--g1-type-meta); font-variant-numeric: tabular-nums; }
+:where(.ui-page-header) h1 { font-size: var(--g1-type-page-title); font-weight: var(--g1-weight-title); line-height: 32px; text-wrap: balance; }
+@media (max-width: 760px), (pointer: coarse) { :where(.ui-button, .ui-icon-button) { min-height: var(--g1-touch-height); } :where(.ui-icon-button) { min-width: var(--g1-touch-height); } }
 :where(input:not([type="checkbox"], [type="radio"]), textarea, select) {
   background: var(--g1-bg);
-  border: var(--g1-border-width) solid var(--g1-control-border);
+  border: var(--g1-border-width) solid var(--g1-border);
 }
-button:where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
-[data-part="composer"] { border-radius: var(--g1-radius-control); border-color: var(--g1-control-border); border-left-color: var(--rail); }
-[data-part="composer"]:focus-within { box-shadow: var(--g1-focus-halo); }
+:where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
+:is(.primary, .ui-button-primary):hover { background-color: color-mix(in srgb, var(--g1-primary) 88%, var(--g1-primary-text)); }
+[data-part="composer"]:focus-within { border-color: var(--g1-control-border); }
 [data-part="composer"] [data-part="composer-field"] textarea:focus-visible,
-[data-part="composer"] .cm-content:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; box-shadow: none; }
+[data-part="composer"] .cm-content:focus-visible { outline: none; box-shadow: none; }
 :where(button, input, textarea, select):is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: .65; }
 :focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 :is(input:not([type="checkbox"], [type="radio"]), textarea, select):focus-visible {
@@ -46,14 +58,13 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .approval-control button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 .approval-control span { color: var(--fulcrum-muted); text-wrap: pretty; }
 @media (max-width: 600px) { .observer-banner { align-items: flex-start; flex-direction: column; flex-wrap: nowrap; gap: 8px; } .observer-banner > div:first-child, #take-control-feedback { flex: none; } .observer-action { width: 100%; justify-items: start; } .observer-banner button { min-height: 44px; width: 100%; } }
-.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, var(--g1-font-ui)); }
+.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, var(--g1-type-chat)) / var(--g1-leading-chat) var(--achilles-ui-font, var(--g1-font-ui)); }
 .page-view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 @media (width >= 1280px) {
-  .page-view.docked { display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
+  .page-view.docked { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: minmax(0, 1fr); }
 }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-ui-font, var(--g1-font-ui)); font-size: var(--achilles-ui-size, 14px); }
-:root[data-code-font]:not([data-code-font="system-mono"]) .main-pane [data-part="composer"] textarea,
-.main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+:root[data-code-font]:not([data-code-font="system-mono"]) .main-pane [data-part="composer"] :is(textarea, .cm-editor) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 [data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: 12px; line-height: 20px; }
 [data-part="composer-queued"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 2px 8px; border-left: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
 [data-part="composer-queued-label"] { flex: none; color: var(--fulcrum-accent); }

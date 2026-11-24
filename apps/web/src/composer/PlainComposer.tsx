@@ -20,7 +20,6 @@ import { ComposerHint } from "./hint";
 export function PlainComposer(props: ComposerAdapterProps) {
   const {
     state,
-    reason,
     label = "message",
     placeholder,
     className,
@@ -90,18 +89,16 @@ export function PlainComposer(props: ComposerAdapterProps) {
         role="group"
         aria-label={label}
       >
-        {model.draft ? (
-          <div data-part="composer-field" data-value={model.draft}>
-            <textarea
-              ref={input}
-              rows={1}
-              value={model.draft}
-              readOnly
-              aria-label={`${label} (draft, read-only)`}
-            />
-          </div>
-        ) : null}
-        <p data-part="composer-reason">{reason}</p>
+        <div data-part="composer-field" data-value={model.draft}>
+          <textarea
+            ref={input}
+            rows={1}
+            value={model.draft}
+            placeholder={placeholder}
+            readOnly
+            aria-label={label}
+          />
+        </div>
       </div>
     );
 

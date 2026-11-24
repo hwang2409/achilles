@@ -13,7 +13,7 @@ function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: Su
   const total = count?.total;
   const waiting = count?.waiting || undefined;
   return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={route.label}>
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={route.icon} /></svg>
+    {route !== createRoute && <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={route.icon} /></svg>}
     <span>{route.label}</span>
     {(total || waiting) && <small aria-hidden="true">{waiting && <span className="waiting-count">{waiting}</span>}{waiting && total && " · "}{total}</small>}
   </a>;
@@ -50,7 +50,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
   return <aside ref={sidebar} id="surface-sidebar" className="sidebar" aria-label={narrow ? "navigation menu" : "sidebar"} role={narrow && drawer ? "dialog" : undefined} aria-modal={narrow && drawer || undefined} aria-hidden={narrow && !drawer ? true : undefined} inert={narrow && !drawer || undefined}>
     <div className="brand-row">
       <span className="brand-mark" aria-hidden="true" /><strong>achilles</strong>
-      <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected}><i aria-hidden="true" />zeta</span>
+      <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected}>Zeta</span>
       {narrow && <button className="drawer-close" aria-label="close navigation" onClick={onClose}>×</button>}
     </div>
     <div className="sidebar-scroll">

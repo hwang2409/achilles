@@ -13,7 +13,7 @@
 [data-part="message"] ul[data-part="md-list"] > [data-part="md-list-item"]::before { content: "–"; position: absolute; left: 0; color: var(--fulcrum-muted); }
 [data-part="message"] ol[data-part="md-list"] > [data-part="md-list-item"] { padding-left: 4px; margin: 0 0 4px; }
 [data-part="message"] [data-part="md-blockquote"] { margin: 0 0 12px; padding-left: 16px; border-left: 2px solid var(--fulcrum-border); color: var(--fulcrum-muted); font-style: italic; }
-[data-part="message"] [data-part="md-link"] { color: var(--g1-accent-ink); text-decoration: underline; text-underline-offset: 3px; }
+[data-part="message"] [data-part="md-link"] { color: var(--g1-link); text-decoration: underline; text-underline-offset: 3px; }
 [data-part="message"] [data-part="md-code-inline"] {
   padding: 0 5px;
   border: 0;

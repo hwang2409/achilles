@@ -345,7 +345,6 @@ try {
     if (await pin() !== "anthropic:failed") throw new Error("switch-then-reply chat did not start pinned to anthropic:failed");
     await capture("auth-card-1440", card);
     await card.getByRole("link", { name: "/accounts", exact: true }).click();
-    await authPage.getByRole("button", { name: "show accounts", exact: true }).click();
     const occupied = authPage.getByText(/another tab had control/, { selector: "#account-switch-reason" });
     if (await authPage.getByRole("button", { name: "try again", exact: true }).isVisible()) await authPage.getByRole("button", { name: "try again", exact: true }).click();
     await authPage.getByRole("button", { name: "sign in again to anthropic:failed", exact: true }).click();
@@ -691,7 +690,7 @@ with _database() as db:
   };
   const waitCreateMode = async (enabled: boolean) => {
     if (!await dockHead(page).count()) return gateWait.playwright(page.getByRole("button", { name: `create mode ${enabled ? "on" : "off"}`, exact: true }), "waitFor");
-    await gateWait.playwright(page.locator(`.page-chat-head${enabled ? ":not(:has(.page-chat-data))" : ":has(.page-chat-data)"}`), "waitFor");
+    await gateWait.playwright(page.locator(`.page-chat-head[data-create-mode="${enabled ? "on" : "off"}"]`), "waitFor");
     if (await modeMenu(page).getAttribute("aria-expanded") === "true") await page.keyboard.press("Escape");
   };
   const mobileSheet = {
@@ -872,8 +871,9 @@ with _database() as db:
           const box = element.getBoundingClientRect();
           if (![box.top, box.right, box.bottom, box.left].every(Number.isFinite)) return false;
           if (box.bottom <= 0 || box.top >= innerHeight || box.right <= 0 || box.left >= innerWidth) return false;
-          const x = Math.max(box.left + 1, Math.min(box.right - 1, innerWidth / 2));
-          const y = Math.max(box.top + 1, Math.min(box.bottom - 1, innerHeight / 2));
+          // Hit the visible center, not a rounded corner outside the button.
+          const x = (Math.max(0, box.left) + Math.min(innerWidth, box.right)) / 2;
+          const y = (Math.max(0, box.top) + Math.min(innerHeight, box.bottom)) / 2;
           const hit = document.elementFromPoint(x, y);
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
@@ -1436,7 +1436,7 @@ with _database() as db:
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
-  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
   if (pageIndexRequests.length - pageRequestsBeforeCreate !== 1)
     throw new Error(`create_page made ${pageIndexRequests.length - pageRequestsBeforeCreate} /api/pages refetches, expected 1`);
   await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
@@ -1498,7 +1498,7 @@ with _database() as db:
     await field.press("Enter", { timeout: 20_000 });
     // A fast scripted reply can move from running to idle in one browser render.
     await waitFor(async () => JSON.parse(await Bun.file(control).text()).page_open_turn_barrier === "held", "held first page turn");
-    await gateWait.playwright(page.locator(".run-state.state-running"), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page.locator(".run-state.state-running, .page-chat-readouts.state-running"), "waitFor", { timeout: 20_000 });
     const firstPageChat = await homeSessionId();
     await gateWait.playwright(page.locator(`[data-chat-id="${firstPageChat}"]`), "waitFor", { timeout: 20_000 });
     const mcpConfigPath = join(zetaHome, "mcp.json");
@@ -1539,7 +1539,7 @@ with _database() as db:
       return Boolean(status && frames.some((frame) => frame.id === status.id && frame.result));
     }, "released selected-chat attach finished replay");
     await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
-    await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
     await gateWait.playwright(page, "waitForFunction", () => new Promise<boolean>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))), undefined, { timeout: 20_000 });
     if (!await dockTitle.isVisible()) throw new Error(`stale attach reverted the visible dock title: ${await dockHead(page).locator("strong").innerText()}`);
     console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row");
@@ -1625,7 +1625,7 @@ with _database() as db:
   const chatTwo = await homeSessionId();
   if (!chatTwo) throw new Error("second home chat session id missing");
   const transcriptBeforeDiscovery = await page.locator('[data-part="message"]').count();
-  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
   const discoveryPrompt = "list achilles resources, then inspect /reading";
   await field.fill(discoveryPrompt);
   await field.press("Enter");
@@ -1638,7 +1638,7 @@ with _database() as db:
   await waitFor(async () => (await inspectApproval.count()) > 0, "inspect_page approval after scripted turn");
   await inspectApproval.getByRole("button", { name: "approve", exact: true }).click();
   await gateWait.playwright(page.getByText("new chat tools complete", { exact: true }), "waitFor", { timeout: 20_000 });
-  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
   const newChatTranscript = await page.locator('[data-part="message"]').nth(transcriptBeforeDiscovery).innerText();
   if (newChatTranscript.includes("MCP server achilles is unavailable") || (await page.locator("body").innerText()).includes("MCP server achilles is unavailable"))
     throw new Error("new chat transcript reported achilles as unavailable after resources discovery");
@@ -1694,15 +1694,15 @@ with _database() as db:
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const booksList = page.locator('.record-list[data-collection="books"]');
-  await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(booksList.getByText("No books yet", { exact: true }), "waitFor", { timeout: 20_000 });
   if (await booksList.locator("header .record-count").innerText() !== "0" || await booksList.getByText("sorted by updated", { exact: true }).count())
     throw new Error("empty books state showed the wrong count or sort label");
-  const addBook = booksList.getByRole("button", { name: "add a book", exact: true });
+  const addBook = booksList.getByRole("button", { name: "Add a book", exact: true });
   await addBook.click();
   if (!(await page.locator('.record-form[data-collection="books"][data-operation="insert"] input[name="title"]').evaluate((element) => document.activeElement === element)))
     throw new Error("empty books add action did not focus the insert form");
   const desktopComposer = page.locator('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
-  await booksList.getByRole("button", { name: "ask the chat", exact: true }).click();
+  await booksList.getByRole("button", { name: "Ask the chat", exact: true }).click();
   await waitFor(async () => (await desktopComposer.inputValue()) === "add a book to this page", "desktop empty-state chat draft");
   if (!(await desktopComposer.evaluate((element) => document.activeElement === element))) throw new Error("empty-state chat action did not focus the composer");
   if ((JSON.parse(await Bun.file(control).text()).requests ?? []).some((request: { method?: string; params?: { text?: string } }) => request.method === "send" && request.params?.text === "add a book to this page")) throw new Error("empty-state chat action sent a message");
@@ -1721,7 +1721,7 @@ with _database() as db:
   });
   await page.reload();
   await gateWait.playwright(page.getByText("books loading…", { exact: true }), "waitFor", { timeout: 20_000 });
-  if (await booksList.getByText("no books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
+  if (await booksList.getByText("No books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
   await captureBlockState("b-loading", booksList.locator('[role="status"]'));
   await page.unroute(recordsPattern);
 
@@ -1738,7 +1738,7 @@ with _database() as db:
   await gateWait.playwright(booksList.getByText("books request failed: Failed to fetch. your data is safe; nothing was changed.", { exact: true }), "waitFor", { timeout: 20_000 });
   await captureBlockState("c-failed", booksList.locator('[role="alert"]'));
   await booksList.getByRole("button", { name: "try again", exact: true }).click();
-  await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(booksList.getByText("No books yet", { exact: true }), "waitFor", { timeout: 20_000 });
   await page.unroute(recordsPattern);
 
   await clickCreateMode(false);
@@ -2010,7 +2010,7 @@ with _database() as db:
       };
       const target = document.querySelector<HTMLElement>(".record-form-actions button.primary:not(:disabled)");
       const targetBox = target?.getBoundingClientRect();
-      const point = targetBox ? { x: Math.max(targetBox.left + 1, Math.min(targetBox.right - 1, innerWidth / 2)), y: Math.max(targetBox.top + 1, Math.min(targetBox.bottom - 1, innerHeight / 2)) } : null;
+      const point = targetBox ? { x: (Math.max(0, targetBox.left) + Math.min(innerWidth, targetBox.right)) / 2, y: (Math.max(0, targetBox.top) + Math.min(innerHeight, targetBox.bottom)) / 2 } : null;
       const hit = point ? document.elementFromPoint(point.x, point.y) : null;
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => {
         const element = document.querySelector<HTMLElement>(selector);
@@ -2282,6 +2282,11 @@ with _database() as db:
   await listSummaryApproval.getByRole("button", { name: "approve", exact: true }).click();
   const toolRow = page.locator('[data-part="tool"]', { hasText: "list_books" }).last();
   await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
+  const expandSummaryTool = async () => {
+    if (await toolRow.getAttribute("open") === null) await toolRow.locator('[data-part="tool-header"]').click();
+  };
+  if ((await toolRow.getAttribute("open")) !== null || await toolRow.locator('[data-part="tool-body"]').count()) throw new Error("tool details must start collapsed and unmounted");
+  await expandSummaryTool();
   const summaryBody = toolRow.locator('[data-part="tool-summary-preview"]');
   await gateWait.playwright(summaryBody.getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
   await gateWait.playwright(summaryBody.getByText("+ 2 more", { exact: true }), "waitFor", { timeout: 20000 });
@@ -2291,6 +2296,7 @@ with _database() as db:
         await page.reload();
         await setupMobileSheet(page, 900, "button");
       } else await page.setViewportSize({ width, height: 900 });
+      await expandSummaryTool();
       await page.screenshot({ path: join(screenshotDir, `tool-summary-${width}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -2301,6 +2307,8 @@ with _database() as db:
     await page.reload();
     await setupMobileSheet(page, 900, "button");
     await page.setViewportSize({ width: 1440, height: 900 });
+    await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
+    await expandSummaryTool();
     await gateWait.playwright(page.locator('[data-part="tool"]', { hasText: "list_books" }).last().locator('[data-part="tool-summary-preview"]').getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
   }
   await toolRow.locator('[data-part="tool-raw"] summary').click();
@@ -2339,6 +2347,14 @@ with _database() as db:
   if (!rawBox || !rowBox || !nextBox || !geometry.nextText.includes("layout updated") || nextBox.y < rawBox.y + rawBox.height)
     throw new Error(`raw disclosure overlaps next transcript row: ${JSON.stringify(geometry)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
+  const outerSummary = toolRow.locator('[data-part="tool-header"]');
+  await outerSummary.click();
+  await waitFor(async () => {
+    const collapsed = await rawGeometry();
+    const header = await outerSummary.boundingBox();
+    return Boolean(header && collapsed.rowBox && collapsed.nextBox && !(await owningVirtualRow.evaluate((row) => (row as HTMLElement).style.minHeight)) && collapsed.rowBox.height <= header.height + 4 && collapsed.nextBox.y - (collapsed.rowBox.y + collapsed.rowBox.height) <= 32);
+  }, "outer tool collapse releases the raw disclosure space");
+  await outerSummary.click();
   if (process.env.ONLY_TOOL_SUMMARY) {
     const rawSummary = toolRow.locator('[data-part="tool-raw"] summary');
     await rawSummary.click();
@@ -2881,7 +2897,7 @@ with _database() as db:
   await gateWait.playwright(page.getByText("allow page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await gateWait.playwright(page.locator(".page-chat-head:not(:has(.page-chat-ask))").or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
   await awaitApprovalMode("set_settings", allowSession, "allow", "allow-mode session settings");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
   await page.reload();
@@ -2915,7 +2931,7 @@ with _database() as db:
     return Boolean(current && current !== readingChatBeforeReload);
   }, "new allow-mode reading chat");
   const reloadChat = await homeSessionId();
-  await gateWait.playwright(page.locator(".page-chat-head:not(:has(.page-chat-ask))").or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
   const reloadBooks = async () => {
     const response = await fetch(`${origin}/api/pages/${createdPage.id}/records/books?field=title&equals=${encodeURIComponent('"Reload Book"')}`, { headers: { Authorization: `Bearer ${readingCredential}` } });
     if (!response.ok) throw new Error(`reload book query failed: ${response.status}`);
@@ -2950,7 +2966,7 @@ with _database() as db:
   }, "reply published to the reloaded page while its history read and the reply's row are held");
   const heldHistoryControl = JSON.parse(await Bun.file(control).text());
   await writeControl(control, { ...heldHistoryControl, release_reload_history_barrier: true });
-  await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the kept turn running");
+  await waitFor(async () => await page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^running$/ }).first().isVisible(), "reloaded page shows the kept turn running");
   const heldRowControl = JSON.parse(await Bun.file(control).text());
   await writeControl(control, { ...heldRowControl, release_reload_row_barrier: true });
   await gateWait.playwright(page.getByText("reload book added", { exact: true }), "waitFor", { timeout: 20_000 }).catch(async (error) => {
@@ -2977,11 +2993,22 @@ with _database() as db:
   const toolLines = async () => { const text = await transcript.innerText(); return ["tool-line before-reload", "tool-line after-reload"].map((line) => text.split(line).length - 1); };
   await allowField.fill("run a tool across a reload");
   await allowField.press("Enter");
-  await waitFor(async () => (await toolLines())[0] === 1, "running tool output shown before the reload");
+  const reloadTool = transcript.locator('[data-part="tool"][data-id="tool:reload-bash"]');
+  const revealReloadTool = () => reloadTool.evaluateAll((cards) => {
+    const card = cards[0];
+    if (card instanceof HTMLDetailsElement && !card.open) card.querySelector<HTMLElement>("summary")?.click();
+  });
+  await waitFor(async () => {
+    await revealReloadTool();
+    return (await toolLines())[0] === 1;
+  }, "running tool output shown before the reload");
   await page.reload();
-  await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the running tool's turn");
+  await waitFor(async () => await page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^running$/ }).first().isVisible(), "reloaded page shows the running tool's turn");
   const runningTool = page.locator('[data-part="tool"][data-state="streaming"]').filter({ hasText: "tool-line before-reload" });
-  await waitFor(async () => (await runningTool.count()) === 1, "running tool output from before the reload shown on the reloaded page while the tool runs").catch(async (error) => {
+  await waitFor(async () => {
+    await revealReloadTool();
+    return (await runningTool.count()) === 1;
+  }, "running tool output from before the reload shown on the reloaded page while the tool runs").catch(async (error) => {
     throw new Error(`${error}\ntranscript after the reload during a running tool: ${redact((await transcript.innerText()).slice(-1500))}`);
   });
   if ((await toolLines())[0] !== 1) throw new Error(`running tool output showed ${(await toolLines())[0]} times after the reload, not once`);
@@ -3023,7 +3050,7 @@ with _database() as db:
   await waitFor(async () => Boolean(replyTo("resume")), "reloaded page resumed the chat in the woken turn's setup");
   const wakeAttach = replyTo("resume");
   if (wakeAttach?.result?.attached !== "live_turn") throw new Error(`reload in a woken turn's setup did not attach to it: ${redact(JSON.stringify(wakeAttach?.error ?? { attached: wakeAttach?.result?.attached ?? null }))}`);
-  await gateWait.playwright(page.locator(".page-chat-head:not(:has(.page-chat-ask))").or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
   // zeta reports the setup as running, so the page keeps the mode pending; an older zeta reported idle and refused it
   if (replyTo("set_settings") && replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
   if (await page.getByRole("alert").count()) throw new Error(`reload in a woken turn's setup showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
@@ -3035,7 +3062,7 @@ with _database() as db:
   await waitForIdleTurn(page, waitFor);
   const wakeTool = JSON.parse(await Bun.file(control).text()).tool_results?.find((result: { call_id: string }) => result.call_id === "wake-inspect");
   if (!wakeTool || wakeTool.is_error) throw new Error(`the woken turn's page tool did not run on the re-sent binding: ${JSON.stringify(wakeTool ?? null)}`);
-  await gateWait.playwright(page.getByLabel("ask before tools", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 });
+  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="ask"]').or(page.getByLabel("ask before tools", { exact: true })), "waitFor", { state: "visible", timeout: 20_000 });
   await awaitApprovalMode("set_settings", wakeChat, "ask", "ask mode after the woken turn ended");
   if (await page.getByRole("alert").count()) throw new Error(`the woken turn's end showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
   await restartAchilles("allow");
@@ -3221,20 +3248,19 @@ with _database() as db:
   };
   const headerGeometry = async () => {
     const dimensions = await dockHead(page).evaluate((head) => {
-      const box = (selector: string) => head.querySelector(selector)!.getBoundingClientRect();
       const title = head.querySelector("strong")!;
-      const titleRow = box(".page-chat-title-row");
-      const controls = box(".page-chat-controls");
-      const marks = [...head.querySelectorAll<HTMLElement>(".page-chat-status, .page-chat-ask, .page-chat-data")];
+      const row = head.querySelector(".page-chat-title-row")!;
+      const rowBox = row.getBoundingClientRect();
+      const controls = [...row.querySelectorAll("button")];
       return {
-        height: head.getBoundingClientRect().height, stacked: titleRow.bottom === controls.top,
+        height: head.getBoundingClientRect().height,
         overflow: head.scrollWidth > head.clientWidth,
         ellipsized: title.scrollWidth > title.clientWidth && title.clientHeight < 30 && getComputedStyle(title).textOverflow === "ellipsis",
-        oneBaseline: marks.every((mark) => getComputedStyle(mark).whiteSpace === "nowrap" && Math.abs((mark.getBoundingClientRect().top + mark.clientHeight / 2) - (controls.top + controls.height / 2)) <= 1),
-        touchTargets: [...head.querySelectorAll(".page-chat-trigger")].every((button) => button.getBoundingClientRect().width >= 44 && button.getBoundingClientRect().height === 44),
+        oneBaseline: controls.every((button) => Math.abs(button.getBoundingClientRect().top + button.clientHeight / 2 + button.clientTop - (rowBox.top + rowBox.height / 2)) <= 1),
+        touchTargets: controls.length === (innerWidth <= 760 ? 4 : 3) && controls.every((button) => button.getBoundingClientRect().width >= 44 && button.getBoundingClientRect().height === 44),
       };
     });
-    if (dimensions.height !== 90 || !dimensions.stacked || dimensions.overflow || !dimensions.ellipsized || !dimensions.oneBaseline || !dimensions.touchTargets) throw new Error(`page chat header geometry: ${JSON.stringify(dimensions)}`);
+    if (dimensions.height !== 53 || dimensions.overflow || !dimensions.ellipsized || !dimensions.oneBaseline || !dimensions.touchTargets) throw new Error(`page chat header geometry: ${JSON.stringify(dimensions)}`);
   };
   const popupBounds = async () => {
     if (!await dockHead(page).locator(".page-chat-popup").evaluate((node) => {
@@ -3246,7 +3272,7 @@ with _database() as db:
   const outsideCloses = async (trigger: ReturnType<Page["locator"]>) => {
     const composer = page.locator('.page-chat-surface textarea[aria-label="message"]');
     const cases = [
-      { name: "readouts", act: () => dockHead(page).locator(".page-chat-readouts").click(), focus: trigger },
+      { name: "header background", act: () => dockHead(page).click({ position: { x: 4, y: 2 } }), focus: trigger },
       ...(page.viewportSize()!.width === 1440 ? [{ name: "sidebar background", act: () => page.locator(".brand-row strong").click(), focus: trigger }] : []),
       { name: "composer", act: () => composer.click(), focus: composer },
       { name: "Escape", act: () => page.keyboard.press("Escape"), focus: trigger },
@@ -3414,10 +3440,8 @@ with _database() as db:
   await setupMobileSheet(observerPage, 844);
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   if (screenshotDir) await writeFile(join(screenshotDir, "s2-header-manifest.json"), JSON.stringify({ head: (await Bun.$`git rev-parse HEAD`.text()).trim(), theme, captures: [...s2Images, "s2-header-switcher-390.png", "s2-header-confirmation-390.png", "s2-header-one-chat-controller-390.png", "s2-header-one-chat-observer-390.png"] }, null, 2) + "\n");
-  const observerComposerReason = observerPage.locator('[data-part="composer-reason"]');
-  const observerBody = await observerPage.locator("body").innerText();
-  if ((await observerComposerReason.count()) && !(await observerComposerReason.first().innerText()).includes("read-only")) throw new Error("observer composer did not explain its disabled state");
-  if (!observerBody.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
+  const observerReason = await observerPage.locator("#tab-authority-description").innerText();
+  if (!observerReason.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
   const observerNewChat = observerPage.locator("button.new-chat");
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
   await waitFor(async () => (await observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').count()) > 0, "observer transcript rows");
@@ -3426,7 +3450,10 @@ with _database() as db:
   const observerFrameCountAtActions = observerFrames.length;
   const observerHttpCountAtActions = observerHttp.length;
   const observerComposer = observerPage.getByRole("textbox", { name: "message", exact: true });
-  if (await observerComposer.count()) { await observerComposer.fill("observer must not send"); await observerComposer.press("Enter"); }
+  if (await observerComposer.count()) {
+    if (await observerComposer.isEditable()) throw new Error("observer composer was editable");
+    await observerComposer.press("Enter");
+  }
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   await observerPage.keyboard.press(appShortcut("Comma"));
   const observerSettings = observerPage.getByRole("dialog", { name: "settings", exact: true });

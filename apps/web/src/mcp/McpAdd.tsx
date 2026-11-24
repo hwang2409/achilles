@@ -88,18 +88,7 @@ function reviewFields(config: McpRow["config"], enabled: boolean, clientId: bool
 }
 
 type Review = { id: number; attempt: McpAddAttempt; clientId: boolean };
-export function McpAdd({ owner, snapshot, defaultScope, online, reviewTrust }: {
-  owner: McpOwner; snapshot: Snapshot; defaultScope: Scope; online: boolean; reviewTrust: (name: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  return <section className="mcp-add" aria-label="add a connection">
-    {!open ? <button type="button" className="primary" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!online}
-      onClick={() => setOpen(true)}>add connection</button>
-      : <AddForm owner={owner} snapshot={snapshot} defaultScope={defaultScope} online={online} reviewTrust={reviewTrust} close={() => setOpen(false)} />}
-  </section>;
-}
-
-function AddForm({ owner, snapshot, defaultScope, online, reviewTrust, close }: {
+export function McpAdd({ owner, snapshot, defaultScope, online, reviewTrust, close }: {
   owner: McpOwner; snapshot: Snapshot; defaultScope: Scope; online: boolean; reviewTrust: (name: string) => void; close: () => void;
 }) {
   const [scope, setScope] = useState(defaultScope);

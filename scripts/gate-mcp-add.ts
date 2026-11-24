@@ -109,7 +109,7 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
     await confirm(tab);
     await receipt(tab).waitFor(opts);
     await tab.getByRole("link", { name: /fixture-add-http/ }).click(opts);
-    await tab.getByText("oauth configured · sign-in state not checked", { exact: true }).waitFor(opts);
+    await tab.getByText("OAuth configured (sign-in not checked)", { exact: true }).waitFor(opts);
     await assertCleared(tab);
     await inspect(tab);
     await tab.close();

@@ -12,7 +12,7 @@ type Props = {
 
 export function PagesLanding({ catalog: { items, next, loading, error }, reload, more }: Props) {
   const titles = new Map(items?.map(({ route, title }) => [route, title]));
-  return <ModuleFrame title="pages">
+  return <ModuleFrame title="Pages" subtitle="Open a page you built with Zeta.">
     <div className="pages-landing">
       {error ? <ModuleState kind="failed" title="the page catalog did not load" action={{ label: "retry", run: reload }} />
         : items === null ? <ModuleState kind="loading" title="reading pages…" />
@@ -26,7 +26,7 @@ export function PagesLanding({ catalog: { items, next, loading, error }, reload,
                 <div className="pages-facts">
                   {!Number.isNaN(Date.parse(page.updated_at)) && <span>changed <time dateTime={page.updated_at} title={new Date(page.updated_at).toLocaleString()}>{timeLabel(page.updated_at)}</time></span>}
                   <span>{page.chat_count} {page.chat_count === 1 ? "chat" : "chats"}</span>
-                  <span className="pages-mode" data-on={page.create_mode}>{page.create_mode ? "create on" : "create off"}</span>
+                  {page.create_mode && <span>Create on</span>}
                 </div>
                 {page.created_by_route !== null && <span className="pages-origin">made from {titles.get(page.created_by_route) ?? page.created_by_route}</span>}
               </a>

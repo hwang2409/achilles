@@ -1,4 +1,4 @@
-.settings-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--g1-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); box-shadow: var(--g1-shadow-overlay); }
+.settings-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--g1-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); box-shadow: var(--g1-shadow-overlay); }
 .settings-dialog::backdrop { background: rgb(0 0 0 / 32%); }
 .settings-panel { overflow: auto; max-height: calc(100dvh - 34px); }
 .settings-titlebar, .settings-session > footer { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 20px; border-bottom: 1px solid var(--g1-rule); }

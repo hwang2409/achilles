@@ -17,7 +17,7 @@ import { WRITE_SURFACE } from "./writeSurfaces";
 import "./settings-dialog.css";
 
 const swatches = ["bg", "fg", "accent", "ok", "warn", "danger"];
-const uiFonts: Array<[UiFont, string]> = [["geist", "Geist"], ["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "System"]];
+const uiFonts: Array<[UiFont, string]> = [["system", "System"], ["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"]];
 const codeFonts: Array<[CodeFont, string]> = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "System monospace"]];
 const densities: Array<[Density, string]> = [["comfortable", "Comfortable"], ["compact", "Compact"]];
 const themeLabels: Record<ThemeChoice, string> = { auto: "System", "g1-light": "Light", "g1-dark": "Dark" };
