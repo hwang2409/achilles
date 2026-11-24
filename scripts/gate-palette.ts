@@ -17,7 +17,10 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   const vimDraft = () => page.locator('[data-vim-composer] [data-part="composer-field"]').getAttribute("data-value");
   const runCommand = async (query: string, option: string) => {
     await paletteInput.fill(query);
-    await waitFor(async () => (await palette.getByRole("option", { selected: true }).allTextContents()).some(text => text.startsWith(option)), `palette selects ${option}`).catch(async (error) => {
+    await waitFor(async () => {
+      const [text, ...extra] = await palette.getByRole("option", { selected: true }).allTextContents();
+      return extra.length === 0 && Boolean(text?.startsWith(option));
+    }, `palette selects ${option}`).catch(async (error) => {
       throw new Error(`${error}; options=${JSON.stringify(await palette.getByRole("option").evaluateAll(items => items.map(item => [item.textContent, item.getAttribute("aria-selected")])))}`);
     });
     await paletteInput.press("Enter");
@@ -67,24 +70,38 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await field.press("Escape");
   await waitFor(async () => !(await isFocused(field)), "esc in NORMAL leaves the composer");
 
-  await page.keyboard.press("?");
-  await gateWait.playwright(sheet, "waitFor", { state: "visible", timeout: 10_000 });
-  await capture("shortcuts-sheet-1440x900.png");
-  await page.keyboard.press("Escape");
-  await gateWait.playwright(sheet, "waitFor", { state: "hidden", timeout: 10_000 });
-
-  await page.keyboard.press("ControlOrMeta+k");
-  await runCommand("display settings", "display settings");
-  await gateWait.playwright(settings, "waitFor", { state: "visible", timeout: 10_000 });
-  await page.keyboard.press("ControlOrMeta+k");
-  await runCommand("keyboard shortcuts", "keyboard shortcuts");
-  await gateWait.playwright(sheet, "waitFor", { state: "visible", timeout: 10_000 });
-  if (!await sheet.evaluate(dialog => dialog.contains(document.activeElement))) throw new Error("palette-opened shortcuts did not take focus");
-  await page.keyboard.press("Escape");
-  await gateWait.playwright(sheet, "waitFor", { state: "hidden", timeout: 10_000 });
-  if (!(await settings.isVisible())) throw new Error("escape closed settings under the shortcuts sheet");
-  await page.keyboard.press("Escape");
-  await gateWait.playwright(settings, "waitFor", { state: "hidden", timeout: 10_000 });
+  const settingsKey = () => page.keyboard.press("ControlOrMeta+Comma");
+  const paletteKey = () => page.keyboard.press("ControlOrMeta+k");
+  const paletteButton = page.getByRole("button", { name: "command palette", exact: true });
+  const paletteCommand = (name: string) => async () => { await paletteKey(); await runCommand(name, name); };
+  const closeButton = sheet.getByRole("button", { name: "esc", exact: true });
+  const cases = [
+    { name: "question mark", act: () => page.keyboard.press("?"), top: sheet, focus: closeButton },
+    { name: "settings shortcut", act: settingsKey, top: settings },
+    { name: "palette shortcut", act: paletteKey, top: palette, focus: paletteInput },
+    { name: "palette button", act: () => paletteButton.click(), top: palette, focus: paletteInput },
+    { name: "palette settings command", act: paletteCommand("display settings"), top: settings },
+    { name: "settings shortcut over palette", prepare: paletteKey, act: settingsKey, top: settings },
+    { name: "palette while settings closes", prepare: settingsKey, act: async () => { await page.keyboard.press("Escape"); await paletteKey(); }, top: palette, focus: paletteInput },
+    { name: "palette over settings", prepare: settingsKey, act: paletteKey, top: palette, focus: paletteInput, underlying: settings },
+    { name: "palette shortcuts command", act: paletteCommand("keyboard shortcuts"), top: sheet, focus: closeButton },
+    { name: "palette shortcuts over settings", prepare: settingsKey, act: paletteCommand("keyboard shortcuts"), top: sheet, focus: closeButton, underlying: settings },
+  ];
+  for (const { name, prepare, act, top, focus, underlying } of cases) {
+    await page.locator("main[data-main-pane]").focus();
+    await prepare?.();
+    await act();
+    await top.waitFor({ state: "visible", timeout: 5_000 });
+    await waitFor(() => focus ? isFocused(focus) : top.evaluate(dialog => dialog.contains(document.activeElement)), `${name} moved focus into the top overlay`);
+    if (name === "question mark") await capture("shortcuts-sheet-1440x900.png");
+    await page.keyboard.press("Escape");
+    await top.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => { throw new Error(`${name}: Escape left the top overlay open`); });
+    if (underlying) {
+      if (!await underlying.isVisible()) throw new Error(`${name}: Escape closed the underlying settings`);
+      await page.keyboard.press("Escape");
+      await underlying.waitFor({ state: "hidden", timeout: 5_000 });
+    }
+  }
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.keyboard.press("ControlOrMeta+k");
@@ -110,6 +127,11 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await runCommand(otherPage, otherPage);
   await waitFor(async () => new URL(page.url()).pathname !== "/" && await page.getByRole("textbox", { name: "message", exact: true }).count() === 1, `palette goes to page ${otherPage}`);
   await page.keyboard.press("ControlOrMeta+k");
+  await paletteInput.fill("prove chat");
+  await palette.getByRole("option", { name: /^prove chat/, selected: true }).waitFor({ timeout: 5_000 });
+  await paletteInput.fill("no matching chat fixture");
+  await paletteInput.press("Enter");
+  if (!await palette.isVisible() || new URL(page.url()).searchParams.get("chat") === chatId) throw new Error("Enter opened a stale chat result");
   await runCommand("prove chat", "prove chat");
   await waitFor(async () => await page.locator("[data-session-id]").getAttribute("data-session-id") === chatId, "palette opens a chat");
   await page.keyboard.press("ControlOrMeta+k");

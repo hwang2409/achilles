@@ -3460,6 +3460,7 @@ with _database() as db:
   if (!await palette.getByText("toggle vim mode", { exact: true }).isVisible()) throw new Error("observer palette hid the local vim mode toggle");
   if (await palette.getByText("toggle create mode", { exact: true }).count()) throw new Error("observer palette exposed the shared create mode toggle");
   await observerPage.keyboard.press("Escape");
+  await palette.waitFor({ state: "hidden", timeout: 5_000 });
   const observerWritableControls = observerPage.locator("[data-record-form] button:not(:disabled), [data-part='approval'] button:not(:disabled)");
   if (await observerWritableControls.count()) throw new Error("observer exposed an enabled form or approval action");
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageAtActions) throw new Error("observer action matrix changed settings storage");
@@ -3569,6 +3570,7 @@ with _database() as db:
   const takeoverReason = observerPage.getByText(/^at .{1,15} another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/);
   await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
   if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
+  console.log("observer palette closed; take control was reachable and its refusal retained the live observer");
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });
   await setupMobileSheet(observerPage, 844);
   const observerMenu = observerPage.getByRole("button", { name: "open menu", exact: true });

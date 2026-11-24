@@ -192,7 +192,7 @@ function Sidebar({
 
   return (
     <div
-      className="group peer shrink-0 text-sidebar-foreground"
+      className="group peer shrink-0 text-sidebar-foreground [@media(max-width:760px),(max-height:500px)]:hidden"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}

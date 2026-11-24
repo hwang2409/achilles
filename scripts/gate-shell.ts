@@ -207,7 +207,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(connected, "waitFor", { state: "attached" });
   if (await tab.locator('.create-split a[aria-current="page"]').getAttribute("href") !== `/create${theme}` || await tab.locator(".create-split button").count()) throw new Error("create is not selected as a place without a switch");
   await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor", { state: "attached" });
-  const newChat = tab.locator(".surface-actions").getByRole("button", { name: "new chat", exact: true });
+  const newChat = tab.locator("[data-shell-nav]").getByRole("button", { name: "new chat", exact: true });
   const assertNewChat = async () => {
     // A navigation from the controller can reconnect as observer before its old socket closes.
     const enabled = newChat.and(tab.locator(":enabled:not([aria-disabled=true])"));
@@ -251,8 +251,10 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   const expectedFacts = `create on · runs in a new chat · ${expectedApproval}`;
   await gateWait.playwright(facts.filter({ hasText: expectedFacts }), "waitFor");
   const build = tab.locator("[data-create-form-actions] button[type=submit]");
-  const actionWidths = () => tab.locator(".new-chat, [data-create-form-actions] button[type=submit]").evaluateAll((buttons) =>
-    buttons.map((button) => button.getBoundingClientRect().width));
+  const actionWidths = async (width: number) => {
+    if (width !== 390) await newChat.waitFor({ state: "visible", timeout: 5_000 });
+    return tab.locator(".new-chat:visible, [data-create-form-actions] button[type=submit]:visible").evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().width));
+  };
   const prompt = tab.getByRole("textbox", { name: "describe your page" });
   await tab.setViewportSize({ width: 390, height: 844 });
   await tab.getByRole("button", { name: "a reading list with statuses" }).click();
@@ -264,7 +266,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
     await tab.setViewportSize({ width, height });
     await tab.evaluate(() => document.fonts.ready.then(() => undefined));
     if (await tab.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error(`create page overflow at ${width}px`);
-    readyWidths.set(width, await actionWidths());
+    readyWidths.set(width, await actionWidths(width));
     measure.push((await tab.locator("[data-create-landing]").boundingBox())!.width);
     await capture("landing", width);
     if (width === 390) {
@@ -295,8 +297,8 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
       await capture("pending", 1440);
       for (const width of [1440, 390]) {
         await tab.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-        const pendingWidths = await actionWidths();
-        if (pendingWidths.some((size, index) => Math.abs(size - readyWidths.get(width)![index]) > 1)) throw new Error(`busy action changed width at ${width}px`);
+        const pendingWidths = await actionWidths(width);
+        if (pendingWidths.length !== readyWidths.get(width)!.length || pendingWidths.some((size, index) => Math.abs(size - readyWidths.get(width)![index]) > 1)) throw new Error(`busy action changed width at ${width}px: ready=${readyWidths.get(width)} pending=${pendingWidths}`);
         if (width === 390) await capture("pending", width);
       }
       await tab.setViewportSize({ width: 1440, height: 900 });

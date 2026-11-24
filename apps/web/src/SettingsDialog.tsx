@@ -71,7 +71,7 @@ export function SettingsDialog({ open, onClose, restoreFocus, serverForcesAsk = 
   const settings = useSettings();
   const resetDone = JSON.stringify(settings) === JSON.stringify(resetTarget(settings));
   return <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-    <DialogContent showCloseButton={false} aria-describedby={undefined} className="max-h-[90dvh] [&_button]:max-sm:min-h-[44px] [&_button]:max-sm:min-w-[44px] gap-0 overflow-auto rounded-none animate-none p-4 sm:max-w-2xl sm:p-6" onCloseAutoFocus={(event) => { event.preventDefault(); restoreFocus(); }}>
+    <DialogContent data-shell-overlay="settings" showCloseButton={false} aria-describedby={undefined} className="max-h-[90dvh] [&_button]:max-sm:min-h-[44px] [&_button]:max-sm:min-w-[44px] gap-0 overflow-auto rounded-none animate-none p-4 sm:max-w-2xl sm:p-6" onCloseAutoFocus={(event) => { event.preventDefault(); restoreFocus(); }}>
       <header className="sticky -top-4 z-10 flex flex-wrap items-center justify-between gap-2 bg-background pb-4 sm:-top-6"><DialogTitle>settings</DialogTitle><div className="flex items-center gap-3 text-sm text-muted-foreground"><span>Saved in this browser</span><Button type="button" size="sm" variant="outline" onClick={onClose}>esc</Button></div></header>
       <div>
         <Row title="Theme" description="System follows your device’s light or dark appearance."><Segments label="theme" value={settings.theme} choices={themeChoices.map((theme) => [theme, themeLabels[theme]])} surface={WRITE_SURFACE.settingsTheme} onChange={(theme) => updateSettings({ theme })} /></Row>
