@@ -47,11 +47,10 @@
   align-items: center;
   min-height: 36px;
   column-gap: var(--g1-space-2);
-  background: var(--g1-bg-subtle);
 }
-[data-part="tool"] > [data-part="tool-header"] { min-height: 26px; padding: 2px 0; border-radius: var(--g1-radius-control); background: transparent; }
+[data-part="tool"] > [data-part="tool-header"] { min-height: 26px; padding: 2px 0; border-radius: var(--g1-radius-control); }
 summary[data-part="tool-header"] { cursor: pointer; }
-/* a row hover brightens its text instead of filling */
+/* a tool row has no fill at rest or on hover (orca): hover brightens its verb instead */
 [data-part="tool"] > summary[data-part="tool-header"]:hover { background: transparent; }
 [data-part="tool"] > summary[data-part="tool-header"]:hover > [data-part="tool-name"] { color: var(--g1-fg); }
 [data-part="approval"] > [data-part="tool-header"] { background: color-mix(in srgb, var(--g1-warn-fill) 6%, var(--g1-bg)); }
