@@ -3339,11 +3339,13 @@ with _database() as db:
   await page.keyboard.press("Enter");
   await s2Shot(page, "confirm-approval-390");
   await page.getByRole("button", { name: "confirm", exact: true }).click();
-  await gateWait.playwright(dockHead(page).locator('[data-write-surface="page-chat.auto-approve"][aria-checked="true"]'), "waitFor");
+  await gateWait.playwright(modeItem(page, "run tools without asking").and(page.getByRole("menuitemcheckbox", { checked: true })), "waitFor");
   await page.keyboard.press("Escape");
   await switcher.click();
+  const selected = page.getByRole("option", { selected: true });
+  await waitFor(() => selected.evaluate(node => node === document.activeElement), "selected chat takes focus");
   await page.keyboard.press("ArrowDown");
-  const keyboardTitle = await dockHead(page).locator('[role="option"]:focus [data-page-chat-choice-title]').innerText();
+  const keyboardTitle = await page.getByRole("listbox").locator('[role="option"]:focus [data-page-chat-choice-title]').innerText();
   await page.keyboard.press("Enter");
   await gateWait.playwright(page.locator("[data-page-chat-bar][aria-expanded=false]"), "waitFor");
   await setupMobileSheet(page, 844, "button");
@@ -3424,7 +3426,7 @@ with _database() as db:
   for (const name of ["run tools without asking", "create mode"] as const) {
     if (!await modeItem(observerPage, name).isDisabled()) throw new Error("mobile observer can change a mode");
   }
-  await gateWait.playwright(dockHead(observerPage).getByText("this tab is read-only", { exact: false }).first(), "waitFor");
+  await gateWait.playwright(observerPage.getByRole("menu", { name: "page chat options" }).getByText("this tab is read-only", { exact: false }).first(), "waitFor");
   await s2Shot(observerPage, "observer-menu-390");
   await setupMobileSheet(observerPage, 844);
   await observerPage.setViewportSize({ width: 1440, height: 900 });
