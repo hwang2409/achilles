@@ -820,7 +820,9 @@ with _database() as db:
         await observerTelemetry.screenshot({ path: join(screenshotDir, name), animations: "disabled" });
         telemetryArtifacts.push(name);
       };
-      for (const viewport of [{ width: 360, height: 740 }, { width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
+      // The compact layout can fit at 740px; a shorter viewport still exercises scrolling.
+      const scrollHeight = 680;
+      for (const viewport of [{ width: 360, height: scrollHeight }, { width: 360, height: 740 }, { width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
         const size = `${viewport.width}x${viewport.height}`;
         await observerTelemetry.setViewportSize(viewport);
         if (!await banner.isVisible()) throw new Error(`telemetry recovery ${size}: read-only banner is hidden`);
@@ -844,7 +846,7 @@ with _database() as db:
             const row = element.querySelector("[data-telemetry-unavailable-actions]")!.getBoundingClientRect();
             return { scrollTop: element.scrollTop, stepTop: step.top, stepBottom: step.bottom, rowTop: row.top, visible: step.top >= Math.max(0, pane.top) && step.bottom <= Math.min(innerHeight, pane.bottom, row.top) };
           });
-          if (viewport.width === 360 && (!geometry.visible || (viewport.height === 740 && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
+          if (viewport.width === 360 && (!geometry.visible || (viewport.height === scrollHeight && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
           await captureRecovery(`${size}-bottom`);
           await notice.evaluate(element => { element.scrollTop = 0; });
         }
