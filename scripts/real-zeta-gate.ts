@@ -856,18 +856,16 @@ with _database() as db:
     for (const width of [390, 1280, 1440, 1920]) {
       if (width === 390) {
         await setupMobileSheet(page, mobileHeight);
-        const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
+        const drawerClose = page.getByRole("button", { name: "close navigation", exact: true });
         if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click({ force: true });
         await waitFor(async () => {
-          const sidebar = await page.locator(".sidebar").evaluate((element) => {
-            const style = getComputedStyle(element);
-            return { transform: style.transform, right: element.getBoundingClientRect().right };
-          });
+          const drawerClosed = await page.locator('[aria-controls="surface-sidebar"]').getAttribute("aria-expanded") === "false"
+            && !await page.locator("[data-shell-nav]").isVisible() && !await page.locator('[data-slot="sheet-overlay"]').isVisible();
           const sheet = await page.locator(".page-chat-surface").evaluate((element) => {
             const style = getComputedStyle(element);
             return { transform: style.transform, visibility: style.visibility };
           });
-          return sidebar.right <= 0 && sidebar.transform !== "matrix(1, 0, 0, 1, 0, 0)" && sheet.visibility === "hidden" && sheet.transform !== "matrix(1, 0, 0, 1, 0, 0)";
+          return drawerClosed && sheet.visibility === "hidden" && sheet.transform !== "matrix(1, 0, 0, 1, 0, 0)";
         }, "mobile overlays settled");
         await waitFor(async () => await target.evaluate((element) => {
           element.scrollIntoView({ block: "center", inline: "nearest" });
@@ -3496,17 +3494,15 @@ with _database() as db:
   if (screenshotDir) {
     const observerMarker = "prove chat";
     await setupMobileSheet(observerPage, 760);
-    const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
+    const drawerClose = observerPage.getByRole("button", { name: "close navigation", exact: true });
     if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click({ force: true });
     for (const dialog of await observerPage.locator('[role="dialog"][aria-modal="true"]').all()) {
       const close = dialog.getByRole("button", { name: /close/i }).first();
       if (await close.isVisible().catch(() => false)) await close.click({ force: true });
     }
     const pageChatDialog = observerPage.getByRole("dialog", { name: "page chat" });
-    await waitFor(async () => await observerPage.locator(".sidebar").evaluate((element) => {
-      const style = getComputedStyle(element);
-      return element.getBoundingClientRect().right <= 0 && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
-    }), "observer drawer settled");
+    await waitFor(async () => !await observerPage.locator("[data-shell-nav]").isVisible()
+      && !await observerPage.locator('[data-slot="sheet-overlay"]').isVisible(), "observer drawer settled");
     const routeUnderneath = new URL(observerPage.url()).pathname;
     if (routeUnderneath !== "/reading") throw new Error(`observer page route changed before active chat capture: ${routeUnderneath}`);
     await setupMobileSheet(observerPage, 760, "button");

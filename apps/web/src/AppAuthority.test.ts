@@ -1212,3 +1212,24 @@ test("tool approval errors leave the old setting and a stale chat never writes",
     } finally { release(settings); }
   });
 });
+
+test("slash and question mark leave portal listbox typeahead alone", async () => {
+  await withApp("controller", {}, async (app) => {
+    const portal = document.createElement("div");
+    portal.setAttribute("role", "listbox");
+    const option = document.createElement("div");
+    option.setAttribute("role", "option");
+    option.tabIndex = 0;
+    portal.append(option);
+    app.baseElement.append(portal);
+    try {
+      option.focus();
+      for (const key of ["/", "?"]) {
+        const event = new KeyboardEvent("keydown", { key, bubbles: true, composed: true, cancelable: true });
+        await act(async () => { option.dispatchEvent(event); });
+        expect(event.defaultPrevented, `listbox must own ${key}`).toBe(false);
+        expect(document.activeElement === option).toBe(true);
+      }
+    } finally { portal.remove(); }
+  });
+});

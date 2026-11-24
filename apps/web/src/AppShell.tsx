@@ -136,13 +136,14 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   }, [workspace, displaySettings, canWrite, loading, narrow, startNewChat, createMode, paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isEditableTarget(event) || (event.target instanceof Element && event.target.closest("[role=dialog], [role=alertdialog], [role=menu]"))) return;
+      if (event.defaultPrevented || isEditableTarget(event) || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.composedPath().some(node => node instanceof Element && node.matches("[role=dialog], [role=alertdialog], [role=menu], [role=listbox]"))) return;
       if (event.key === "/") {
         event.preventDefault();
         const search = restorableFocus(sidebar.current?.querySelector(".chat-search input") ?? null);
         if (search) search.focus(); else openPalette();
       }
-      if (workspace && event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); openShortcuts(activeElement()); }
+      if (workspace && event.key === "?") { event.preventDefault(); openShortcuts(activeElement()); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
   }, [workspace, shortcutsOpen, paletteOpen]);
