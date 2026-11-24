@@ -40,7 +40,7 @@
 .module-frame > header :is(h1, p) { margin: 0; }
 .module-frame > header > button { flex: none; }
 .ui-tabs { display: flex; flex-wrap: wrap; gap: var(--g1-space-1); }
-.ui-tabs :is(button, a) { display: inline-flex; align-items: center; gap: var(--g1-space-1); padding-inline: var(--g1-space-2); color: var(--g1-muted); border-radius: var(--g1-radius-control); }
+.ui-tabs :is(button, a) { min-height: var(--g1-touch-height); display: inline-flex; align-items: center; gap: var(--g1-space-1); padding-inline: var(--g1-space-2); color: var(--g1-muted); border-radius: var(--g1-radius-control); }
 .ui-tabs :is([aria-pressed="true"], [aria-current="page"]) { background: var(--g1-selected); color: var(--g1-fg); }
 .module-frame > header h1::first-letter, .module-state h2::first-letter { text-transform: uppercase; }
 .module-body > :not(.module-state), .agents-split, .sessions-split { width: 100%; max-width: var(--g1-page-max); }

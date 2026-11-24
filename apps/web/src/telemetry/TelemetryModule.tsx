@@ -46,8 +46,8 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
     setPath(href);
   };
   const tabs = (
-    <nav className="tm-tabs" aria-label="telemetry views">
-      {TABS.map((item) => <a key={item.tab} href={item.href} aria-current={item.tab === tab ? "page" : undefined} onClick={(event) => go(event, item.href)}>{item.tab}</a>)}
+    <nav className="ui-tabs" aria-label="telemetry views">
+      {TABS.map((item) => <a key={item.tab} href={item.href} aria-current={item.tab === tab ? "page" : undefined} onClick={(event) => go(event, item.href)}>{item.tab[0].toUpperCase() + item.tab.slice(1)}</a>)}
     </nav>
   );
   if (!supportsFeature(client, TELEMETRY_FEATURE)) {

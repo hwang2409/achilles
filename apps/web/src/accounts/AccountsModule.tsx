@@ -83,10 +83,9 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
     }
   };
   const showAction = { label: "show accounts", run: () => void show() };
-  return <ModuleFrame title="accounts">
+  return <ModuleFrame title="Accounts" subtitle="View model accounts and usage. Credentials stay with Zeta.">
     <div className="accounts-place">
       <h2 ref={heading} tabIndex={-1}>model accounts</h2>
-      <p className="account-intro">the accounts zeta can use. achilles shows names and usage only. credentials stay with zeta.</p>
       {active ? null : loading ? <ModuleState kind="loading" title="loading accounts…" />
         : !client ? (connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
           : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />)

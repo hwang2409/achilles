@@ -23,7 +23,7 @@ export function SettingsModule(props: Props) {
       setShown(id);
       document.querySelector<HTMLElement>(`#${id} h2`)?.focus();
     }}>{label}</a>;
-  return <ModuleFrame title="settings">
+  return <ModuleFrame title="Settings" subtitle="Change browser preferences and Zeta defaults.">
     <div className="sp">
       <nav className="sp-subnav" aria-label="settings sections">
         {section("browser", "This browser")}

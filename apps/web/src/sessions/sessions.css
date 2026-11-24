@@ -1,8 +1,4 @@
 .sessions-frame { font: var(--achilles-ui-size, 14px)/1.5 var(--achilles-ui-font, var(--g1-font-ui)); }
-.sessions-frame > .sessions-head { flex-wrap: wrap; gap: 4px 16px; padding-block: var(--g1-space-2); }
-.sessions-head > span { margin-left: auto; color: var(--fulcrum-muted); font-size: .85em; }
-.sessions-head > button { min-height: 40px; padding-inline: 12px; margin-left: auto; }
-.sessions-head > span + button { margin-left: 0; }
 .sessions-frame :is(a, button, input):focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .sessions-frame button:not(:disabled, [aria-disabled="true"]):hover { background: var(--g1-hover); }
 .sessions-frame button:disabled { color: var(--fulcrum-muted); cursor: default; }
@@ -71,9 +67,6 @@
 .sessions-timeline.transcript { overflow: visible; }
 .sessions-more { margin-block: 8px; }
 @media (max-width: 760px), (max-height: 500px) {
-  .sessions-frame > .sessions-head { padding-inline: 16px; }
-  .sessions-head > span { order: 3; flex-basis: 100%; margin-left: 0; }
-  .sessions-head > span + button { margin-left: auto; }
   .sessions-split { display: block; overflow: auto; --sessions-columns: minmax(0, 1fr) 5rem 3.5rem; }
   .sessions-catalog { border-right: 0; }
   .sessions-split[data-detail="true"] .sessions-catalog, .sessions-split[data-detail="false"] .sessions-detail, .sessions-row > span:nth-child(2) { display: none; }

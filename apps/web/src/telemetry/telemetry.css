@@ -33,11 +33,6 @@
 .tm-refreshing { color: var(--fulcrum-muted); animation: tm-appear 0s 400ms both; }
 @keyframes tm-appear { from { visibility: hidden; } }
 .tm-tabs-row { flex: none; display: flex; flex-wrap: wrap; align-items: stretch; gap: 0 24px; padding: 0 var(--tm-pad) 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
-.tm-tabs { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; }
-.tm-tabs a { display: flex; align-items: center; min-height: 44px; padding: 2px 0 0; margin-right: 12px; color: var(--fulcrum-muted); border-bottom: 2px solid transparent; white-space: nowrap; }
-.tm-tabs a:hover { color: var(--fulcrum-fg); }
-.tm-tabs a[aria-current="page"] { color: var(--fulcrum-fg); font-weight: 700; border-bottom-color: var(--fulcrum-accent); }
-.tm-tabs a:focus-visible { outline-offset: -2px; }
 
 .tm-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); background: none; color: var(--fulcrum-fg); cursor: pointer; font: inherit; white-space: nowrap; }
 .tm-button:hover:not(:disabled) { border-color: var(--fulcrum-muted); }
