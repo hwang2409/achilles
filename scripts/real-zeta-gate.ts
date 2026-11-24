@@ -14,6 +14,8 @@ import { gateHomeSettings } from "./gate-home-settings";
 import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
+import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
+import { gateMcpOAuth, mcpOAuthArtifacts, oauthFixture, refuseMcpOAuth } from "./gate-mcp-oauth";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
 import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
@@ -231,6 +233,7 @@ try {
   authEnv.ZETA_PROOF_ORIGIN = origin;
   let authZeta = await serveAuth(false);
   const mcpAddSurfaceId = await gateMcpAdd(browser, origin, authHome, cwd, screenshotDir, () => `${logs.get(authApp)}\n${logs.get(authZeta)}`);
+  const mcpOAuthSurfaceIds = await gateMcpOAuth(browser, origin, authHome, screenshotDir);
   const accountsPage = await browser.newPage();
   try { await gateAccountsPlace(accountsPage, origin); }
   finally { await accountsPage.close(); }
@@ -568,6 +571,7 @@ with _database() as db:
   // before any chat tab opens: a chat tab keeps control, and the settings change borrows it
   await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
   const mcpWriteSurfaceIds = await gateMcpWrites(browser, origin, zetaHome, cwd, screenshotDir);
+  const mcpTestSurfaceId = await gateMcpTest(browser, origin, zetaHome, cwd, screenshotDir);
   const agentsHome = join(temp, "agents-zeta");
   const agentsDiscovery = join(agentsHome, "agents-ws.json");
   await mkdir(agentsHome, { mode: 0o700 });
@@ -1497,6 +1501,17 @@ with _database() as db:
     await gateWait.playwright(page.locator(".run-state.state-running"), "waitFor", { timeout: 20_000 });
     const firstPageChat = await homeSessionId();
     await gateWait.playwright(page.locator(`[data-chat-id="${firstPageChat}"]`), "waitFor", { timeout: 20_000 });
+    const mcpConfigPath = join(zetaHome, "mcp.json");
+    const baselineMcp = await readFile(mcpConfigPath);
+    const config = JSON.parse(baselineMcp.toString());
+    const oauth = oauthFixture();
+    try {
+      await Bun.write(mcpConfigPath, JSON.stringify({ ...config, servers: { ...config.servers, ...oauth.config.servers } }));
+      await refuseMcpOAuth(browser, origin);
+    } finally {
+      oauth.stop();
+      await writeFile(mcpConfigPath, baselineMcp);
+    }
     if (!zetaProcess.kill("SIGUSR2")) throw new Error("could not release the first page turn");
     await waitFor(async () => Boolean(heldAttach), "old selected-chat attach catalogue held");
     const { chatId, release } = heldAttach!;
@@ -3335,7 +3350,7 @@ with _database() as db:
   const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
   const observerPage = await browser.newPage();
-  const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId, ...agentWriteSurfaceIds]);
+  const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId, mcpTestSurfaceId, ...mcpOAuthSurfaceIds, ...agentWriteSurfaceIds]);
   const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
     for (const id of await target.locator("[data-write-surface]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-write-surface")).filter((id): id is string => Boolean(id)))) renderedWriteSurfaceIds.add(id);
   };
@@ -3615,7 +3630,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...agentControlArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),

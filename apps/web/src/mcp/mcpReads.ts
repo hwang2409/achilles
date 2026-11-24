@@ -94,6 +94,15 @@ type Failure = ReturnType<typeof mcpReadFailure> | { method: typeof METHOD; reas
 type ScopeRead = { rows: McpRow[]; revision: string; at: number } | { failure: Failure };
 export const canReadMcp = (client: ZetaClient) => supportsFeature(client, "mcp_management_v1") && supportsRequest(client, METHOD);
 
+export async function readMcpScope(client: ZetaClient, scope: McpScope, signal?: AbortSignal): Promise<ScopeRead> {
+  try {
+    const result = projectMcpSnapshot(await client.request(METHOD, { scope }, { signal, timeoutMs: 5_000 }), scope);
+    return result ? { ...result, at: Date.now() } : { failure: { method: METHOD, reason: "invalid_response" } };
+  } catch (error: unknown) {
+    return { failure: mcpReadFailure(error) };
+  }
+}
+
 export function createMcpReads(canRead = canReadMcp) {
   let snapshot: Record<McpScope, ScopeRead> | null = null;
   const listeners = new Set<() => void>();
@@ -113,15 +122,7 @@ export function createMcpReads(canRead = canReadMcp) {
       if (!canRead(client)) {
         snapshot = null;
       } else {
-        const read = async (scope: McpScope): Promise<ScopeRead> => {
-          try {
-            const result = projectMcpSnapshot(await client.request(METHOD, { scope }, { signal, timeoutMs: 5_000 }), scope);
-            return result ? { ...result, at: Date.now() } : { failure: { method: METHOD, reason: "invalid_response" } };
-          } catch (error: unknown) {
-            return { failure: mcpReadFailure(error) };
-          }
-        };
-        const [effective, user, project] = await Promise.all(mcpScopes.map(read));
+        const [effective, user, project] = await Promise.all(mcpScopes.map((scope) => readMcpScope(client, scope, signal)));
         if (signal?.aborted || current !== generation) return null;
         snapshot = { effective, user, project };
       }
