@@ -165,6 +165,7 @@ const setting = (id: WriteSurfaceId, key: keyof ReturnType<typeof getSettings>, 
       expect(getSettings()[key]).toBe(before);
       await click(app.getByRole("button", { name: "allow without asking" }));
     }
+    if (child) expect(control.getAttribute("aria-checked")).toBe("true");
     expect(getSettings()[key]).not.toBe(before);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)[key]).toBe(getSettings()[key]);
   }
@@ -755,11 +756,11 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
     expect(writes).not.toContain("send");
   } },
-  "settings.theme": setting("settings.theme", "theme", ' button[aria-pressed="false"]'),
-  "settings.ui-font": setting("settings.ui-font", "uiFont", ' button[aria-pressed="false"]'),
-  "settings.code-font": setting("settings.code-font", "codeFont", ' button[aria-pressed="false"]'),
-  "settings.size": setting("settings.size", "size", ' button[aria-pressed="false"]'),
-  "settings.density": setting("settings.density", "density", ' button[aria-pressed="false"]'),
+  "settings.theme": setting("settings.theme", "theme", ' [role="radio"][aria-checked="false"]'),
+  "settings.ui-font": setting("settings.ui-font", "uiFont", ' [role="radio"][aria-checked="false"]'),
+  "settings.code-font": setting("settings.code-font", "codeFont", ' [role="radio"][aria-checked="false"]'),
+  "settings.size": setting("settings.size", "size", ' [role="radio"][aria-checked="false"]'),
+  "settings.density": setting("settings.density", "density", ' [role="radio"][aria-checked="false"]'),
   "settings.vim": setting("settings.vim", "vim"),
   "settings.auto-approve": setting("settings.auto-approve", "autoApproveDefault", "", true),
   "settings.reset": setting("settings.reset", "size", "", true),
