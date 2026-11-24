@@ -1,9 +1,9 @@
 /* design-v4 shell: the transcript and composer own the center pane's scroll boundary. */
-.app-shell { height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: 264px minmax(0, 1fr); background: var(--fulcrum-bg); }
+.app-shell { height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: 280px minmax(0, 1fr); background: var(--fulcrum-bg); }
 .brand-mark { position: relative; width: 20px; height: 20px; flex: none; background: var(--g1-primary); }
 
-.sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--g1-border); background: var(--g1-bg-subtle); overflow: hidden; z-index: 4; }
-.chat-group h2 { position: sticky; top: var(--g1-nav-row-height); z-index: 1; height: var(--g1-nav-row-height); box-sizing: border-box; margin: 0; padding: 0 var(--g1-sidebar-inset); background: var(--g1-bg-subtle); line-height: var(--g1-nav-row-height); }
+.sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--g1-border); background: var(--g1-sidebar); overflow: hidden; z-index: 4; }
+.chat-group h2 { position: sticky; top: var(--g1-nav-row-height); z-index: 1; height: var(--g1-nav-row-height); box-sizing: border-box; margin: 0; padding: 0 var(--g1-sidebar-inset); background: var(--g1-sidebar); line-height: var(--g1-nav-row-height); }
 .chat-group h2::first-letter, .list-head > span::first-letter { text-transform: uppercase; }
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: var(--g1-space-2); padding: 0 var(--g1-sidebar-inset); }
@@ -37,7 +37,7 @@
    scroll-padding-top stays: it keeps a focused row (arrow keys, scrollIntoView) below the two sticky heads
    (list head + group head) instead of hidden under them. useOnScreen reads it too: a build row under the heads is not on screen. */
 .chat-list { flex: 1 1 auto; min-height: 80px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--g1-border) transparent; scroll-padding-top: calc(2 * var(--g1-nav-row-height)); }
-.chat-list > .list-head { position: sticky; top: 0; z-index: 2; background: var(--g1-bg-subtle); }
+.chat-list > .list-head { position: sticky; top: 0; z-index: 2; background: var(--g1-sidebar); }
 .transcript [data-part="timeline-scroll"]:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
 /* the rows paint over an outline of the scroll box itself, so its focus ring is a layer of the frame above them */
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible) { position: relative; }
@@ -63,14 +63,14 @@
 .skip-link { position: fixed; z-index: 20; top: 8px; left: 8px; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-accent); transform: translateY(-150%); }
 .skip-link:focus { transform: translateY(0); }
 
-.chat-header { container-type: inline-size; height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--g1-page-gutter); border-bottom: 1px solid var(--g1-border); }
+.chat-header { container-type: inline-size; height: 44px; flex: 0 0 44px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--g1-page-gutter); border-bottom: 1px solid var(--g1-border); }
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
 /* the crumb keeps its width (the title gives way first) until it passes 40% of the bar; its "/" is its own span, so it never clips */
 .chat-heading span { order: 0; flex: 0 0 auto; max-width: 40%; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own
    allocated box (narrow viewport + sidebar + chat-actions leave .chat-heading under 160px) and
    visually overlap .chat-actions; ellipsis alone keeps the title readable at whatever room remains. */
-.chat-heading strong { order: 1; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; font-weight: 600; }
+.chat-heading strong { order: 1; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .chat-actions { display: flex; align-items: center; gap: 12px; white-space: nowrap; font-size: inherit; }
 /* actions read as buttons (body text, hover fill); the approval mode is muted status text with the same side padding, so the gaps match */
 .chat-actions button { min-height: var(--g1-icon-height); color: var(--g1-fg); font-size: inherit; }
@@ -127,7 +127,7 @@
   .fold-mark-approve { display: none; }
 }
 /* hollow, so "queued" differs from "running" by shape, not only color */
-.chat-header > [role="alert"] { position: absolute; top: 56px; right: 16px; color: var(--fulcrum-danger); }
+.chat-header > [role="alert"] { position: absolute; top: 44px; right: 16px; color: var(--fulcrum-danger); }
 .create-mode-alert { position: relative; z-index: 2; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; color: var(--fulcrum-danger); background: var(--fulcrum-bg); border-bottom: 1px solid var(--fulcrum-border); }
 .create-mode-alert button { flex: 0 0 auto; }
 
