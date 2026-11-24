@@ -36,10 +36,12 @@ function CommandDialog({
   className,
   showCloseButton = true,
   onCloseAutoFocus,
+  contentProps,
   value,
   onValueChange,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
+  contentProps?: { "data-shell-overlay"?: string }
   onCloseAutoFocus?: React.ComponentProps<typeof DialogContent>["onCloseAutoFocus"]
   value?: string
   onValueChange?: (value: string) => void
@@ -50,7 +52,7 @@ function CommandDialog({
 }) {
   return (
     <Dialog {...props}>
-      <DialogContent className={cn("overflow-hidden p-0", className)} showCloseButton={showCloseButton} onCloseAutoFocus={onCloseAutoFocus}>
+      <DialogContent {...contentProps} className={cn("overflow-hidden p-0", className)} showCloseButton={showCloseButton} onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
