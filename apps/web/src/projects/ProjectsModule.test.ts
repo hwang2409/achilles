@@ -102,7 +102,7 @@ test.each([
     expect(zeta.asked("project_show")).toBe(1);
     expect(other.textContent).toBe("reading…");
     expect(other.getAttribute("aria-disabled")).toBe("true");
-    expect(view.getByText(/zeta lets only the tab in control read full text/)).toBeTruthy();
+    expect(view.getByText(/Zeta lets only the tab in control read full text/)).toBeTruthy();
     await act(async () => zeta.release());
     expect(await view.findByRole("button", { name: "take control and show decision text" })).toBeTruthy();
     expect(view.getByRole("region", { name: "brief text" }).textContent).toContain("brief text body");
