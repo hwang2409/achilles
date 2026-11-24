@@ -60,7 +60,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     { ...create, id: WRITE_SURFACE.pageChatCreateMode, label: "create mode", enable: "allow this chat to change the page layout", disable: "limit this chat to changing page data", on: "create mode on", off: "data only" },
   ];
   const reason = (mode: Mode) => mode.reason ?? mode.pending;
-  const menuStyle = "z-[60] w-[min(22rem,calc(100vw-2rem))] max-h-[min(22rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto overscroll-contain";
+  const menuStyle = "z-[60] w-[min(20rem,calc(100vw-2rem))] max-h-[min(22rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto overscroll-contain";
   const confirmationRow = (mode: (typeof modes)[number]) => <div className="mt-1 flex flex-wrap gap-2 border-t bg-muted p-2" role="region" aria-labelledby="page-chat-effect">
     <p className="basis-full text-sm" id="page-chat-effect">{mode.checked ? mode.disable : mode.enable}?</p>
     <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}><Button ref={confirm} role="button" size="sm" type="button" onClick={() => { finishConfirmation(); if (!reason(mode)) mode.action?.(); }}>confirm</Button></DropdownMenuItem>
