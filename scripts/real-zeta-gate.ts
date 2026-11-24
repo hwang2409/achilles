@@ -3250,11 +3250,10 @@ with _database() as db:
     if (dimensions.height !== 53 || dimensions.overflow || !dimensions.ellipsized || !dimensions.oneBaseline || !dimensions.touchTargets) throw new Error(`page chat header geometry: ${JSON.stringify(dimensions)}`);
   };
   const popupBounds = async () => {
-    if (!await page.locator("[data-page-chat-popup]").evaluate((node) => {
-      const popup = node.getBoundingClientRect();
-      const surface = node.closest("[data-page-chat-surface]")!.getBoundingClientRect();
-      return popup.top >= surface.top && popup.bottom <= surface.bottom && popup.left >= surface.left && popup.right <= surface.right;
-    })) throw new Error("page chat popup escaped the rail or sheet");
+    const popup = await page.locator("[data-page-chat-popup]").boundingBox();
+    const surface = await page.locator("[data-page-chat-surface]").boundingBox();
+    if (!popup || !surface || popup.y < surface.y || popup.y + popup.height > surface.y + surface.height || popup.x < surface.x || popup.x + popup.width > surface.x + surface.width)
+      throw new Error(`page chat popup escaped the rail or sheet: ${JSON.stringify({ popup, surface })}`);
   };
   const outsideCloses = async (trigger: ReturnType<Page["locator"]>) => {
     const composer = page.locator('[data-page-chat-surface] textarea[aria-label="message"]');
