@@ -61,6 +61,11 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
   ];
   const reason = (mode: Mode) => mode.reason ?? mode.pending;
   const menuStyle = "z-[60] w-[min(22rem,calc(100vw-2rem))] max-h-[min(22rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto overscroll-contain";
+  const confirmationRow = (mode: (typeof modes)[number]) => <div className="mt-1 flex flex-wrap gap-2 border-t bg-muted p-2" role="region" aria-labelledby="page-chat-effect">
+    <p className="basis-full text-sm" id="page-chat-effect">{mode.checked ? mode.disable : mode.enable}?</p>
+    <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}><Button ref={confirm} role="button" size="sm" type="button" onClick={() => { finishConfirmation(); if (!reason(mode)) mode.action?.(); }}>confirm</Button></DropdownMenuItem>
+    <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}><Button role="button" variant="outline" size="sm" type="button" onClick={finishConfirmation}>keep current</Button></DropdownMenuItem>
+  </div>;
   return <>
     <div data-page-chat-head="" className="relative z-10 min-w-0 shrink-0 border-b px-3 py-1" data-approval-mode={approval.checked ? "allow" : "ask"} data-create-mode={create.checked ? "on" : "off"} data-popup={popup ?? undefined}>
       <div data-page-chat-title-row="" className="flex min-w-0 items-center gap-1">
@@ -90,11 +95,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
               {mode.error && <div className="px-2 py-1.5 text-xs text-destructive" role="alert">{mode.error}</div>}
               {mode.savedAt && <div className="px-2 py-1.5 text-xs text-muted-foreground" role="status">{mode.checked ? mode.on : mode.off} · saved <time dateTime={mode.savedAt.toISOString()}>{timeLabel(mode.savedAt.toISOString())}</time></div>}
             </div>)}
-            {confirmation !== null && <div className="mt-1 flex flex-wrap gap-2 border-t bg-muted p-2" role="region" aria-labelledby="page-chat-effect">
-              <p className="basis-full text-sm" id="page-chat-effect">{modes[confirmation].checked ? modes[confirmation].disable : modes[confirmation].enable}?</p>
-              <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}><Button ref={confirm} role="button" size="sm" type="button" onClick={() => { const mode = modes[confirmation]; finishConfirmation(); if (!reason(mode)) mode.action?.(); }}>confirm</Button></DropdownMenuItem>
-              <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}><Button role="button" variant="outline" size="sm" type="button" onClick={finishConfirmation}>keep current</Button></DropdownMenuItem>
-            </div>}
+            {confirmation !== null && confirmationRow(modes[confirmation])}
           </DropdownMenuContent>
         </DropdownMenu>
         {close && <Button variant="ghost" size="icon-lg" className="size-11" type="button" ref={closeRef} aria-label="close page chat" onClick={close}><X aria-hidden="true" /></Button>}

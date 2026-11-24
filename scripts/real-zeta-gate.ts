@@ -717,7 +717,7 @@ with _database() as db:
       await gateWait.playwright(tab, "waitForFunction", () => {
         const sheet = document.querySelector<HTMLElement>("#page-chat-sheet");
         if (!matchMedia("(width < 1280px)").matches) return false;
-        return !sheet && !document.querySelector('[data-slot="sheet-overlay"]');
+        return !!sheet && sheet.inert && !sheet.hasAttribute('role') && getComputedStyle(sheet).visibility === 'hidden' && !document.querySelector('[data-page-chat-backdrop]');
       });
     };
     const checkOpen = async (via: NonNullable<typeof opener>) => {
@@ -834,7 +834,7 @@ with _database() as db:
             const style = getComputedStyle(element);
             return { transform: style.transform, right: element.getBoundingClientRect().right };
           });
-          return sidebar.right <= 0 && sidebar.transform !== "matrix(1, 0, 0, 1, 0, 0)" && !await page.locator("[data-page-chat-surface]").count();
+          return sidebar.right <= 0 && sidebar.transform !== "matrix(1, 0, 0, 1, 0, 0)" && !await page.locator("[data-page-chat-surface]:visible").count();
         }, "mobile overlays settled");
         await waitFor(async () => await target.evaluate((element) => {
           element.scrollIntoView({ block: "center", inline: "nearest" });
@@ -1928,7 +1928,7 @@ with _database() as db:
       const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
       const textFit = Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && (renderedStyle?.overflowY === "visible" || rendered.scrollHeight <= rendered.clientHeight));
       const numericFit = !numeric || Boolean(rendered && rendered.innerText.length <= (scientific ? 7 : 5));
-      const overlays = ["[data-page-chat-bar]", "[data-page-chat-drawer]", "[data-slot=sheet-overlay]", "[data-page-chat-surface]"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
+      const overlays = ["[data-page-chat-bar]", "[data-page-chat-backdrop]", "[data-page-chat-surface]"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return node && getComputedStyle(node).visibility === "visible" && box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
       return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector("[data-record-mark]")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted: painted && { ...painted, top: painted.top + pane.scrollTop, bottom: painted.bottom + pane.scrollTop }, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
@@ -1982,10 +1982,10 @@ with _database() as db:
       const targetBox = target?.getBoundingClientRect();
       const point = targetBox ? { x: (Math.max(0, targetBox.left) + Math.min(innerWidth, targetBox.right)) / 2, y: (Math.max(0, targetBox.top) + Math.min(innerHeight, targetBox.bottom)) / 2 } : null;
       const hit = point ? document.elementFromPoint(point.x, point.y) : null;
-      const overlays = ["[data-page-chat-bar]", "[data-page-chat-drawer]", "[data-slot=sheet-overlay]", "[data-page-chat-surface]"].flatMap((selector) => {
+      const overlays = ["[data-page-chat-bar]", "[data-page-chat-backdrop]", "[data-page-chat-surface]"].flatMap((selector) => {
         const element = document.querySelector<HTMLElement>(selector);
         const rect = element?.getBoundingClientRect();
-        return element && rect && rect.width > 0 && rect.height > 0 ? [{ selector, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left } }] : [];
+        return element && getComputedStyle(element).visibility === "visible" && rect && rect.width > 0 && rect.height > 0 ? [{ selector, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left } }] : [];
       });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       return {
@@ -2020,7 +2020,7 @@ with _database() as db:
         paneWidth: pane.getBoundingClientRect().width,
         railWidth: rail.getBoundingClientRect().width,
         divider: getComputedStyle(rail).borderLeftWidth,
-        modal: Boolean(rail.querySelector('[role="dialog"], [aria-modal], [data-slot=sheet-overlay], [aria-label="close page chat"]')),
+        modal: Boolean(rail.querySelector('[role="dialog"], [aria-modal], [data-page-chat-backdrop], [aria-label="close page chat"]')),
         composers: rail.querySelectorAll("#message-composer").length,
         overflow: document.documentElement.scrollWidth > innerWidth,
       };
@@ -2040,6 +2040,25 @@ with _database() as db:
   });
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
     throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
+  const pendingMobilePrompt = "first message while page chat closes";
+  const queuedMobilePrompt = "queued message while page chat is closed";
+  let holdMobileSend = false;
+  let releaseMobileSend: (() => void) | undefined;
+  let queuedMobileSent = false;
+  await page.routeWebSocket(url => url.hostname === "127.0.0.1", socket => {
+    const server = socket.connectToServer();
+    socket.onMessage(message => {
+      const frame = typeof message === "string" ? JSON.parse(message) : null;
+      if (frame?.method === "send" || frame?.method === "steer") {
+        if (holdMobileSend && frame.params?.text === pendingMobilePrompt) {
+          releaseMobileSend = () => server.send(message);
+          return;
+        }
+        if (frame.params?.text === queuedMobilePrompt) queuedMobileSent = true;
+      }
+      server.send(message);
+    });
+  });
   await page.reload();
   await setupMobileSheet(page, 760, "button");
   await setupMobileSheet(page, 760, "resize");
@@ -2048,18 +2067,40 @@ with _database() as db:
   const beforeClosing = await fieldInSheet.inputValue();
   await fieldInSheet.fill("unsent mobile sheet draft");
   await page.getByRole("button", { name: "close page chat", exact: true }).click();
-  await gateWait.playwright(fieldInSheet, "waitFor", { state: "detached" });
+  await gateWait.playwright(fieldInSheet, "waitFor", { state: "hidden" });
   await pageChatBar.click();
   await gateWait.playwright(fieldInSheet, "waitFor", { state: "visible" });
   if (await fieldInSheet.inputValue() !== "unsent mobile sheet draft") throw new Error("closing page chat lost an unsent draft");
+  holdMobileSend = true;
+  try {
+    await fieldInSheet.fill(pendingMobilePrompt);
+    await fieldInSheet.press("Enter");
+    await waitFor(async () => !!releaseMobileSend, "mobile page chat first send is still in flight");
+    await fieldInSheet.fill(queuedMobilePrompt);
+    await fieldInSheet.press("Enter");
+    const queued = page.locator('[data-part="composer-queued"]').filter({ hasText: queuedMobilePrompt });
+    await gateWait.playwright(queued, "waitFor", { state: "visible" });
+    await page.getByRole("button", { name: "close page chat", exact: true }).click();
+    await gateWait.playwright(fieldInSheet, "waitFor", { state: "hidden" });
+    if (queuedMobileSent) throw new Error("mobile page chat sent the queued message before releasing the in-flight send");
+    holdMobileSend = false;
+    releaseMobileSend!();
+    releaseMobileSend = undefined;
+    await waitFor(async () => queuedMobileSent, "queued delivery continues while mobile page chat stays closed");
+    await pageChatBar.click();
+    await gateWait.playwright(fieldInSheet, "waitFor", { state: "visible" });
+  } finally {
+    holdMobileSend = false;
+    releaseMobileSend?.();
+  }
   await fieldInSheet.fill(beforeClosing);
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
-  const backdropTabIndex = await page.locator("[data-slot=sheet-overlay]").evaluate((element) => (element as HTMLElement).tabIndex);
+  const backdropTabIndex = await page.locator("[data-page-chat-backdrop]").evaluate((element) => (element as HTMLElement).tabIndex);
   if (backdropTabIndex >= 0) throw new Error(`page chat backdrop is in sequential focus order: tabIndex=${backdropTabIndex}`);
   await page.keyboard.press("Tab");
   if (!await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement)))
     throw new Error("390px page chat real Tab escaped the modal sheet");
-  if (await page.locator("[data-slot=sheet-overlay]").evaluate((element) => element === document.activeElement))
+  if (await page.locator("[data-page-chat-backdrop]").evaluate((element) => element === document.activeElement))
     throw new Error("390px page chat real Tab focused the backdrop");
   const timelineHeight = await page.locator("[data-page-chat-surface] [data-chat-transcript]").evaluate((element) => element.clientHeight);
   if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
@@ -2106,7 +2147,7 @@ with _database() as db:
     return {
       error: null,
       point,
-      hit: hit ? { tag: hit.tagName, id: hit.id, className: hit.className, backdrop: hit.matches("[data-slot=sheet-overlay]"), backgroundControl: Boolean(hit.closest("[data-record-form-actions] button")) } : null,
+      hit: hit ? { tag: hit.tagName, id: hit.id, className: hit.className, backdrop: hit.matches("[data-page-chat-backdrop]"), backgroundControl: Boolean(hit.closest("[data-record-form-actions] button")) } : null,
       dialog: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, modal: dialog.matches(":modal") },
       surface: surface ? { left: surface.left, top: surface.top, right: surface.right, bottom: surface.bottom } : null,
       animations,
@@ -2119,7 +2160,7 @@ with _database() as db:
     throw new Error(`page chat backdrop click point landed inside the sheet: ${JSON.stringify(outsideClick)}`);
   const pathBeforeOutsideClick = new URL(page.url()).pathname;
   await page.evaluate(() => {
-    const backdrop = document.querySelector<HTMLButtonElement>("[data-slot=sheet-overlay]");
+    const backdrop = document.querySelector<HTMLButtonElement>("[data-page-chat-backdrop]");
     if (!backdrop) throw new Error("page chat backdrop disappeared before click");
     (window as typeof window & { __pageChatBackdropClick?: { target: string; backdrop: boolean } }).__pageChatBackdropClick = { target: "", backdrop: false };
     backdrop.addEventListener("click", (event) => {

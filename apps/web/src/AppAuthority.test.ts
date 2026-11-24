@@ -194,9 +194,34 @@ const insert = { description: "Add a book", name: "add_book", operation: "insert
 const records = { tool: insert, page: { layout: { blocks: [{ type: "form", title: "add book", tool: insert.name }, { type: "list", title: "books", collection: "books" }] } } };
 const docked: Options = { ...records, attached: true };
 const openPageChat = async (app: RenderResult) => {
-  const trigger = app.queryByRole("button", { name: /^Page chat/i });
+  const trigger = app.container.querySelector("[data-page-chat-bar]");
   if (trigger?.matches('[data-page-chat-bar]') && trigger.getAttribute("aria-expanded") === "false") await click(trigger);
 };
+test("mobile page chat drains a queued delivery without reopening", async () => {
+  let release!: (value: object) => void;
+  const messages: unknown[] = [];
+  const pending = new Promise<object>((resolve) => { release = resolve; });
+  const accepted = { result: { accepted: true } };
+  const send = (params: Record<string, unknown>) => {
+    messages.push(params.text);
+    return messages.length === 1 ? pending : accepted;
+  };
+  try {
+    await withApp("controller", { ...docked, rpc: { send, steer: send } }, async (app) => {
+      await openPageChat(app);
+      const field = app.getByRole("textbox", { name: "message" });
+      await change(field, "in flight");
+      await keydown(field, "Enter");
+      expect(messages).toEqual(["in flight"]);
+      await change(field, "queued while open");
+      await keydown(field, "Enter");
+      expect(messages).toEqual(["in flight"]);
+      await click(app.getByRole("button", { name: "close page chat" }));
+      await act(async () => release(accepted));
+      await waitFor(() => expect(messages).toEqual(["in flight", "queued while open"]));
+    });
+  } finally { release(accepted); }
+});
 const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row => ({ kind: "visible", options, check: async (app, authority, writes) => {
   await openPageChat(app);
   if (id !== "page-chat.new") await click(app.getByRole("button", { name: "page chat options" }));

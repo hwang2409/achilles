@@ -11,7 +11,15 @@ export function ToolDisclosure({ sessionId, children }: { sessionId: string; chi
 }
 
 function readText(source: ToolBodyProps["output"]): string {
-  return Array.from(source.chunks()).join("");
+  const cut = source.omission;
+  let head = "", tail = "";
+  for (const chunk of source.chunks()) {
+    if (cut && chunk.start >= cut.end) tail += chunk.text;
+    else head += chunk.text;
+  }
+  const appendLine = (text: string, line: string) => text + (text && !text.endsWith("\n") ? "\n" : "") + line;
+  const text = cut ? appendLine(head, `${cut.bytes} bytes not kept`) + (tail ? `\n${tail}` : "") : head;
+  return source.protocolTruncated ? appendLine(text, "host did not provide the complete output") : text;
 }
 
 export function CompactTool({ id }: { id: string }) {

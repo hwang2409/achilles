@@ -1,7 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { Ellipsis } from "lucide-react";
@@ -9,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AccountSwitchReceipt } from "./accounts/AccountSwitchReview";
 import type { createAccountLogin } from "./accounts/accountLogin";
 import { PageChatHeader } from "./PageChatHeader";
-import { createContext, useCallback, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
+import { createContext, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
@@ -33,7 +32,7 @@ import { HistoryDialog } from "./page/HistoryDialog";
 import { useRecordWrites } from "./page/RecordForm";
 import { PageView } from "./page/PageView";
 import { EmptyChat } from "./EmptyChat";
-import { isEditableTarget, keyboardFocusToComposer } from "./keyboard";
+import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
@@ -83,15 +82,14 @@ type ComposerActivity = { sending: boolean; queued: number; failed: boolean; hel
 
 const PAGE_CHAT_SHEET_QUERY = "(width < 1280px)";
 
-function usePageChatSheet(resizeComposerFocus: { current: boolean }) {
+function usePageChatSheet() {
   const [open, setOpen] = useState(false);
   const [matches, setMatches] = useState(() => matchMedia(PAGE_CHAT_SHEET_QUERY).matches);
   useEffect(() => {
     const media = matchMedia(PAGE_CHAT_SHEET_QUERY);
     const update = () => {
       // Keep the live composer in view when its rail becomes a modal sheet.
-      resizeComposerFocus.current = media.matches && Boolean(document.activeElement?.closest("[data-page-chat-docked] #message-composer"));
-      setOpen(resizeComposerFocus.current);
+      setOpen(media.matches && Boolean(document.activeElement?.closest("[data-page-chat-docked] #message-composer")));
       setMatches(media.matches);
     };
     setMatches(media.matches);
@@ -252,13 +250,14 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
   const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  const resizeComposerFocus = useRef(false);
-  const { narrow, open: mobileChatOpen, setOpen: setMobileChatOpen } = usePageChatSheet(resizeComposerFocus);
+  const { narrow, open: mobileChatOpen, setOpen: setMobileChatOpen } = usePageChatSheet();
   const mobilePageChat = narrow && hasBlocks;
   const pageChatSheetOpen = mobilePageChat && mobileChatOpen;
   const pageChatButton = useRef<HTMLButtonElement | null>(null);
   const pageChatClose = useRef<HTMLButtonElement | null>(null);
-  const sheetScroll = useRef<{ store: typeof store; top: number } | null>(null);
+  const pageChatSurface = useRef<HTMLElement>(null);
+  const mobileChatWasOpen = useRef(false);
+  const sheetClosed = mobilePageChat && !pageChatSheetOpen;
   const [pageChatFocusRequest, setPageChatFocusRequest] = useState(0);
   const [transcript, setTranscript] = useState<HTMLElement | null>(null);
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
@@ -315,17 +314,23 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     setPageChatFocusRequest((value) => value + 1);
     if (mobilePageChat) { setMobileChatOpen(true); }
   };
-  const transcriptNode = useRef<HTMLElement | null>(null);
-  const attachTranscript = useCallback((node: HTMLElement | null) => {
-    if (!node) {
-      // Preserve the reading position across the desktop rail and the modal Sheet.
-      const scroll = transcriptNode.current?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
-      if (scroll) sheetScroll.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 1
-        ? { store, top: scroll.scrollTop } : null;
+  useModalFocus(pageChatSheetOpen, pageChatSurface, pageChatClose, true);
+  useEffect(() => {
+    if (!pageChatSheetOpen) {
+      if (mobileChatWasOpen.current && mobilePageChat) pageChatButton.current?.focus();
+      mobileChatWasOpen.current = false;
+      return;
     }
-    transcriptNode.current = node;
-    setTranscript(node);
-  }, [store]);
+    mobileChatWasOpen.current = true;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.composedPath().some((node) => node instanceof HTMLElement && node.matches('[data-page-chat-popup], [data-slot="dialog-content"], [data-slot="alert-dialog-content"]'))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setMobileChatOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [pageChatSheetOpen, mobilePageChat, setMobileChatOpen]);
   // layout effect: the reset for a new store lands before paint, so the previous chat's control never shows for a frame
   useLayoutEffect(() => {
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
@@ -340,10 +345,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     };
     scroll.addEventListener("keydown", arrows);
     const stop = watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
-    const saved = sheetScroll.current;
-    sheetScroll.current = null;
-    const restore = saved?.store === store ? requestAnimationFrame(() => scroll.scrollTo({ top: saved.top, behavior: "auto" })) : undefined;
-    return () => { if (restore !== undefined) cancelAnimationFrame(restore); scroll.removeEventListener("keydown", arrows); stop(); };
+    return () => { scroll.removeEventListener("keydown", arrows); stop(); };
   }, [store, transcript]);
   const authErrorId = useSyncExternalStore(store?.subscribe ?? (() => () => {}), () => authErrorRow(store));
   const lastState = activeLastState(waiting, authErrorId ? "failed" : outcome, turn);
@@ -418,7 +420,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     },
   } : undefined;
   const chatPane = activePage && (ready ?? empty) && <>
-        {hasBlocks && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
+        {hasBlocks && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${sheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
           onSelect={active.selectChat} newChat={newPageChatReason ? undefined : active.newChat} newReason={canWrite ? newPageChatReason : undefined}
           approval={{ checked: (activePage.approval_mode ?? "allow") === "allow", action: canWrite ? active.toggleApprovalMode : undefined,
             reason: !canWrite ? readOnlyReason : (ready ?? empty)?.serverApprovalMode === "ask" ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
@@ -428,7 +430,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
             pending: createMode?.pending ? "saving…" : undefined, error: createMode?.error,
             savedAt: createReceipt?.pageId === activePage.id && createReceipt?.sessionId === ready?.sessionId && createReceipt?.enabled === activePage.create_mode ? createReceipt.at : undefined }}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
-        <section ref={ready ? attachTranscript : undefined} className="relative isolate flex min-h-0 flex-1 flex-col overflow-hidden" data-chat-transcript="" data-follow-request={followRequest}>{active.creatingChat ? <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 overflow-auto p-4 sm:p-8"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div className="flex h-12 shrink-0 items-center justify-end px-[max(12px,calc((100%-944px)/2))]" data-part="jump-to-latest-lane" data-jump-owned="true"><Button variant="outline" className="max-[480px]:size-11 max-[480px]:p-0" type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="relative isolate flex min-h-0 flex-1 flex-col overflow-hidden" data-chat-transcript="" data-follow-request={followRequest}>{active.creatingChat ? <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 overflow-auto p-4 sm:p-8"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div className="flex h-12 shrink-0 items-center justify-end px-[max(12px,calc((100%-944px)/2))]" data-part="jump-to-latest-lane" data-jump-owned="true"><Button variant="outline" className="max-[480px]:size-11 max-[480px]:p-0" type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
@@ -453,17 +455,14 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       : !activePage || !activeStore ? <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 overflow-auto p-4 sm:p-8"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <Button type="button" onClick={active.retryAttachment}>Retry</Button>}</div>
       : <RunProvider store={activeStore}>
         <div data-page-view="" data-docked={hasBlocks || undefined} className={cn("flex min-h-0 min-w-0 flex-auto flex-col", hasBlocks && "min-[1280px]:grid min-[1280px]:grid-cols-[minmax(0,1fr)_360px] min-[1280px]:grid-rows-[minmax(0,1fr)]")}>
-          {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
+          {hasBlocks && <div data-page-reading="" className="flex min-h-0 min-w-0 flex-1 flex-col" inert={pageChatSheetOpen} aria-hidden={pageChatSheetOpen || undefined}><PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} /></div>}
+          {mobilePageChat && <Button variant="secondary" ref={pageChatButton} data-page-chat-bar="" aria-controls="page-chat-sheet" aria-expanded={pageChatSheetOpen} inert={pageChatSheetOpen} className="h-14 w-full shrink-0 justify-between rounded-none border-t px-4" type="button" onClick={() => setMobileChatOpen(true)}><span>Page chat</span>{state !== "idle" && <span className="ml-auto text-xs text-muted-foreground">{stateLabel}</span>}<span aria-hidden="true">⌃</span></Button>}
+          {pageChatSheetOpen && <div data-page-chat-backdrop="" className="fixed inset-0 z-40 bg-black/50" aria-hidden="true" onClick={() => setMobileChatOpen(false)} />}
           <ToolDisclosure sessionId={ready?.sessionId ?? ""}>
-            {mobilePageChat ? <Sheet open={pageChatSheetOpen} onOpenChange={setMobileChatOpen}>
-              <SheetTrigger asChild><Button variant="secondary" ref={pageChatButton} data-page-chat-bar="" className="h-14 w-full justify-between rounded-none border-t px-4" type="button"><span>Page chat</span>{state !== "idle" && <span className="ml-auto text-xs text-muted-foreground">{stateLabel}</span>}<span aria-hidden="true">⌃</span></Button></SheetTrigger>
-              <SheetContent id="page-chat-sheet" aria-modal="true" data-page-chat-surface="" data-page-chat-docked="" side="bottom" showCloseButton={false} aria-describedby={undefined} className="h-[clamp(min(320px,100dvh),66.666dvh,640px)] gap-0 motion-reduce:animate-none"
-                onOpenAutoFocus={(event) => { event.preventDefault(); const composer = resizeComposerFocus.current && document.querySelector<HTMLElement>('#page-chat-sheet #message-composer textarea'); resizeComposerFocus.current = false; (composer || pageChatClose.current)?.focus({ preventScroll: true }); }}
-                onCloseAutoFocus={(event) => { event.preventDefault(); pageChatButton.current?.focus({ preventScroll: true }); }}>
-                <SheetTitle className="sr-only">page chat</SheetTitle>
-                {chatPane}
-              </SheetContent>
-            </Sheet> : <div id={hasBlocks ? "page-chat-sheet" : undefined} data-page-chat-surface="" data-page-chat-docked={hasBlocks || undefined} className={cn("flex min-h-0 min-w-0 flex-auto flex-col", hasBlocks && "border-l [overflow-wrap:anywhere]")}>{chatPane}</div>}
+            <aside ref={pageChatSurface} id={hasBlocks ? "page-chat-sheet" : undefined} data-page-chat-surface="" data-page-chat-docked={hasBlocks || undefined} role={pageChatSheetOpen ? "dialog" : undefined} aria-modal={pageChatSheetOpen || undefined} aria-label={pageChatSheetOpen ? "page chat" : undefined} aria-hidden={sheetClosed || undefined} inert={sheetClosed}
+              className={cn("flex min-h-0 min-w-0 flex-auto flex-col bg-background", hasBlocks && "[overflow-wrap:anywhere]", hasBlocks && !mobilePageChat && "border-l", mobilePageChat && "fixed inset-x-0 bottom-0 z-50 h-[clamp(min(320px,100dvh),66.666dvh,640px)] border-t shadow-lg", sheetClosed && "invisible pointer-events-none")}>
+              {chatPane}
+            </aside>
           </ToolDisclosure>
         </div>
       </RunProvider>}

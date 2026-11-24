@@ -78,6 +78,12 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
     <Button variant="outline" size="sm" type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={!canWrite} title={!canWrite ? disabledReason : undefined} aria-describedby={`${key}-ask`} onClick={run}>confirm</Button>
     <Button variant="outline" size="sm" type="button" onClick={cancelPending}>cancel</Button>
   </li>;
+  const versionRow = (key: string, row: { version: number; active: boolean; created_at: string }, detail: string, blocked = false) => <li key={row.version} data-row={key} className="grid min-h-11 grid-cols-[3em_minmax(0,1fr)_auto] items-center gap-x-3 border-t py-1 first:border-t-0 sm:grid-cols-[3.5em_minmax(0,1fr)_auto_6.5em] max-sm:[&>button]:col-start-3 max-sm:[&>button]:row-span-2 max-sm:[&>button]:row-start-1 max-sm:[&>time]:col-start-2 max-sm:[&>time]:row-start-2">
+    <span className="font-semibold tabular-nums">v{row.version}</span>
+    <span className="truncate text-muted-foreground">{detail}</span>
+    <time className="text-xs text-muted-foreground tabular-nums" dateTime={row.created_at}>{when(row.created_at)}</time>
+    {button(key, row, blocked)}
+  </li>;
   return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
     <DialogContent ref={dialog} data-page-history="" showCloseButton={false} className="max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto rounded-none p-0 sm:max-w-[600px]"
       onCloseAutoFocus={(event) => { event.preventDefault(); opener.current?.focus(); }}
@@ -97,12 +103,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
               : <ol>{versions.layout.map((row) => {
                 const key = `layout-${row.version}`;
                 if (pending === key) return confirmRow(key, row.version, "layout", () => void restore("layout", `/api/pages/${pageId}/layout/restore`, row.version, activeLayout!));
-                return <li key={row.version} data-row={key} className="grid min-h-11 grid-cols-[3em_minmax(0,1fr)_auto] items-center gap-x-3 border-t py-1 first:border-t-0 sm:grid-cols-[3.5em_minmax(0,1fr)_auto_6.5em] max-sm:[&>button]:col-start-3 max-sm:[&>button]:row-span-2 max-sm:[&>button]:row-start-1 max-sm:[&>time]:col-start-2 max-sm:[&>time]:row-start-2">
-                  <span className="font-semibold tabular-nums">v{row.version}</span>
-                  <span className="truncate text-muted-foreground">{row.restored_from ? `restored from v${row.restored_from} · ` : row.action ? `${actions[row.action] ?? row.action} · ` : ""}{layoutSummary(row.block_types.length, row.summary)}</span>
-                  <time className="text-xs text-muted-foreground tabular-nums" dateTime={row.created_at}>{when(row.created_at)}</time>
-                  {button(key, row, !createMode)}
-                </li>;
+                return versionRow(key, row, `${row.restored_from ? `restored from v${row.restored_from} · ` : row.action ? `${actions[row.action] ?? row.action} · ` : ""}${layoutSummary(row.block_types.length, row.summary)}`, !createMode);
               })}</ol>}
           </section>
           {toolNames.map((name) => {
@@ -113,12 +114,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
               <ol>{rows.map((row) => {
                 const key = `tool-${name}-${row.version}`;
                 if (pending === key) return confirmRow(key, row.version, "version", () => void restore(name, `/api/pages/${pageId}/tools/${encodeURIComponent(name)}/rollback`, row.version, active!));
-                return <li key={row.version} data-row={key} className="grid min-h-11 grid-cols-[3em_minmax(0,1fr)_auto] items-center gap-x-3 border-t py-1 first:border-t-0 sm:grid-cols-[3.5em_minmax(0,1fr)_auto_6.5em] max-sm:[&>button]:col-start-3 max-sm:[&>button]:row-span-2 max-sm:[&>button]:row-start-1 max-sm:[&>time]:col-start-2 max-sm:[&>time]:row-start-2">
-                  <span className="font-semibold tabular-nums">v{row.version}</span>
-                  <span className="truncate text-muted-foreground">{row.restored_from ? `restored from v${row.restored_from}` : ""}</span>
-                  <time className="text-xs text-muted-foreground tabular-nums" dateTime={row.created_at}>{when(row.created_at)}</time>
-                  {button(key, row)}
-                </li>;
+                return versionRow(key, row, row.restored_from ? `restored from v${row.restored_from}` : "");
               })}</ol>
             </section>;
           })}
