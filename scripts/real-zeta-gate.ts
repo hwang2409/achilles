@@ -763,7 +763,7 @@ with _database() as db:
     const row = state === "switcher" ? tab.getByRole("option", { selected: true }) : modeItem(tab, "create mode");
     if (state === "confirmation") await row.click();
     const focused = state === "confirmation" ? tab.getByRole("button", { name: "confirm", exact: true }) : row;
-    if (!await focused.evaluate((node) => node === document.activeElement)) throw new Error("page chat popup did not take focus on open");
+    await waitFor(() => focused.evaluate((node) => node === document.activeElement), `${state} takes focus on open`);
     if (await tab.locator("#message-composer").count() !== 1) throw new Error("page chat popup duplicated the composer");
     if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, `s2-header-${state}-390.png`), animations: "disabled" });
     if (state === "confirmation") {
@@ -771,7 +771,8 @@ with _database() as db:
       if (await focused.count() || !await row.evaluate((node) => node === document.activeElement)) throw new Error("first Escape did not cancel only the confirmation and restore its row");
     }
     await tab.keyboard.press("Escape");
-    if (await trigger.getAttribute("aria-expanded") !== "false" || !await trigger.evaluate((node) => node === document.activeElement)) throw new Error("popup Escape did not close only the popup and restore its trigger");
+    if (await trigger.getAttribute("aria-expanded") !== "false") throw new Error("popup Escape did not close the popup");
+    await waitFor(() => trigger.evaluate((node) => node === document.activeElement), `${state} Escape returns focus to the trigger`);
     await tab.keyboard.press("Escape");
     await gateWait.playwright(dialog, "waitFor", { state: "hidden" });
     if (!await bar.evaluate((node) => node === document.activeElement)) throw new Error("sheet Escape did not restore focus to the page chat bar");
