@@ -16,8 +16,6 @@
 .vim-composer .cm-editor.cm-focused { outline: none; }
 .vim-composer .cm-scroller { overflow: auto; font: inherit; }
 .vim-composer .cm-content {
-  min-height: calc(22px + 2 * var(--inset));
-  padding: var(--inset);
   caret-color: var(--fulcrum-accent);
   font: inherit;
   line-height: 22px; /* the plain textarea's line height, so multi-line drafts are the same height in both modes */

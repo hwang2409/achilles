@@ -60,7 +60,7 @@
 /* the editor sits over the hidden title in one grid cell, so the row keeps its height and its meta column */
 .chat-row.editing { display: grid; }
 .chat-row.editing > strong { grid-area: 1 / 1; visibility: hidden; }
-.chat-row-edit { grid-area: 1 / 1; align-self: stretch; box-sizing: border-box; width: calc(100% + 10px); min-width: 0; margin: 0 -5px; padding: 0 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: inherit; color: inherit; }
+.chat-row-edit { grid-area: 1 / 1; align-self: stretch; box-sizing: border-box; width: calc(100% + 2 * var(--chat-row-inset)); min-width: 0; margin: 0 calc(-1 * var(--chat-row-inset)); padding: 0 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: inherit; color: inherit; }
 .load-older { width: calc(100% - 32px); height: 40px; margin: 12px 16px; }
 .sidebar-skeleton { padding: 8px 16px; }
 .search-skeleton { min-height: 36px; }
