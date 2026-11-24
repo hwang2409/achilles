@@ -137,7 +137,8 @@ export async function gateShell(
     if (await modeMenu.getByRole("menuitemcheckbox").count() !== 2) throw new Error("docked chat menu must expose exactly the two mode changes");
     await capture("09-narrow-chat-menu-review-390x844.png");
     await page.keyboard.press("Escape");
-    if (await modeMenu.count()) throw new Error("escape did not close the docked chat menu");
+    await gateWait.playwright(modeMenu, "waitFor", { state: "hidden" });
+    if (await overflow.getAttribute("aria-expanded") !== "false") throw new Error("escape did not close the docked chat menu");
     await page.keyboard.press("Escape");
   } else {
     const overflow = page.getByRole("button", { name: "chat options" });
