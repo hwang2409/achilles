@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { DetailRecord, type DetailFilter } from "../DetailRecord";
 import { FormBlock, refreshSelection, selectRow, useRecordWrites, useSelectedRow } from "./RecordForm";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./listColumns";
@@ -182,10 +182,12 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   const listName = collection?.replace(/[_-]+/g, " ").toLowerCase() || "records";
   const itemName = listName === "books" ? "book" : listName === "notes" ? "note" : "record";
   const ask = () => onAskChat?.(`add a ${itemName} to this page`);
-  const add = () => insertCapability?.focusFirst();
+  const add = !loading && !error && !projection.loaded.length && insertCapability
+    ? <button className="ui-button" type="button" onClick={insertCapability.focusFirst}>Add a {itemName}</button>
+    : null;
   return <section className="record-list" data-collection={collection} aria-busy={loading}>
-    <RecordListHeader title={title} loading={loading} error={error} total={total} hasRecords={projection.loaded.length > 0} />
-    {(!error && !loading && projection.loaded.length === 0 || error || loading) && <RecordListState error={error} loading={loading} listName={listName} itemName={itemName} onRetry={retry} onAskChat={onAskChat} ask={ask} insertCapability={insertCapability} add={add} />}
+    <RecordListHeader title={title} loading={loading} error={error} total={total} hasRecords={projection.loaded.length > 0} action={onAskChat ? add : null} />
+    {(!error && !loading && projection.loaded.length === 0 || error || loading) && <RecordListState error={error} loading={loading} listName={listName} itemName={itemName} onRetry={retry} onAskChat={onAskChat} ask={ask} add={add} />}
     {!error && !loading && projection.loaded.length > 0 && <>
       <LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />
       {projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}
@@ -193,14 +195,14 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   </section>;
 }
 
-function RecordListHeader({ title, loading, error, total, hasRecords }: { title: string; loading: boolean; error: string | null; total: number; hasRecords: boolean }) {
-  return <header><h2>{title}{loading ? " loading…" : error ? "" : <> <span className="record-count ui-meta">{total.toLocaleString()}</span></>}</h2>{!loading && !error && hasRecords && <span>sorted by updated</span>}</header>;
+function RecordListHeader({ title, loading, error, total, hasRecords, action }: { title: string; loading: boolean; error: string | null; total: number; hasRecords: boolean; action: ReactNode }) {
+  return <header><h2>{title}{loading ? " loading…" : error ? "" : <> <span className="record-count ui-meta">{total.toLocaleString()}</span></>}</h2>{!loading && !error && hasRecords && <span>sorted by updated</span>}{action}</header>;
 }
 
-function RecordListState({ error, loading, listName, itemName, onRetry, onAskChat, ask, insertCapability, add }: { error: string | null; loading: boolean; listName: string; itemName: string; onRetry: () => void; onAskChat?: (draft: string) => void; ask: () => void; insertCapability?: InsertCapability; add: () => void }) {
+function RecordListState({ error, loading, listName, itemName, onRetry, onAskChat, ask, add }: { error: string | null; loading: boolean; listName: string; itemName: string; onRetry: () => void; onAskChat?: (draft: string) => void; ask: () => void; add: ReactNode }) {
   if (error) return <div className="record-list-error ui-empty" role="alert"><strong>could not load {listName}</strong><p>{listName} request failed: {error}. your data is safe; nothing was changed.</p><div className="record-list-actions"><button type="button" onClick={onRetry}>try again</button>{onAskChat && <button type="button" className="record-list-chat" onClick={() => onAskChat(`help me understand why the ${listName} list could not load: ${error}`)}>ask the chat why</button>}</div></div>;
   if (loading) return <div className="record-list-skeleton" role="status" aria-label="loading records">{[0, 1, 2, 3, 4].map((row) => <span key={row} aria-hidden="true" />)}</div>;
-  return <div className="ui-empty record-list-empty"><strong>No {listName} yet</strong><p>{insertCapability ? "Add the first entry to this list." : onAskChat ? "Ask the page chat to add the first entry." : "New entries will appear here."}</p><div className="record-list-actions">{insertCapability ? <button className="ui-button" type="button" onClick={add}>Add {itemName === "record" ? "a record" : `a ${itemName}`}</button> : onAskChat && <button type="button" className="ui-button" onClick={ask}>Ask the chat</button>}</div></div>;
+  return <div className="ui-empty record-list-empty"><strong>No {listName} yet</strong><p>{onAskChat ? "Ask the page chat to add the first entry." : add ? "Add the first entry to this list." : "New entries will appear here."}</p><div className="record-list-actions">{onAskChat ? <button type="button" className="ui-button" onClick={ask}>Ask the chat</button> : add}</div></div>;
 }
 
 type RecordListProjection = { loaded: Record<string, unknown>[]; visible: Record<string, unknown>[]; tabStop: unknown; loadedRemaining: number; total: number; showReveal: boolean };

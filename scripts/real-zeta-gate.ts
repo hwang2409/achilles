@@ -1550,6 +1550,12 @@ with _database() as db:
   await addBook.click();
   if (!(await page.locator('.record-form[data-collection="books"][data-operation="insert"] input[name="title"]').evaluate((element) => document.activeElement === element)))
     throw new Error("empty books add action did not focus the insert form");
+  const desktopComposer = page.locator('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
+  await booksList.getByRole("button", { name: "Ask the chat", exact: true }).click();
+  await waitFor(async () => (await desktopComposer.inputValue()) === "add a book to this page", "desktop empty-state chat draft");
+  if (!(await desktopComposer.evaluate((element) => document.activeElement === element))) throw new Error("empty-state chat action did not focus the composer");
+  if ((JSON.parse(await Bun.file(control).text()).requests ?? []).some((request: { method?: string; params?: { text?: string } }) => request.method === "send" && request.params?.text === "add a book to this page")) throw new Error("empty-state chat action sent a message");
+  await desktopComposer.fill("");
   await captureBlockState("a-empty", booksList.locator(".record-list-empty"));
 
   const recordsPattern = `**/api/pages/${createdPage.id}/records/books?*`;
