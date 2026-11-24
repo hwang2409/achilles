@@ -59,7 +59,7 @@ async function capture(tab: Page, dir: string | undefined, index: number) {
   if (!dir) return;
   await Bun.sleep(300); // viewport settlement only; behavior is established by locator/RPC evidence.
   const laidOut = await tab.evaluate(() => document.documentElement.scrollWidth <= innerWidth &&
-    Array.from(document.querySelectorAll("dialog[open] .confirmation-proof, dialog[open] .confirmation-actions")).every((node) => {
+    Array.from(document.querySelectorAll("[data-confirmation] [data-confirmation-proof], [data-confirmation] [data-confirmation-actions]")).every((node) => {
       const box = node.getBoundingClientRect();
       return box.x >= 0 && box.right <= innerWidth && box.y >= 0 && box.bottom <= innerHeight;
     }));

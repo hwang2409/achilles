@@ -345,7 +345,7 @@ try {
     if (await pin() !== "anthropic:failed") throw new Error("switch-then-reply chat did not start pinned to anthropic:failed");
     await capture("auth-card-1440", card);
     await card.getByRole("link", { name: "/accounts", exact: true }).click();
-    const occupied = authPage.getByText(/another tab had control/, { selector: "#account-switch-reason" });
+    const occupied = authPage.locator("#account-switch-reason").filter({ hasText: /another tab had control/ });
     if (await authPage.getByRole("button", { name: "try again", exact: true }).isVisible()) await authPage.getByRole("button", { name: "try again", exact: true }).click();
     await authPage.getByRole("button", { name: "sign in again to anthropic:failed", exact: true }).click();
     const login = authPage.getByRole("alertdialog", { name: "review browser sign-in" });

@@ -121,7 +121,7 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
     await Bun.sleep(300);
     await dialog(tab).locator("form").or(tab.locator("[data-test-result]")).first().waitFor(opts);
     await tab.waitForFunction(async () => {
-      const layout = () => JSON.stringify(document.querySelector("dialog[open], .mcp-test")?.getBoundingClientRect());
+      const layout = () => JSON.stringify(document.querySelector("[data-confirmation], .mcp-test")?.getBoundingClientRect());
       const before = layout();
       await new Promise(requestAnimationFrame);
       return before === layout();

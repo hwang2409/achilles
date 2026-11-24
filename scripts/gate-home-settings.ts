@@ -32,7 +32,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
       // The effective 200% viewport must show the acknowledgement without first scrolling it into view.
       await proof.evaluate((node) => {
         const label = node.closest("label")!.getBoundingClientRect();
-        const footer = node.closest("dialog")!.querySelector("footer")!.getBoundingClientRect();
+        const footer = node.closest("[data-confirmation]")!.querySelector("footer")!.getBoundingClientRect();
         if (label.top < 0 || label.bottom > footer.top) {
           throw new Error(`expected the telemetry acknowledgement to fit above the footer before interaction: label [${label.top}, ${label.bottom}], footer ${footer.top}`);
         }
@@ -51,7 +51,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     // Resize after the result arrives: focus alone does not keep a scroll target in view after reflow.
     await tab.setViewportSize({ width: 390, height: 844 });
     await refusal.evaluate((node) => {
-      const footer = node.closest("dialog")!.querySelector("footer")!;
+      const footer = node.closest("[data-confirmation]")!.querySelector("footer")!;
       const alert = node.getBoundingClientRect();
       const footerTop = footer.getBoundingClientRect().top;
       if (document.activeElement !== node || alert.top < 0 || alert.bottom > footerTop || node.scrollHeight > node.clientHeight) {
