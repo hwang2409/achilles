@@ -12,7 +12,9 @@
 .create-landing form { border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); background: var(--g1-panel); padding: 10px 12px 0; }
 .create-landing textarea { display: block; width: 100%; resize: none; min-height: 56px; padding: 4px 0; color: inherit; background: transparent; border: 0; font: inherit; }
 .create-landing textarea::placeholder { color: var(--g1-fg-3); opacity: 1; }
-.create-landing textarea:focus-visible { outline: var(--g1-focus-ring); }
+/* like the chat composer, focus marks the box border, not the text area inside it */
+.create-landing form:focus-within { border-color: var(--g1-accent); }
+.create-landing textarea:focus-visible { outline: none; }
 .create-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
 .create-form-actions span, .create-build-status { color: var(--fulcrum-muted); font-size: inherit; }
 .create-form-actions button { flex: 0 0 112px; min-height: 36px; white-space: nowrap; background: var(--g1-primary); color: var(--g1-primary-text); padding-inline: 12px; }

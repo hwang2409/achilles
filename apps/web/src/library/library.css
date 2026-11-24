@@ -15,7 +15,7 @@
 .library-layout { flex: 1; display: grid; grid-template-columns: minmax(245px, 37%) minmax(0, 1fr); }
 .library-list { border-right: 1px solid var(--fulcrum-border); min-width: 0; }
 .library-filter { padding: 12px var(--g1-page-gutter); border-bottom: 1px solid var(--g1-rule); }
-.library-filter input { flex: 1; min-width: 0; padding: 0 10px; min-height: 40px; color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
+.library-filter input { flex: 1; min-width: 0; padding: 0 var(--g1-space-2); min-height: 40px; color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
 .library-filter input::placeholder { color: var(--g1-fg-3); opacity: 1; }
 .library-filter span { white-space: nowrap; font-size: inherit; color: var(--fulcrum-muted); }
 .library-group h2 { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; margin: 0; padding: 12px var(--g1-page-gutter) 6px; font-size: inherit; font-weight: 500; color: var(--fulcrum-muted); }
@@ -98,7 +98,7 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor-row > label:has(input:disabled) { color: var(--fulcrum-muted); }
 .library-editor-row small { font-size: inherit; color: var(--fulcrum-muted); }
 .library-editor-row small[data-invalid] { color: var(--fulcrum-danger); }
-.library-editor :where(input:not([type="radio"]), textarea) { min-height: 40px; padding: 6px 10px; color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
+.library-editor :where(input:not([type="radio"]), textarea) { min-height: 40px; padding: 6px var(--g1-space-2); color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
 .library-editor input:disabled { color: var(--fulcrum-muted); }
 .library-editor textarea { min-height: 16lh; resize: vertical; font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; font-variant-ligatures: none; }
 .library-editor :is(input, textarea, button):focus-visible, .library-editor-status:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }

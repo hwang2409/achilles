@@ -71,7 +71,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       </div>
       <div className="surface-search">
         {search}
-        <button className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><span aria-hidden="true"><NavIcon d="M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l3.5 3.5" /></span><kbd>{modKey("K")}</kbd></button>
+        <button className="palette-button" aria-label="command palette" title="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><span aria-hidden="true"><NavIcon d="M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l3.5 3.5" /></span><kbd>{modKey("K")}</kbd></button>
       </div>
       <div className="sidebar-destinations">
         <nav className="place-nav" aria-label="places">
@@ -83,7 +83,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       </div>
     </div>
     {!narrow && <footer>
-      <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span></button>
+      <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} title={collapsed ? "expand sidebar" : undefined} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span></button>
     </footer>}
   </aside>;
 }

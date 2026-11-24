@@ -90,8 +90,8 @@
 .agents-spawn > small { margin-inline-start: var(--g1-space-2); }
 .agents-spawn-form { display: grid; gap: var(--g1-space-2); justify-items: start; max-inline-size: 44rem; margin-block-start: var(--g1-space-2); }
 .agents-spawn-form label { display: grid; gap: var(--g1-space-1); width: 100%; }
-.agents-spawn-form :is(select, textarea) { width: 100%; padding-block: var(--g1-space-2); }
-.agents-spawn-form textarea { resize: vertical; }
+.agents-spawn-form :is(select, textarea) { width: 100%; }
+.agents-spawn-form textarea { resize: vertical; padding-block: var(--g1-space-2); }
 .agents-spawn-form :is(select, textarea), .agents-frame :is(.agents-spawn, .agents-cancel) button { min-height: var(--g1-control-height); border-radius: var(--g1-radius-control); }
 
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {

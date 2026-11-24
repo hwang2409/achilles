@@ -33,7 +33,7 @@ button, input, textarea, select { border-radius: var(--g1-radius-control); }
 @media (max-width: 760px), (pointer: coarse) { :where(.ui-button, .ui-icon-button) { min-height: var(--g1-touch-height); } :where(.ui-icon-button) { min-width: var(--g1-touch-height); } }
 :where(input:not([type="checkbox"], [type="radio"]), textarea, select) {
   background: var(--g1-bg);
-  border: var(--g1-border-width) solid var(--g1-border);
+  border: var(--g1-border-width) solid var(--g1-control-border);
 }
 :where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
 :is(.primary, .ui-button-primary):hover { background-color: color-mix(in srgb, var(--g1-primary) 88%, var(--g1-primary-text)); }

@@ -44,7 +44,7 @@ export function AccountLoginStatus({ attempt, login, available, canSignIn, signI
     effect={reviewText("cancel this pending browser sign-in? a credential commit already in progress may still finish.")}
     execute={async () => { await login.cancel(); return cancelledReview; }} checkResult={async () => cancelledReview} onCommitted={() => {}} />}
   {canSignIn && receipt && ["failed", "blocked", "idle", "contention"].includes(receipt.state)
-    && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
+    && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
       onClick={event => signIn(receipt.target, event.currentTarget)}>try again</button>}
 </section>;
 }

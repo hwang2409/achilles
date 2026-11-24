@@ -67,8 +67,10 @@
 .tm-actions .tm-button { min-height: 44px; }
 
 /* Align the intro and empty copy with the telemetry data. */
-.tm-intro { max-width: 62ch; margin: 0; padding-block: var(--g1-space-4) var(--g1-space-7); }
-.tm-records { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 8px 0; margin-bottom: 24px; }
+/* the first heading sits one page padding under the header, as on every other route */
+.tm-intro { max-width: 62ch; margin: 0; padding-block: 0 var(--g1-space-7); }
+.tm-records { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 0 0 8px; margin-bottom: 24px; }
+.tm-records h2 { margin-top: 0; }
 .tm-records ul { margin: 0; padding: 0; list-style: none; line-height: 1.8; }
 .tm-turn-on p { margin: 0 0 12px; }
 .tm-turn-on pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }

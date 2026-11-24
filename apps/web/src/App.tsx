@@ -460,8 +460,9 @@ export function AgentSurface({ connection, client, connectionState, observerBann
         </div>
       </RunProvider>}
   </>;
-  // a chat on a page that is not home belongs to Pages, as its header crumb says
-  const place = landing ? createRoute : current === createRoute ? chatsRoute : current === chatsRoute && activePage && activePage.route !== "/" ? pagesRoute : current;
+  // a chat on a page that is not home belongs to Pages, as its header crumb says; the address decides, so loading and missing pages agree
+  const onPage = current === chatsRoute && location.pathname !== "/" && location.pathname !== homeAlias;
+  const place = landing ? createRoute : current === createRoute ? chatsRoute : onPage ? pagesRoute : current;
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
     workspace: landing ? undefined : { canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", createMode },
@@ -588,8 +589,8 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, createM
   const autoApprove = page.approval_mode === "allow";
   const foldMarkers = (autoApprove || createMode.enabled) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">Auto<span className="fold-long">-approve</span></span>}{createMode.enabled && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on">Create</span>}</span>;
   const routeLabel = page.route === "/" ? "Home" : page.title;
-  if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {routeLabel} <span aria-hidden="true">/</span></span>{titleNode}</div><div className="chat-actions"><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
-  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel} /</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
+  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {

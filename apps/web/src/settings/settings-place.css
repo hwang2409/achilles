@@ -1,7 +1,7 @@
 .sp { overflow-wrap: anywhere; }
 .sp-content { display: flex; flex-direction: column; gap: var(--g1-space-10); max-width: var(--g1-content-max); min-width: 0; padding: var(--g1-space-8) var(--g1-page-gutter); }
 .sp-content section { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 16px; }
-.sp-content section > button { align-self: flex-start; min-height: 44px; margin-top: 4px; padding-inline: 12px; }
+.sp-content section > button { align-self: flex-start; margin-top: 4px; }
 .sp h2 { margin: 0; font-size: var(--g1-type-title); font-weight: var(--g1-weight-title); line-height: 1.2; }
 .sp h3, .sp-defaults dt { margin: 0; font-size: inherit; font-weight: 600; }
 .sp p { margin: 0; }
@@ -51,4 +51,5 @@
 }
 .sp-switch > [role="alert"] { color: var(--g1-danger); }
 
-.sp :is(.confirmation-trigger, .confirmation-row button) { min-height: var(--g1-touch-height); padding-inline: var(--g1-space-2); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
+.sp :is(.confirmation-trigger, .confirmation-row button) { min-height: var(--g1-control-height); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
+@media (max-width: 760px), (pointer: coarse) { .sp :is(.confirmation-trigger, .confirmation-row button) { min-height: var(--g1-touch-height); } }

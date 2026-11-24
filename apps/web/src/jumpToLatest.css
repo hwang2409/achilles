@@ -1,4 +1,3 @@
-/* keep one bottom lane inside the transcript frame, outside the scrollable timeline rows */
 .transcript {
   display: flex;
   flex-direction: column;
@@ -16,23 +15,27 @@
   min-height: 0;
 }
 .transcript [data-part="jump-to-latest-lane"]:not([data-jump-owned="true"]) { display: none !important; }
+/* the control floats over the transcript's bottom corner, so the rows always run down to the composer */
 .transcript > [data-part="jump-to-latest-lane"] {
-  display: flex;
-  flex: none;
-  min-height: 48px;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 max(12px, calc((100% - var(--g1-content-max)) / 2));
+  position: absolute;
+  z-index: 3;
+  bottom: 8px;
+  right: max(12px, calc((100% - var(--g1-content-max)) / 2));
+  background: var(--g1-bg);
+  border-radius: var(--g1-radius-control);
 }
 .transcript > [data-part="jump-to-latest-lane"] [data-part="jump-to-latest"] {
-  padding: 8px 12px;
-  margin-inline: 0;
+  min-height: var(--g1-control-height);
+  padding: 0 var(--g1-space-3);
+  margin: 0;
   color: var(--g1-fg);
-  background: var(--g1-bg);
-  border: 1px solid var(--g1-control-border);
+  font: inherit;
+  background: transparent;
+  border: 1px solid var(--g1-border);
   border-radius: var(--g1-radius-control);
   white-space: nowrap;
 }
+.transcript > [data-part="jump-to-latest-lane"] [data-part="jump-to-latest"]:hover { background-color: var(--g1-hover); text-decoration: none; }
 [data-jump-label="compact"] { display: none; }
 @media (max-width: 480px) {
   .transcript > [data-part="jump-to-latest-lane"] [data-part="jump-to-latest"] { width: 44px; min-width: 44px; height: 44px; padding: 0; }
