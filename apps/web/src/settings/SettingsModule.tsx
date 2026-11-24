@@ -23,19 +23,19 @@ export function SettingsModule(props: Props) {
       setShown(id);
       document.querySelector<HTMLElement>(`#${id} h2`)?.focus();
     }}>{label}</a>;
-  return <ModuleFrame title="settings">
+  return <ModuleFrame title="Settings" subtitle="Change browser preferences and Zeta defaults.">
     <div className="sp">
       <nav className="sp-subnav" aria-label="settings sections">
         {section("browser", "This browser")}
         {section("zeta-defaults", "Zeta defaults")}
         <a href={surfaceHref("/accounts")}>Accounts <span aria-hidden="true">→</span></a>
-        <a href={surfaceHref(connectionsRoute.path)}>MCP connections <span aria-hidden="true">→</span></a>
+        <a href={surfaceHref(connectionsRoute.path)}>Connections <span aria-hidden="true">→</span></a>
       </nav>
       <div className="sp-content">
         <section id="browser" aria-labelledby="settings-browser">
           <h2 id="settings-browser" tabIndex={-1}>This browser</h2>
           <p className="sp-dim">Theme, fonts, text size, density and Vim mode. They apply to this browser only.</p>
-          <button type="button" onClick={openBrowserSettings}>Display settings</button>
+          <button className="ui-button" type="button" onClick={openBrowserSettings}>Display settings</button>
         </section>
         <section id="zeta-defaults" aria-labelledby="settings-zeta">
           <h2 id="settings-zeta" tabIndex={-1}>Zeta defaults</h2>
@@ -232,14 +232,14 @@ function Defaults({ client }: { client: ZetaClient }) {
   if (defaults === "loading") return <p className="sp-dim" role="status">reading zeta defaults…</p>;
   if ("failed" in defaults) return <p className="sp-note">{defaults.failed}</p>;
   const rows: [string, string, string][] = [
-    ["Model", defaults.model ?? "not set in settings.toml", "change it in the terminal (model in settings.toml). a chat can change its own model."],
-    ["Provider", defaults.provider ?? "not set in settings.toml", "change it in the terminal (provider in settings.toml)."],
-    ["Approval mode", defaults.approval === "allow" ? "allow without asking" : defaults.approval ?? "not set in settings.toml", "change it in the terminal (yolo in settings.toml). a chat can change its own approvals."],
-    ["Agent nesting depth", String(defaults.depth), "change it in the terminal (max_depth under [agents] in settings.toml)."],
+    ["Model", defaults.model ?? "Not set", "model"],
+    ["Provider", defaults.provider ?? "Not set", "provider"],
+    ["Approval mode", defaults.approval === "allow" ? "Allow without asking" : defaults.approval ?? "Not set", "yolo"],
+    ["Agent nesting depth", String(defaults.depth), "agents.max_depth"],
   ];
   return <dl className="sp-defaults">
     {rows.map(([label, value, where]) => <div key={label}>
-      <dt>{label}</dt><dd className="sp-value">{value}</dd><dd className="sp-dim">{where}</dd>
+      <dt>{label}</dt><dd className="sp-value">{value}</dd><dd className="sp-dim">Edit <code>{where}</code> in <code>settings.toml</code>.</dd>
     </div>)}
   </dl>;
 }

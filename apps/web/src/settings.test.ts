@@ -18,8 +18,8 @@ describe("web test isolation", () => {
 });
 
 describe("parseSettings", () => {
-  test("defaults to system appearance, system monospace, and 14px", () => {
-    expect(parseSettings(null)).toMatchObject({ theme: "auto", uiFont: "system", codeFont: "system-mono", size: 14 });
+  test("defaults to system appearance and font, system monospace, and 15px", () => {
+    expect(parseSettings(null)).toMatchObject({ theme: "auto", uiFont: "system", codeFont: "system-mono", size: 15 });
   });
 
   test("replaces old named palettes but still applies v1 font and size choices", () => {

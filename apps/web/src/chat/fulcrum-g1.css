@@ -1,19 +1,23 @@
 /* Host skin for Fulcrum's public parts. Keep its scroll roots, cursor gutter and state text. */
-.transcript [data-part="timeline"] > :is([data-virtual-id], [data-id]) {
-  max-width: var(--g1-transcript-width);
-}
 [data-part="message"] {
-  --fulcrum-measure: var(--g1-transcript-width);
+  --fulcrum-measure: var(--g1-content-max);
 }
 [data-part="message"], [data-part="item"][data-kind="user"] {
   font-size: var(--g1-type-chat);
   line-height: var(--g1-leading-chat);
 }
 [data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
-  border-inline-start-color: var(--g1-selection);
-  font-weight: 500;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  padding: var(--g1-space-2) var(--g1-space-3);
+  border: var(--g1-border-width) solid var(--g1-border);
+  border-radius: var(--g1-radius-control);
+  background: var(--g1-panel);
+  font-weight: 400;
+  overflow-wrap: anywhere;
 }
-[data-part="message-prompt"],
+[data-part="item"][data-kind="user"] > [data-part="delivery-note"] { grid-column: 1; }
+[data-part="message-prompt"] { display: none; }
 [data-part="delivery-note"],
 [data-part="run-end-marker"] {
   font-family: var(--achilles-code-font, var(--g1-font-mono));
@@ -22,12 +26,13 @@
 /* The same card skin applies in live chat and agent timelines. Leave the pinned
    per-tool viewers, syntax colors, and disclosure sizing in charge of their bodies. */
 :is([data-part="tool"], [data-part="approval"]) {
-  border-radius: var(--g1-radius-container);
+  border-width: var(--g1-border-width);
+  border-radius: var(--g1-radius-control);
   box-shadow: var(--g1-shadow-rest);
   font-family: var(--achilles-code-font, var(--g1-font-mono));
   font-size: var(--g1-type-small);
 }
-[data-part="tool"][data-state="done"] { --rail: var(--g1-ok); }
+[data-part="tool"] { border-color: var(--g1-border); }
 [data-part="approval"][data-decision="approve"] { --rail: var(--g1-ok); }
 [data-part="approval"][data-decision="deny"] { --rail: var(--g1-danger); }
 [data-part="tool-header"] {
@@ -60,7 +65,6 @@
 [data-part="approval-actions"] button:focus-visible { outline: var(--g1-focus-ring); }
 
 .main-pane [data-part="composer"] {
-  max-width: var(--g1-transcript-width);
   background: var(--g1-bg);
 }
 .main-pane [data-part="composer"][data-error] { border-color: var(--g1-danger); }
@@ -76,16 +80,8 @@
   letter-spacing: var(--g1-tracking-page-title);
 }
 .empty-chat p { font-size: var(--g1-type-chat); line-height: var(--g1-leading-chat); }
-.chat-starters :is(b, i) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
-.chat-starters i {
-  justify-self: start;
-  padding-inline: var(--g1-space-1);
-  border: 1px solid var(--g1-border);
-  border-radius: var(--g1-radius-chip);
-  background: var(--g1-bg-subtle);
-}
 @media (width > 760px) and (height > 500px) {
-  .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-transcript-width)) / 2)); }
+  .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-content-max)) / 2)); }
 }
 
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {

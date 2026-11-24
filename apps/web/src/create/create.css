@@ -1,7 +1,6 @@
-.create-split { display: flex; border: 1px solid var(--fulcrum-border); min-height: 36px; }
-.create-split[data-mode="on"], .create-split:has([aria-current="page"]) { border-color: var(--fulcrum-accent); }
-.create-split > .place-link { flex: 1; padding-inline: 9px; min-height: 100%; }
-.create-split button { border-width: 0 0 0 1px; border-inline-start-color: var(--g1-control-border); color: var(--fulcrum-muted); font-size: 11px; white-space: nowrap; min-width: 88px; padding-inline: 6px; }
+.create-split { display: flex; min-height: var(--g1-nav-row-height); }
+.create-split > .place-link { flex: 1; padding-inline: var(--g1-space-2); min-height: 100%; }
+.create-split button { border: 0; color: var(--fulcrum-muted); font-size: 11px; white-space: nowrap; min-width: 88px; padding-inline: 6px; }
 .create-split button[aria-pressed="true"] { color: var(--fulcrum-accent); }
 .create-heading { min-height: 56px; flex: none; border-bottom: 1px solid var(--fulcrum-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; }
 .create-heading a { border: 1px solid var(--fulcrum-border); padding: 8px 12px; }
@@ -60,41 +59,8 @@
 .create-split .build-status-nav { padding-inline: 8px; border-left: 1px solid var(--fulcrum-border); }
 @media (min-width: 761px) and (min-height: 501px) {
   /* with the page toggle, the summary takes its own row inside the control, so it never overlaps the search field */
-  .create-split:has(button):has(.build-status-nav) { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-  .create-split:has(button) > .place-link { min-height: 36px; }
-  .create-split:has(button) .build-status-nav { order: 3; grid-column: 1 / -1; min-width: 0; min-height: 28px; border-left: 0; border-top: 1px solid var(--fulcrum-border); }
-}
-/* status strip and receipt sit in flow under the route's bar */
-.build-dock { flex: none; display: grid; border-bottom: 1px solid var(--fulcrum-border); }
-.build-dock > * + * { border-top: 1px solid var(--fulcrum-border); }
-.build-status-main { padding: 6px 16px; min-height: 32px; }
-.build-receipt { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 8px 16px; border-inline-start: 2px solid var(--fulcrum-accent); font-size: 12px; }
-.build-receipt span { margin-inline-end: auto; overflow-wrap: anywhere; }
-.build-receipt strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.build-receipt .build-open { display: inline-flex; align-items: center; min-height: 32px; padding-inline: 12px; background: var(--g1-primary); color: var(--g1-primary-text); text-decoration: none; }
-.build-receipt button { min-height: 32px; padding-inline: 8px; border-color: transparent; color: var(--fulcrum-muted); }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.create-landing .build-meta { display: flex; flex-wrap: wrap; gap: 0 6px; }
-.create-landing .build-meta em { font-style: normal; }
-.create-landing .build-meta time { white-space: nowrap; }
-/* the separator starts the time, so a wrapped line never ends with it */
-.create-landing .build-meta em + time::before { content: "· "; }
-.create-landing li > a > b { white-space: nowrap; }
-.create-landing li[data-last-known] { border-color: var(--fulcrum-border); background: transparent; }
-.create-landing .build-tools { display: block; padding: 0 12px 8px; color: var(--fulcrum-muted); overflow-wrap: anywhere; }
-.create-landing .build-results { display: flex; flex-wrap: wrap; gap: 0 12px; padding: 0 12px 8px; }
-.create-landing .build-results li { border: 0; }
-.create-landing .build-results a { display: inline-block; padding: 2px 0; color: var(--fulcrum-muted); font-size: 12px; }
-@media (max-width: 760px), (max-height: 500px) {
-  .build-status a { display: inline-flex; align-items: center; }
-  .create-split:has(button) > .place-link { min-height: 44px; }
-  /* the drawer's summary takes its own full row under "new chat" and create, so it never squeezes either */
-  .surface-actions:has(.build-status-nav) { flex-wrap: wrap; column-gap: 0; }
-  .surface-actions:has(.build-status-nav) > .new-chat { margin-inline-end: 8px; }
-  .create-split:has(.build-status-nav) { display: contents; }
-  .create-split:has(.build-status-nav) > :is(.place-link, button) { min-height: 44px; border: 1px solid var(--fulcrum-border); }
-  .create-split:has(.build-status-nav) > button { border-left-width: 0; }
-  .create-split:is([data-mode="on"], :has([aria-current="page"])):has(.build-status-nav) > :is(.place-link, button) { border-color: var(--fulcrum-accent); }
+  .create-split > :is(.place-link, button) { min-height: 44px; }
+  .create-split:has(.build-status-nav) { flex-wrap: wrap; }
   .create-split .build-status-nav { order: 1; flex-basis: 100%; min-height: 40px; border: 1px solid var(--fulcrum-border); }
 }
 

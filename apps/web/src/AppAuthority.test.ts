@@ -87,7 +87,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
         : path.includes("/records/") ? [] : { ...page, ...options.page });
     }) as typeof fetch;
     (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(`http://fixture.invalid${options.path ?? "/"}${options.attached ? "?chat=session" : ""}`);
-    updateSettings({ vim: false, size: 15 });
+    updateSettings({ vim: false, size: 14 });
     const { SurfaceRouter } = await import("./surface/SurfaceRouter");
     app = render(createElement(SurfaceRouter));
     await act(async () => {});
@@ -104,7 +104,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
     await check(app, writes, requests, emit);
     if (authority === "observer") {
       expect(writes).toEqual([]);
-      const expected = { ...oldSettings, vim: false, size: 15 };
+      const expected = { ...oldSettings, vim: false, size: 14 };
       if (options.browserPreference) Object.assign(expected, { [options.browserPreference]: getSettings()[options.browserPreference] });
       expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)).toEqual(expected);
     }
@@ -177,7 +177,7 @@ const composer = (action: "send" | "steer" | "abort", options: Options = { attac
   const control = app.container.querySelector<HTMLElement>(`button${tag(`composer.${action}`)}`);
   if (authority === "observer") {
     expect(Boolean(control)).toBe(false);
-    expect(select(app, '[data-part="composer-reason"]').textContent).toContain("read-only");
+    expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("Read-only");
     await keydown(field ?? select(app, '[data-part="composer"]'), "Enter");
   } else {
     expect(Boolean(control) && !disabled(control!), `${action}: ${field?.outerHTML}; ${control?.outerHTML}`).toBe(true);
@@ -196,7 +196,7 @@ const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row =
   expect(disabled(control)).toBe(authority === "observer");
   if (authority === "observer") {
     const description = select(app, `#${CSS.escape(control.getAttribute("aria-describedby")!)}`);
-    expect(description.textContent).toContain("this tab is read-only");
+    expect(description.textContent).toContain("read-only");
   }
   await click(control);
   if (authority === "controller") {
@@ -340,7 +340,6 @@ const recoveryWrite = (id: WriteSurfaceId, request: string): Row => {
 const pageSwitch = (): Row => {
   const options = accountFixture([]);
   return { kind: "visible", options: { ...options, path: "/accounts", attached: false, observerBanner: false, slot: true }, check: async (app, authority, writes) => {
-    await click(app.getByRole("button", { name: "show accounts" }));
     const control = select(app, tag("accounts.switch"));
     expect(disabled(control)).toBe(authority === "observer");
     if (authority === "observer") {
@@ -396,10 +395,8 @@ const browserLogin = (cancel: boolean): Row => {
     login_status: () => ({ result: { state: "pending" } }),
     login_cancel: () => ({ result: { state: "succeeded" } }),
   } }, check: async (app, authority, writes, requests) => {
-    expect(requests).not.toContain("account_list");
-    await click(app.getByRole("button", { name: "show accounts" }));
     if (authority === "observer") {
-      expect(app.getByText(/a chat tab keeps it while it is open/)).toBeTruthy();
+      expect(await app.findByText(/a chat tab keeps it while it is open/)).toBeTruthy();
       expect(requests).not.toContain("account_list");
       expect(app.container.querySelector(tag("accounts.login"))).toBeNull();
       expect(app.container.querySelector(tag("accounts.login-cancel"))).toBeNull();
@@ -410,7 +407,7 @@ const browserLogin = (cancel: boolean): Row => {
     const locations: string[] = [];
     window.open = (() => ({ opener: window, closed: false, close() {}, location: { replace: (url: string) => locations.push(url) } })) as typeof window.open;
     try {
-      await click(app.getByRole("button", { name: "sign in to claude" }));
+      await click(await app.findByRole("button", { name: "sign in to claude" }));
       const dialog = app.getByRole("dialog", { name: "review browser sign-in" });
       expect(writes).toEqual([]);
       expect(disabled(dialog.querySelector('button[type="submit"]')!)).toBe(true);
@@ -741,7 +738,7 @@ const rows: Record<WriteSurfaceId, Row> = {
       await keydown(field, "Enter");
     };
     if (authority === "observer") {
-      expect(select(app, '[data-part="composer-reason"]').textContent).toContain("read-only");
+      expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("Read-only");
       expect(requests).not.toContain("account_list");
       return;
     }
@@ -810,7 +807,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     }
   } },
   "record.add": { kind: "local-only", options: records, check: async (app, authority, writes) => {
-    const control = app.getByText("add a book", { selector: "button", exact: true });
+    const control = app.getByText("Add a book", { selector: "button", exact: true });
     const field = select(app, '.record-form input[name="title"]');
     expect(disabled(field)).toBe(authority === "observer");
     if (authority === "observer") expect(select(app, ".record-form .form-note").textContent).toContain("read-only");
@@ -878,8 +875,8 @@ const rows: Record<WriteSurfaceId, Row> = {
     await act(async () => { fireEvent.submit(form); });
     if (authority === "controller") didWrite(writes, "POST /api/pages/page/tools/add_book/invoke");
   } },
-  "page.chat": { kind: "visible", absent: true, options: { ...records, attached: true }, check: async (app, authority, writes) => {
-    const ask = app.queryByText("ask the chat", { selector: "button", exact: true });
+  "page.chat": { kind: "visible", absent: true, options: { page: { layout: { blocks: [{ type: "list", title: "Books", collection: "books" }] } }, attached: true }, check: async (app, authority, writes) => {
+    const ask = app.queryByText("Ask the chat", { selector: "button", exact: true });
     expect(Boolean(ask)).toBe(authority === "controller");
     if (!ask) { await keydown(select(app, '[data-part="composer"]'), "Enter"); return; }
     await click(ask);

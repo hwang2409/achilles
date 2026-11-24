@@ -12,7 +12,7 @@ export async function gateShell(
   await page.evaluate(() => { const url = new URL(location.href); url.searchParams.set("theme", "g1-light"); history.replaceState({}, "", url); });
   const places = page.getByRole("navigation", { name: "places" });
   const grouped = await places.locator("section").evaluateAll((sections) => sections.map((section) => [section.getAttribute("aria-label"), [...section.querySelectorAll("a")].map((link) => link.querySelector("span")?.textContent)]));
-  const expected = [["work", ["chats", "pages", "agents", "sessions", "projects", "telemetry"]], ["library", ["skills", "agent profiles"]], ["manage", ["settings", "accounts", "mcp connections"]]];
+  const expected = [["work", ["chats", "pages", "agents", "sessions", "projects", "telemetry"]], ["library", ["skills", "agent profiles"]], ["manage", ["settings", "accounts", "connections"]]];
   if (JSON.stringify(grouped) !== JSON.stringify(expected)) throw new Error(`unexpected place order: ${JSON.stringify(grouped)}`);
   if (!(await places.getByRole("link", { name: "chats", exact: true }).getAttribute("aria-current"))) throw new Error("home did not select chats");
   if (await page.locator(".sidebar .page-list").count() || await page.locator(".sidebar").getByRole("button", { name: "settings", exact: true }).count()) throw new Error("sidebar duplicated a stable place");
@@ -180,7 +180,7 @@ export async function gateStablePlace(tab: Page, origin: string, gateWait: GateW
   tab.on("websocket", () => { sockets += 1; });
   await tab.goto(`${origin}/agents?theme=g1-dark`);
   const frame = tab.locator(".module-frame");
-  await gateWait.playwright(frame.getByRole("heading", { name: "agents", exact: true, level: 1 }), "waitFor");
+  await gateWait.playwright(frame.getByRole("heading", { name: "Agents", exact: true, level: 1 }), "waitFor");
   await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
   if (sockets !== 1) throw new Error(`agents opened ${sockets} zeta connections`);
   if (await frame.getByRole("heading", { name: "not available in this build" }).count() || await tab.getByText("page not found", { exact: true }).count()) throw new Error("agents rendered a placeholder or page-not-found state");
@@ -362,13 +362,9 @@ export async function gateAccountsPlace(tab: Page, origin: string) {
     });
   });
   await tab.goto(`${origin}/accounts`);
-  const show = tab.getByRole("button", { name: "show accounts", exact: true });
-  await show.waitFor({ timeout: 10_000 });
+  await tab.getByRole("heading", { name: "no model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
   await tab.getByText("no chat is active.", { exact: true }).waitFor({ timeout: 10_000 });
   if (await tab.getByRole("button", { name: "switch chat", exact: true }).isEnabled()) throw new Error("the idle catalog enabled a chat switch with no active chat");
-  if (reads.length || roles.join() !== "observer") throw new Error("accounts did not wait as an observer for the show accounts click");
-  await show.click({ timeout: 10_000 });
-  await tab.getByRole("heading", { name: "no model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
   const controller = sockets[1];
   if (!controller || roles.join() !== "observer,controller,observer" || JSON.stringify(reads) !== '[{"role":"controller","params":{}}]')
     throw new Error("accounts did not borrow control for exactly one sessionless read");

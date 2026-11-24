@@ -67,7 +67,7 @@ describe("RecordList", () => {
     routeFetches([{ name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } }], []);
     const result = render(React.createElement(PageView, { canWrite: true, page: { title: "reading", route: "/reading", layout: { blocks: [{ type: "form", title: "add book", tool: "add_book" }, { type: "list", title: "books", collection: "books" }] } }, pageId: "page-capability", credential: "secret", refreshKey: "0:0" }));
     await act(async () => {});
-    expect(result.getByRole("button", { name: "add a book", exact: true })).toBeTruthy();
+    expect(result.getByRole("button", { name: "Add a book", exact: true })).toBeTruthy();
   });
 
   test("removes an insert action when its form leaves the same page", async () => {
@@ -75,38 +75,38 @@ describe("RecordList", () => {
     const page = (blocks: Array<Record<string, unknown>>) => React.createElement(PageView, { canWrite: true, page: { title: "reading", route: "/reading", layout: { blocks } }, pageId: "page-capability-cleanup", credential: "secret", refreshKey: "0:0" });
     const result = render(page([{ type: "form", title: "add book", tool: "add_book" }, { type: "list", title: "books", collection: "books" }]));
     await act(async () => {});
-    const addBook = result.getByRole("button", { name: "add a book", exact: true });
+    const addBook = result.getByRole("button", { name: "Add a book", exact: true });
     fireEvent.click(addBook);
     expect(result.container.querySelector('input[name="title"]')).toBe(document.activeElement);
     result.rerender(page([{ type: "list", title: "books", collection: "books" }]));
     await act(async () => {});
-    expect(result.queryByRole("button", { name: "add a book", exact: true })).toBeNull();
+    expect(result.queryByRole("button", { name: "Add a book", exact: true })).toBeNull();
   });
 
   test("shows loading instead of empty while the first fetch is held", async () => {
     holdFetches();
     const result = renderList(props);
     expect(text(result)).toContain("loading…");
-    expect(text(result)).not.toContain("no reading yet");
+    expect(text(result)).not.toContain("No books yet");
     await settle(calls[0], []);
-    expect(text(result)).toContain("no reading yet");
+    expect(text(result)).toContain("No books yet");
   });
 
   test("retries the same request and renders the recovered rows", async () => {
     holdFetches();
     const result = renderList(props);
     await act(async () => calls[0].resolve(new Response("no", { status: 503 })));
-    expect(text(result)).toContain("could not load reading");
+    expect(text(result)).toContain("could not load books");
     const retry = result.getByRole("button", { name: "try again" });
     fireEvent.keyDown(retry, { key: "Enter" });
     fireEvent.click(retry);
     expect(calls).toHaveLength(2);
     await settle(calls[1], [{ record_id: "book-retry", title: "Recovered" }]);
     expect(text(result)).toContain("Recovered");
-    expect(text(result)).not.toContain("could not load reading");
-    expect(text(result)).not.toContain("no reading yet");
+    expect(text(result)).not.toContain("could not load books");
+    expect(text(result)).not.toContain("No books yet");
     expect(result.queryByRole("button", { name: "add a record", exact: true })).toBeNull();
-    expect(result.queryByRole("button", { name: "ask the chat", exact: true })).toBeNull();
+    expect(result.queryByRole("button", { name: "Ask the chat", exact: true })).toBeNull();
   });
 
   test("resets rows when the layout page identity changes", async () => {
@@ -124,7 +124,7 @@ describe("RecordList", () => {
     holdFetches();
     const result = renderList(props);
     await settle(calls[0], []);
-    expect(text(result)).toContain("no reading yet");
+    expect(text(result)).toContain("No books yet");
 
     result.rerender(React.createElement(RecordList, { key: "page-one:books", ...props, refreshKey: "0:1" }));
     await settle(calls[1], [{ record_id: "book-1", title: "The Dispossessed" }]);

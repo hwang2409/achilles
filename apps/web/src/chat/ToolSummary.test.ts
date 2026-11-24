@@ -78,6 +78,11 @@ describe("tool summaries", () => {
     expect(formatToolArguments({ deep: { deeper: { value: 1 } } })).toContain('"value": 1');
   });
 
+  test("indents raw arguments with real line breaks", () => {
+    expect(formatToolArguments({ route: "/example", title: "first\nsecond" }))
+      .toBe('{\n  "route": "/example",\n  "title": "first\\nsecond"\n}');
+  });
+
   test("shows zeta argument truncation in the visible raw disclosure", async () => {
     const base = item({ query: "large" });
     const truncated = { ...base, tool_call: { ...base.tool_call, meta: { argumentsTruncated: true } } };

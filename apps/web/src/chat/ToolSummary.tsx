@@ -177,13 +177,18 @@ function formatRaw(value: unknown): string {
     const open = Array.isArray(current) ? "[" : "{";
     const close = Array.isArray(current) ? "]" : "}";
     if (state.truncated) entries.push(`${nextIndent}[truncated]`);
-    return entries.length ? `${open}\\n${entries.join(",\\n")}\\n${indent}${close}` : `${open}${close}`;
+    return entries.length ? `${open}\n${entries.join(",\n")}\n${indent}${close}` : `${open}${close}`;
   };
   const formatted = visit(value, 0, "");
-  return formatted.length > MAX_RAW_TEXT ? `${formatted.slice(0, MAX_RAW_TEXT - 14)}\\n[truncated]` : formatted;
+  return formatted.length > MAX_RAW_TEXT ? `${formatted.slice(0, MAX_RAW_TEXT - 14)}\n[truncated]` : formatted;
 }
 
 export function formatToolArguments(value: unknown): string { return formatRaw(value); }
+
+export function toolErrorLine(output: ToolBodyProps["output"]): string {
+  const { text: raw } = outputText(output);
+  return raw ? errorLines(parseJson(raw), raw)[0] : "Tool failed without an error message.";
+}
 
 export function ToolSummaryBody({ item, output, state }: ToolBodyProps): ReactNode {
   const [rawOpen, setRawOpen] = useState(false);
@@ -191,11 +196,12 @@ export function ToolSummaryBody({ item, output, state }: ToolBodyProps): ReactNo
   useLayoutEffect(() => {
     const details = rawRef.current;
     const row = details?.closest<HTMLElement>("[data-virtual-id]");
-    if (!details || !row) return;
+    const card = details?.closest<HTMLDetailsElement>('details[data-part="tool"]');
+    if (!details || !row || !card) return;
     let frame: number | null = null;
     const syncOwnerHeight = () => {
       frame = null;
-      if (!details.open) { row.style.removeProperty("min-height"); return; }
+      if (!details.open || !card.open) { row.style.removeProperty("min-height"); return; }
       // the virtual owner can retain its old measured height after a mobile-to-desktop remount; publish the disclosure's actual bottom.
       const rowBox = row.getBoundingClientRect();
       const detailsBox = details.getBoundingClientRect();
@@ -207,17 +213,19 @@ export function ToolSummaryBody({ item, output, state }: ToolBodyProps): ReactNo
     scheduleOwnerHeight();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleOwnerHeight);
     observer?.observe(details);
-    return () => { observer?.disconnect(); if (frame !== null) cancelAnimationFrame(frame); row.style.removeProperty("min-height"); };
+    card.addEventListener("toggle", scheduleOwnerHeight);
+    return () => { card.removeEventListener("toggle", scheduleOwnerHeight); observer?.disconnect(); if (frame !== null) cancelAnimationFrame(frame); row.style.removeProperty("min-height"); };
   }, [rawOpen]);
 
   const summary = summarizeToolOutput(output, item.is_error || state === "error", state);
   const useFulcrumBody = summary.fallback;
+  const rawResult = rawOpen && !useFulcrumBody ? parseJson(summary.raw) : undefined;
   const showPreview = !useFulcrumBody && (summary.lines.length > 1 || text(summary.raw) !== summary.lines[0]);
   return <>
     {useFulcrumBody ? <ToolBody item={item} output={output} state={state} /> : showPreview ? <div data-part="tool-output"><div data-part="tool-summary-preview">{summary.lines.map((line, index) => <div key={`${line}-${index}`}>{line}</div>)}</div></div> : <ToolBody item={item} output={output} state={state} />}
     <details ref={rawRef} data-part="tool-raw" onToggle={(event) => setRawOpen(event.currentTarget.open)}>
       <summary>raw</summary>
-      {rawOpen && !useFulcrumBody ? <pre>{`${item.tool_call.meta?.argumentsTruncated ? "arguments truncated by zeta\n" : ""}arguments\n${formatRaw(item.tool_call.arguments)}\n\nresult\n${summary.raw}`}</pre> : null}
+      {rawOpen && !useFulcrumBody ? <pre>{`${item.tool_call.meta?.argumentsTruncated ? "arguments truncated by zeta\n" : ""}arguments\n${formatRaw(item.tool_call.arguments)}\n\nresult\n${rawResult && typeof rawResult === "object" ? formatRaw(rawResult) : summary.raw}`}</pre> : null}
       {rawOpen && useFulcrumBody ? <p>fulcrum shows the complete retained result above.</p> : null}
     </details>
   </>;

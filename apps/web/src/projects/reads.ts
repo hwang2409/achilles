@@ -99,6 +99,11 @@ export function projectMemoryRevision(result: unknown) {
   return { digest: memory.digest, versionId: memory.version_id };
 }
 
+export function projectMemoryEntry(result: unknown, memoryId: string): Body | null {
+  if (!record(result) || !record(result.memory) || result.memory.memory_id !== memoryId || !text(result.body) || typeof result.truncated !== "boolean") return null;
+  return { text: result.body, truncated: result.truncated };
+}
+
 export function projectMessage(result: unknown, messageId: string): Body | null {
   if (!record(result) || !record(result.message) || result.message.message_id !== messageId || !text(result.body) || typeof result.truncated !== "boolean") return null;
   return { text: result.body, truncated: result.truncated };
@@ -116,6 +121,9 @@ export const readMemory = async (client: ZetaClient, projectId: string, cursor: 
   checked(projectMemory(await client.request("state_memory", { project_id: projectId, limit: PAGE, cursor }, options)));
 export const readInbox = async (client: ZetaClient, projectId: string, cursor: string | null, { signal }: Read = {}) =>
   checked(projectInbox(await client.request("state_inbox", { project_id: projectId, limit: PAGE, cursor }, { signal })));
+/** Controller only; the full entry is not part of the list response. */
+export const readMemoryEntry = async (client: ZetaClient, projectId: string, memoryId: string, { signal }: Read = {}) =>
+  checked(projectMemoryEntry(await client.request("state_memory_detail", { project_id: projectId, memory_id: memoryId }, { signal }), memoryId));
 /** Controller only: `project_show` returns every kind; only the one asked for is kept. */
 export const readKindText = async (client: ZetaClient, projectId: string, kind: MemoryKind, { signal }: Read = {}) =>
   checked(projectKindText(await client.request("project_show", { project_id: projectId }, { signal }), kind));
