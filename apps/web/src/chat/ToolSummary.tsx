@@ -129,7 +129,8 @@ function argsText(item: ToolItem): string {
 }
 
 const PATH_BUDGET = 56;
-const HOME = /\/(?:Users|home)\/[^/\s]+(?=\/|\s|$)/g;
+// a home dir only at the start of a path, so src/home/me/x stays as is
+const HOME = /(?<![^\s'"=:(])\/(?:Users|home)\/[^/\s'"]+(?=[/\s'"]|$)/g;
 // the argument a reader needs, shown without its key: tool name pattern -> argument keys
 const PRIMARY: [RegExp, string[]][] = [
   [/^(read|edit|write|multi_?edit|view|cat|ls|list_dir|notebook_?edit)$/, ["path", "file_path", "notebook_path"]],

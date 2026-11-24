@@ -86,6 +86,7 @@ describe("tool summaries", () => {
     expect(displayPath("/w/abc/x.py", "/w/a")).toBe("/w/abc/x.py");
     expect(displayPath("/Users/me/notes/x.py", null)).toBe("~/notes/x.py");
     expect(displayPath("/home/me", null)).toBe("~");
+    expect(displayPath("src/home/me/x.py", null)).toBe("src/home/me/x.py");
     const long = displayPath("/Users/me/.zeta/scratch/achilles/orca-look/home-ux-final/cwd/src/app/config.py", null);
     expect(long.length).toBeLessThanOrEqual(56);
     expect(long).toStartWith("~/");
