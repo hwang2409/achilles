@@ -549,8 +549,7 @@ with _database() as db:
   };
   const waitCreateMode = async (enabled: boolean) => {
     if (!await dockHead(page).count()) return gateWait.playwright(page.getByRole("button", { name: `create mode ${enabled ? "on" : "off"}`, exact: true }), "waitFor");
-    await ensureModeMenu(page);
-    await waitFor(async () => (await modeItem(page, "create mode").getAttribute("aria-checked")) === String(enabled), "page chat create mode updated");
+    await gateWait.playwright(page.locator(`.page-chat-head[data-create-mode="${enabled ? "on" : "off"}"]`), "waitFor");
     if (await modeMenu(page).getAttribute("aria-expanded") === "true") await page.keyboard.press("Escape");
   };
   const mobileSheet = {
@@ -1296,7 +1295,7 @@ with _database() as db:
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
-  await waitForIdleTurn(page, waitFor);
+  await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
   if (pageIndexRequests.length - pageRequestsBeforeCreate !== 1)
     throw new Error(`create_page made ${pageIndexRequests.length - pageRequestsBeforeCreate} /api/pages refetches, expected 1`);
   await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
@@ -1358,7 +1357,7 @@ with _database() as db:
     await field.press("Enter", { timeout: 20_000 });
     // A fast scripted reply can move from running to idle in one browser render.
     await waitFor(async () => JSON.parse(await Bun.file(control).text()).page_open_turn_barrier === "held", "held first page turn");
-    await gateWait.playwright(page.locator('[data-part="composer-stop"]'), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page.locator(".run-state.state-running, .page-chat-readouts.state-running"), "waitFor", { timeout: 20_000 });
     const firstPageChat = await homeSessionId();
     await gateWait.playwright(page.locator(`[data-chat-id="${firstPageChat}"]`), "waitFor", { timeout: 20_000 });
     if (!zetaProcess.kill("SIGUSR2")) throw new Error("could not release the first page turn");
@@ -1388,7 +1387,7 @@ with _database() as db:
       return Boolean(status && frames.some((frame) => frame.id === status.id && frame.result));
     }, "released selected-chat attach finished replay");
     await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
-    await waitForIdleTurn(page, waitFor);
+    await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
     await gateWait.playwright(page, "waitForFunction", () => new Promise<boolean>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))), undefined, { timeout: 20_000 });
     if (!await dockTitle.isVisible()) throw new Error(`stale attach reverted the visible dock title: ${await dockHead(page).locator("strong").innerText()}`);
     console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row");
@@ -1474,7 +1473,7 @@ with _database() as db:
   const chatTwo = await homeSessionId();
   if (!chatTwo) throw new Error("second home chat session id missing");
   const transcriptBeforeDiscovery = await page.locator('[data-part="message"]').count();
-  await waitForIdleTurn(page, waitFor);
+  await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
   const discoveryPrompt = "list achilles resources, then inspect /reading";
   await field.fill(discoveryPrompt);
   await field.press("Enter");
@@ -1487,7 +1486,7 @@ with _database() as db:
   await waitFor(async () => (await inspectApproval.count()) > 0, "inspect_page approval after scripted turn");
   await inspectApproval.getByRole("button", { name: "approve", exact: true }).click();
   await gateWait.playwright(page.getByText("new chat tools complete", { exact: true }), "waitFor", { timeout: 20_000 });
-  await waitForIdleTurn(page, waitFor);
+  await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
   const newChatTranscript = await page.locator('[data-part="message"]').nth(transcriptBeforeDiscovery).innerText();
   if (newChatTranscript.includes("MCP server achilles is unavailable") || (await page.locator("body").innerText()).includes("MCP server achilles is unavailable"))
     throw new Error("new chat transcript reported achilles as unavailable after resources discovery");
@@ -2738,7 +2737,7 @@ with _database() as db:
   await gateWait.playwright(page.getByText("allow page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await gateWait.playwright(page.locator(".page-chat-head:not(:has(.page-chat-ask))").or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
   await awaitApprovalMode("set_settings", allowSession, "allow", "allow-mode session settings");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
   await page.reload();
@@ -2772,7 +2771,7 @@ with _database() as db:
     return Boolean(current && current !== readingChatBeforeReload);
   }, "new allow-mode reading chat");
   const reloadChat = await homeSessionId();
-  await gateWait.playwright(page.locator(".page-chat-head:not(:has(.page-chat-ask))").or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
   const reloadBooks = async () => {
     const response = await fetch(`${origin}/api/pages/${createdPage.id}/records/books?field=title&equals=${encodeURIComponent('"Reload Book"')}`, { headers: { Authorization: `Bearer ${readingCredential}` } });
     if (!response.ok) throw new Error(`reload book query failed: ${response.status}`);
@@ -2880,7 +2879,7 @@ with _database() as db:
   await waitFor(async () => Boolean(replyTo("resume")), "reloaded page resumed the chat in the woken turn's setup");
   const wakeAttach = replyTo("resume");
   if (wakeAttach?.result?.attached !== "live_turn") throw new Error(`reload in a woken turn's setup did not attach to it: ${redact(JSON.stringify(wakeAttach?.error ?? { attached: wakeAttach?.result?.attached ?? null }))}`);
-  await gateWait.playwright(page.locator(".page-chat-head:not(:has(.page-chat-ask))").or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
   // zeta reports the setup as running, so the page keeps the mode pending; an older zeta reported idle and refused it
   if (replyTo("set_settings") && replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
   if (await page.getByRole("alert").count()) throw new Error(`reload in a woken turn's setup showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
@@ -2892,7 +2891,7 @@ with _database() as db:
   await waitForIdleTurn(page, waitFor);
   const wakeTool = JSON.parse(await Bun.file(control).text()).tool_results?.find((result: { call_id: string }) => result.call_id === "wake-inspect");
   if (!wakeTool || wakeTool.is_error) throw new Error(`the woken turn's page tool did not run on the re-sent binding: ${JSON.stringify(wakeTool ?? null)}`);
-  await gateWait.playwright(page.getByLabel("ask before tools", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 });
+  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="ask"]').or(page.getByLabel("ask before tools", { exact: true })), "waitFor", { state: "visible", timeout: 20_000 });
   await awaitApprovalMode("set_settings", wakeChat, "ask", "ask mode after the woken turn ended");
   if (await page.getByRole("alert").count()) throw new Error(`the woken turn's end showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
   await restartAchilles("allow");
@@ -3078,20 +3077,19 @@ with _database() as db:
   };
   const headerGeometry = async () => {
     const dimensions = await dockHead(page).evaluate((head) => {
-      const box = (selector: string) => head.querySelector(selector)!.getBoundingClientRect();
       const title = head.querySelector("strong")!;
-      const titleRow = box(".page-chat-title-row");
-      const controls = box(".page-chat-controls");
-      const marks = [...head.querySelectorAll<HTMLElement>(".page-chat-status, .page-chat-ask, .page-chat-data")];
+      const row = head.querySelector(".page-chat-title-row")!;
+      const rowBox = row.getBoundingClientRect();
+      const controls = [...row.querySelectorAll("button")];
       return {
-        height: head.getBoundingClientRect().height, stacked: titleRow.bottom === controls.top,
+        height: head.getBoundingClientRect().height,
         overflow: head.scrollWidth > head.clientWidth,
         ellipsized: title.scrollWidth > title.clientWidth && title.clientHeight < 30 && getComputedStyle(title).textOverflow === "ellipsis",
-        oneBaseline: marks.every((mark) => getComputedStyle(mark).whiteSpace === "nowrap" && Math.abs((mark.getBoundingClientRect().top + mark.clientHeight / 2) - (controls.top + controls.height / 2)) <= 1),
-        touchTargets: [...head.querySelectorAll(".page-chat-trigger")].every((button) => button.getBoundingClientRect().width >= 44 && button.getBoundingClientRect().height === 44),
+        oneBaseline: controls.every((button) => Math.abs(button.getBoundingClientRect().top + button.clientHeight / 2 + button.clientTop - (rowBox.top + rowBox.height / 2)) <= 1),
+        touchTargets: controls.length === (innerWidth <= 760 ? 4 : 3) && controls.every((button) => button.getBoundingClientRect().width >= 44 && button.getBoundingClientRect().height === 44),
       };
     });
-    if (dimensions.height !== 90 || !dimensions.stacked || dimensions.overflow || !dimensions.ellipsized || !dimensions.oneBaseline || !dimensions.touchTargets) throw new Error(`page chat header geometry: ${JSON.stringify(dimensions)}`);
+    if (dimensions.height !== 53 || dimensions.overflow || !dimensions.ellipsized || !dimensions.oneBaseline || !dimensions.touchTargets) throw new Error(`page chat header geometry: ${JSON.stringify(dimensions)}`);
   };
   const popupBounds = async () => {
     if (!await dockHead(page).locator(".page-chat-popup").evaluate((node) => {
@@ -3103,7 +3101,7 @@ with _database() as db:
   const outsideCloses = async (trigger: ReturnType<Page["locator"]>) => {
     const composer = page.locator('.page-chat-surface textarea[aria-label="message"]');
     const cases = [
-      { name: "readouts", act: () => dockHead(page).locator(".page-chat-readouts").click(), focus: trigger },
+      { name: "header background", act: () => dockHead(page).click({ position: { x: 4, y: 2 } }), focus: trigger },
       ...(page.viewportSize()!.width === 1440 ? [{ name: "sidebar background", act: () => page.locator(".brand-row strong").click(), focus: trigger }] : []),
       { name: "composer", act: () => composer.click(), focus: composer },
       { name: "Escape", act: () => page.keyboard.press("Escape"), focus: trigger },
@@ -3271,8 +3269,8 @@ with _database() as db:
   await setupMobileSheet(observerPage, 844);
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   if (screenshotDir) await writeFile(join(screenshotDir, "s2-header-manifest.json"), JSON.stringify({ head: (await Bun.$`git rev-parse HEAD`.text()).trim(), theme, captures: [...s2Images, "s2-header-switcher-390.png", "s2-header-confirmation-390.png", "s2-header-one-chat-controller-390.png", "s2-header-one-chat-observer-390.png"] }, null, 2) + "\n");
-  const observerBody = await observerPage.locator("body").innerText();
-  if (!observerBody.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
+  const observerReason = await observerPage.locator("#tab-authority-description").innerText();
+  if (!observerReason.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
   const observerNewChat = observerPage.locator("button.new-chat");
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
   await waitFor(async () => (await observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').count()) > 0, "observer transcript rows");
