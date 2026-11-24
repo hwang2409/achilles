@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { ACCOUNT_LIST_IDLE_FEATURE, AccountReadError, NoAnswer, readAccounts, supportsFeature, type Account, type Connection } from "../zeta";
@@ -17,12 +17,12 @@ type Props = {
 // The page's connection-owned status is the receipt for both operations.
 const cancelledReview = { status: "committed", value: reviewText("checked"), receipt: reviewText("sign-in result checked") } as const;
 const startedReview = { status: "committed", receipt: reviewText("sign-in attempt checked") } as const;
-const resetTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+const resetTime = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hourCycle: "h23" });
 const percent = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
 const windowLabel = (minutes: number) => minutes % 1440 === 0 ? `${minutes / 1440}d` : minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
 
 function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void }) {
-  return <ul className="account-rows" aria-label={stale ? "last loaded accounts" : "model accounts"} data-stale={stale}>
+  return <>{accounts.some(({ usage }) => usage?.freshness === "stale") && <p className="account-stale">Some usage data may be out of date.</p>}<ul className="account-rows" aria-label={stale ? "last loaded accounts" : "model accounts"} data-stale={stale}>
     {accounts.map(({ account, label, available, current, default: isDefault, usage }) => <li key={account} data-default={isDefault} data-available={available}>
       <div className="account-identity">
         <h3>{account}</h3>
@@ -33,10 +33,10 @@ function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: 
         </p>
       </div>
       <div className="account-usage">
-        <p>{usage?.freshness === "now" ? "usage up to date" : usage?.freshness === "stale" ? "usage is stale" : "usage unknown"}</p>
+        {!usage && <p>Usage unavailable</p>}
         {usage?.windows.map(({ kind, minutes, usedPercent, resetsAt }, index) => <div className="account-window" key={`${kind}-${index}`}>
           <div><span>{windowLabel(minutes)} window</span><span>{percent.format(usedPercent / 100)} used</span></div>
-          <meter aria-label={`${account} ${windowLabel(minutes)} usage`} min={0} max={100} value={usedPercent} />
+          <meter high={95} optimum={0} aria-label={`${account} ${windowLabel(minutes)} usage`} min={0} max={100} value={usedPercent} />
           <time dateTime={new Date(resetsAt).toISOString()}>resets {resetTime.format(resetsAt)}</time>
         </div>)}
         {usage?.refreshFailed && <p className="account-availability" data-failed="true">last usage refresh failed</p>}
@@ -44,7 +44,7 @@ function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: 
       {!available && signIn && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
         aria-label={`sign in again to ${account}`} onClick={event => signIn({ provider: account.startsWith("anthropic:") ? "claude" : "codex", account }, event.currentTarget)}>sign in again</button>}
     </li>)}
-  </ul>;
+  </ul></>;
 }
 
 export function AccountsModule({ client, connecting, connection, login }: Props) {
@@ -64,9 +64,12 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const rows = (refreshed?.value.accounts ?? last?.accounts) ?? [];
   const fresh = !!client && (refreshed ? refreshed.client === client : last?.client === client);
   const canSignIn = fresh && !!supported && !loading && !failure && !active;
-  const show = async () => {
-    if (!supported || loading || active || review) return;
-    heading.current?.focus();
+  const attempted = useRef(false);
+  const inFlight = useRef(false);
+  const show = async (focus: boolean) => {
+    if (!supported || inFlight.current || active || review) return;
+    inFlight.current = true;
+    if (focus) heading.current?.focus();
     setLoading(true);
     setFailure(null);
     try {
@@ -79,10 +82,16 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
     } catch (error) {
       setFailure(error instanceof AccountReadError ? error.message : error instanceof NoAnswer ? "zeta did not answer the account request." : "could not read accounts from zeta.");
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   };
-  const showAction = { label: "show accounts", run: () => void show() };
+  useEffect(() => {
+    if (attempted.current || !supported || fresh || active || review) return;
+    attempted.current = true;
+    void show(false);
+  });
+  const showAction = { label: "Try again", run: () => void show(true) };
   return <ModuleFrame title="Accounts" subtitle="View model accounts and usage. Credentials stay with Zeta.">
     <div className="accounts-place">
       <h2 ref={heading} tabIndex={-1}>model accounts</h2>
@@ -90,8 +99,8 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
         : !client ? (connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
           : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />)
         : !supported ? <ModuleState kind="unsupported" title="update zeta to manage accounts here" detail="on this version, use /accounts inside an active chat." />
-        : failure ? <ModuleState kind="failed" title="could not load accounts" detail={failure} action={{ ...showAction, label: "try again" }} />
-        : !fresh ? <ModuleState kind="empty" title="accounts need control to load" detail="this page borrows control for one read. it will not interrupt another tab." action={showAction} />
+        : failure ? <ModuleState kind="failed" title="could not load accounts" detail={failure} action={showAction} />
+        : !fresh ? <ModuleState kind="loading" title="loading accounts…" />
         : !rows.length && <ModuleState kind="empty" title="no model accounts yet" detail="sign in to a model provider to start." />}
       {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} />}
       {attempt && <section className="account-login" data-state={attempt.state} aria-label="browser sign-in">

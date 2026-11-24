@@ -310,10 +310,8 @@ const browserLogin = (cancel: boolean): Row => {
     login_status: () => ({ result: { state: "pending" } }),
     login_cancel: () => ({ result: { state: "succeeded" } }),
   } }, check: async (app, authority, writes, requests) => {
-    expect(requests).not.toContain("account_list");
-    await click(app.getByRole("button", { name: "show accounts" }));
     if (authority === "observer") {
-      expect(app.getByText(/a chat tab keeps it while it is open/)).toBeTruthy();
+      expect(await app.findByText(/a chat tab keeps it while it is open/)).toBeTruthy();
       expect(requests).not.toContain("account_list");
       expect(app.container.querySelector(tag("accounts.login"))).toBeNull();
       expect(app.container.querySelector(tag("accounts.login-cancel"))).toBeNull();
@@ -324,7 +322,7 @@ const browserLogin = (cancel: boolean): Row => {
     const locations: string[] = [];
     window.open = (() => ({ opener: window, closed: false, close() {}, location: { replace: (url: string) => locations.push(url) } })) as typeof window.open;
     try {
-      await click(app.getByRole("button", { name: "sign in to claude" }));
+      await click(await app.findByRole("button", { name: "sign in to claude" }));
       const dialog = app.getByRole("dialog", { name: "review browser sign-in" });
       expect(writes).toEqual([]);
       expect(disabled(dialog.querySelector('button[type="submit"]')!)).toBe(true);

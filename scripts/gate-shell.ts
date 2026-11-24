@@ -362,10 +362,6 @@ export async function gateAccountsPlace(tab: Page, origin: string) {
     });
   });
   await tab.goto(`${origin}/accounts`);
-  const show = tab.getByRole("button", { name: "show accounts", exact: true });
-  await show.waitFor({ timeout: 10_000 });
-  if (reads.length || roles.join() !== "observer") throw new Error("accounts did not wait as an observer for the show accounts click");
-  await show.click({ timeout: 10_000 });
   await tab.getByRole("heading", { name: "no model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
   const controller = sockets[1];
   if (!controller || roles.join() !== "observer,controller,observer" || JSON.stringify(reads) !== '[{"role":"controller","params":{}}]')
