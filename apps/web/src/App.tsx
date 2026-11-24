@@ -5,8 +5,8 @@ import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { CodeFence } from "./chat/CodeFence";
-import { ToolSummaryBody, toolArgumentSummary } from "./chat/ToolSummary";
-import { Approval, Fallback, Message, Notification, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
+import { CompactTool, ToolDisclosure } from "./chat/CompactTool";
+import { Approval, Fallback, Message, Notification, RunProvider, Timeline, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import type { RenderShell } from "./surface/SurfaceRouter";
 import { titleOf, useAgentNavAdapter } from "./surface/AgentNavAdapter";
@@ -60,7 +60,7 @@ function ChatNotification({ id }: { id: string }) {
   return <p className="chat-continuation" role="status">{item.event.data.text}</p>;
 }
 
-const renderers: Renderers = { notification: ChatNotification, message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ErrorRow };
+const renderers: Renderers = { notification: ChatNotification, message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: CompactTool, error: ErrorRow };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
 // inside the reply that is still streaming. it shows here once delivery settles.
 function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
@@ -443,7 +443,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
             pending: createMode?.pending ? "saving…" : undefined, error: createMode?.error,
             savedAt: createReceipt?.pageId === activePage.id && createReceipt?.sessionId === ready?.sessionId && createReceipt?.enabled === activePage.create_mode ? createReceipt.at : undefined }}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);

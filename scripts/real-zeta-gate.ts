@@ -2130,6 +2130,11 @@ with _database() as db:
   await listSummaryApproval.getByRole("button", { name: "approve", exact: true }).click();
   const toolRow = page.locator('[data-part="tool"]', { hasText: "list_books" }).last();
   await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
+  const expandSummaryTool = async () => {
+    if (await toolRow.getAttribute("open") === null) await toolRow.locator('[data-part="tool-header"]').click();
+  };
+  if ((await toolRow.getAttribute("open")) !== null || await toolRow.locator('[data-part="tool-body"]').count()) throw new Error("tool details must start collapsed and unmounted");
+  await expandSummaryTool();
   const summaryBody = toolRow.locator('[data-part="tool-summary-preview"]');
   await gateWait.playwright(summaryBody.getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
   await gateWait.playwright(summaryBody.getByText("+ 2 more", { exact: true }), "waitFor", { timeout: 20000 });
@@ -2139,6 +2144,7 @@ with _database() as db:
         await page.reload();
         await setupMobileSheet(page, 900, "button");
       } else await page.setViewportSize({ width, height: 900 });
+      await expandSummaryTool();
       await page.screenshot({ path: join(screenshotDir, `tool-summary-${width}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -2149,6 +2155,8 @@ with _database() as db:
     await page.reload();
     await setupMobileSheet(page, 900, "button");
     await page.setViewportSize({ width: 1440, height: 900 });
+    await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
+    await expandSummaryTool();
     await gateWait.playwright(page.locator('[data-part="tool"]', { hasText: "list_books" }).last().locator('[data-part="tool-summary-preview"]').getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
   }
   await toolRow.locator('[data-part="tool-raw"] summary').click();

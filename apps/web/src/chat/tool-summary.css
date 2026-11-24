@@ -27,3 +27,10 @@
   .transcript [data-part="tool-status"] { grid-column: 3; grid-row: 1; }
 }
 .transcript [data-part="tool-foot"] { display: none; }
+
+.compact-tool-error { grid-column: 2 / -1; grid-row: 2; min-width: 0; color: var(--fulcrum-danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+  .transcript .compact-tool > [data-part="tool-header"] { grid-template-columns: 12px minmax(0, 2fr) minmax(0, 3fr) auto; grid-template-rows: auto; }
+  .transcript .compact-tool [data-part="tool-summary"] { grid-column: 3; grid-row: 1; }
+  .transcript .compact-tool [data-part="tool-status"] { grid-column: 4; }
+}

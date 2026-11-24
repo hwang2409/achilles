@@ -185,6 +185,11 @@ function formatRaw(value: unknown): string {
 
 export function formatToolArguments(value: unknown): string { return formatRaw(value); }
 
+export function toolErrorLine(output: ToolBodyProps["output"]): string {
+  const { text: raw } = outputText(output);
+  return raw ? errorLines(parseJson(raw), raw)[0] : "Tool failed without an error message.";
+}
+
 export function ToolSummaryBody({ item, output, state }: ToolBodyProps): ReactNode {
   const [rawOpen, setRawOpen] = useState(false);
   const rawRef = useRef<HTMLDetailsElement>(null);

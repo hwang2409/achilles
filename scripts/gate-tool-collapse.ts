@@ -16,7 +16,7 @@ try {
   const row = card.locator('xpath=ancestor::*[@data-virtual-id][1]');
   const next = row.locator('xpath=following-sibling::*[@data-virtual-id][1]');
   await next.getByText("Next reply").waitFor();
-  if (await card.getAttribute("open") !== null) await summary.click();
+  if (await card.getAttribute("open") !== null || await card.locator('[data-part="tool-body"]').count()) throw new Error("tool details must start collapsed and unmounted");
   const measure = () => row.evaluate((owner) => ({
     height: owner.getBoundingClientRect().height,
     distance: owner.nextElementSibling!.getBoundingClientRect().top - owner.getBoundingClientRect().top,
