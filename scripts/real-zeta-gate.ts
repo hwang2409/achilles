@@ -3257,7 +3257,7 @@ with _database() as db:
     const composer = page.locator('[data-page-chat-surface] textarea[aria-label="message"]');
     const cases = [
       { name: "header background", act: () => dockHead(page).click({ position: { x: 4, y: 2 } }), focus: trigger },
-      ...(page.viewportSize()!.width === 1440 ? [{ name: "sidebar background", act: () => page.locator(".brand-row strong").click(), focus: trigger }] : []),
+      ...(page.viewportSize()!.width === 1440 ? [{ name: "sidebar background", act: () => page.locator("[data-shell-nav] [data-slot=sidebar-header] strong").click(), focus: trigger }] : []),
       { name: "composer", act: () => composer.click(), focus: composer },
       { name: "Escape", act: () => page.keyboard.press("Escape"), focus: trigger },
     ];
