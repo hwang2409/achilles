@@ -11,7 +11,7 @@ test("a connected zeta whose hello did not grant telemetry_read_v1 shows the upd
   let requests = 0;
   const client = { features: ["delivery_id", "served_turn_end"], request: async () => { requests++; return {}; } } as unknown as ZetaClient;
   const view = render(createElement(TelemetryModule, { client, pathname: "/telemetry" }));
-  expect(view.container.querySelector(".telemetry-notice [role=status]")?.textContent).toBe("telemetry · needs a newer zeta");
+  expect(view.container.querySelector("[data-telemetry-unavailable] [role=status]")?.textContent).toBe("telemetry · needs a newer zeta");
   expect(view.queryByText(/connecting/i)).toBeNull();
   expect(requests).toBe(0);
 });
@@ -30,8 +30,8 @@ test.each([
   } as unknown as ZetaClient;
   const view = render(createElement(TelemetryModule, { client, pathname: "/telemetry" }));
   await view.findByRole("heading", { name: "telemetry overview" });
-  expect(view.container.querySelector(".tm-m-errors .tm-metric-detail")?.firstChild?.textContent).toBe(rate);
-  expect(view.container.querySelector(".tm-m-errors .tm-metric-suffix")?.textContent).toBe(" errored spans / all spans");
+  expect(view.container.querySelector("[data-telemetry-metric=errors] [data-metric-detail]")?.firstChild?.textContent).toBe(rate);
+  expect(view.container.querySelector("[data-telemetry-metric=errors] [data-metric-detail-label]")?.textContent).toBe(" errored spans / all spans");
 });
 
 const failedTools = { ...point, spans: 12, errors: 9, tool_calls: 9, model_calls: 1 };
@@ -42,14 +42,14 @@ const modelBucket = { ...point, spans: 1, model_calls: 1 };
 const currentHour = Math.floor(Date.now() / 3.6e6) * 3.6e12;
 
 test.each([
-  { name: "overview metric", path: "", heading: "telemetry overview", selector: ".tm-m-errors .tm-metric-detail", expected: "75% errored spans / all spans" },
-  { name: "overview chart", path: "", heading: "telemetry overview", selector: ".tm-bar-error", style: "height", expected: null },
-  { name: "models row", path: "/models", heading: "models", selector: "[data-selected] [role=cell]:nth-child(4)", expected: "errors 9 · 100%" },
-  { name: "tools row", path: "/tools", heading: "tools", selector: ".tm-ag-failure-rate", expected: "100%" },
-  { name: "tools meter uses bounded shares on both sides of its scale", path: "/tools", heading: "tools", selector: "[role=row]:last-child .tm-ag-meter i", style: "width", expected: "50%" },
-  { name: "per-model chart ignores the overview tool errors", path: "/models", heading: "models", selector: ".tm-bar-error", style: "height", expected: null },
-  { name: "per-model chart caps its own errors", path: "/models", heading: "models", selector: ".tm-bar-error", style: "height", expected: "100%", modelErrors: 9 },
-  { name: "per-model chart shows its own errors", path: "/models", heading: "models", selector: ".tm-bar-error", style: "height", expected: "50%", modelErrors: 1, modelCalls: 2 },
+  { name: "overview metric", path: "", heading: "telemetry overview", selector: "[data-telemetry-metric=errors] [data-metric-detail]", expected: "75% errored spans / all spans" },
+  { name: "overview chart", path: "", heading: "telemetry overview", selector: "[data-chart-errors]", style: "height", expected: null },
+  { name: "models row", path: "/models", heading: "models", selector: "[data-selected=true] td:nth-child(4)", expected: "errors 9 · 100%" },
+  { name: "tools row", path: "/tools", heading: "tools", selector: "[data-failure-rate]", expected: "100%" },
+  { name: "tools meter uses bounded shares on both sides of its scale", path: "/tools", heading: "tools", selector: "tbody tr:last-child [data-aggregate-meter] i", style: "width", expected: "50%" },
+  { name: "per-model chart ignores the overview tool errors", path: "/models", heading: "models", selector: "[data-chart-errors]", style: "height", expected: null },
+  { name: "per-model chart caps its own errors", path: "/models", heading: "models", selector: "[data-chart-errors]", style: "height", expected: "100%", modelErrors: 9 },
+  { name: "per-model chart shows its own errors", path: "/models", heading: "models", selector: "[data-chart-errors]", style: "height", expected: "50%", modelErrors: 1, modelCalls: 2 },
 ])("bounded error share: $name", async ({ path, heading, selector, style, expected, modelErrors = 0, modelCalls = 1 }) => {
   const client = {
     features: ["telemetry_read_v1"],

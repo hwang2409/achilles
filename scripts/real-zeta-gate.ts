@@ -822,7 +822,7 @@ with _database() as db:
         await observerTelemetry.setViewportSize(viewport);
         if (!await banner.isVisible()) throw new Error(`telemetry recovery ${size}: read-only banner is hidden`);
         await observerTelemetry.evaluate(() => document.fonts.ready.then(() => undefined));
-        const notice = observerTelemetry.locator(".telemetry-placeholder");
+        const notice = observerTelemetry.locator("[data-telemetry-unavailable]");
         if (await notice.evaluate(element => element.scrollTop) !== 0) throw new Error("telemetry recovery must be tested without scrolling");
         for (const action of [notice.getByRole("button", { name: "check again", exact: true }), notice.getByRole("link", { name: "back to chats", exact: true })]) {
           const geometry = await action.evaluate(element => {
@@ -838,7 +838,7 @@ with _database() as db:
             element.scrollTop = element.scrollHeight;
             const pane = element.getBoundingClientRect();
             const step = element.querySelector("ol li:last-child")!.getBoundingClientRect();
-            const row = element.querySelector(".telemetry-actions")!.getBoundingClientRect();
+            const row = element.querySelector("[data-telemetry-unavailable-actions]")!.getBoundingClientRect();
             return { scrollTop: element.scrollTop, stepTop: step.top, stepBottom: step.bottom, rowTop: row.top, visible: step.top >= Math.max(0, pane.top) && step.bottom <= Math.min(innerHeight, pane.bottom, row.top) };
           });
           if (viewport.width === 360 && (!geometry.visible || (viewport.height === 740 && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
