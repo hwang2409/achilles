@@ -63,7 +63,7 @@
 .skip-link { position: fixed; z-index: 20; top: 8px; left: 8px; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-accent); transform: translateY(-150%); }
 .skip-link:focus { transform: translateY(0); }
 
-.chat-header { container-type: inline-size; height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--g1-space-7); border-bottom: 1px solid var(--g1-border); }
+.chat-header { container-type: inline-size; height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--g1-page-gutter); border-bottom: 1px solid var(--g1-border); }
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
 .chat-heading span { order: 0; flex: 0 0 auto; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own

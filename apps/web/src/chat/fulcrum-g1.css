@@ -89,3 +89,9 @@ summary[data-part="tool-header"]:hover { background: var(--g1-hover); }
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
   summary[data-part="tool-header"] { min-height: 44px; }
 }
+
+/* plain: fulcrum's transitions, press scale, and hover underlines are off; a hover only tints */
+:is([data-part="timeline"], [data-part="composer"]) :is(*, ::before) { transition: none; }
+[data-part="approval-actions"] button:active { transform: none; }
+:is([data-part="resync-retry"], [data-part="jump-to-latest"], [data-part="approval-actions"] button, [data-part="run-bar"] button):hover,
+button[data-part="sub-agent"]:hover [data-part="sub-agent-open"] { text-decoration: none; }

@@ -16,7 +16,7 @@
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0; color: var(--fulcrum-muted); border-color: transparent; }
 .surface-search .palette-button > span { display: none; }
-.place-nav { flex: none; margin: 0 var(--g1-sidebar-padding) var(--g1-space-3); }
+.place-nav { flex: none; margin: var(--g1-space-3) var(--g1-sidebar-padding); }
 .chat-group h2 { font-size: inherit; font-weight: 600; color: var(--g1-muted); }
 .place-nav section + section { margin-top: var(--g1-space-4); }
 .place-link > span::first-letter { text-transform: uppercase; }
