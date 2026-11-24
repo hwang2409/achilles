@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { Confirmation, reviewText, type Result } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
@@ -30,9 +31,9 @@ function useAuth(owner: McpOwner, row: McpRow | null | undefined) {
 export function McpPendingElsewhere({ owner, row, online }: { owner: McpOwner; row: McpRow | null | undefined; online: boolean }) {
   const { state, tracking } = useAuth(owner, row?.config.oauth ? row : null);
   if (!tracking || state) return null;
-  return <div className="mcp-auth-global" role="status">
+  return <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm" role="status">
     <span>another OAuth attempt is in progress or still being checked.</span>
-    <button type="button" disabled={!online} onClick={() => void owner.auth.checkNow()}>check now</button>
+    <Button variant="outline" type="button" disabled={!online} onClick={() => void owner.auth.checkNow()}>check now</Button>
   </div>;
 }
 
@@ -68,15 +69,15 @@ export function McpAuth({ owner, row, revision, online, heading }: {
     }
     return { execute: () => perform(false), checkResult: () => perform(true) };
   }
-  const trigger = (action: "start" | "logout", disabled: boolean, surface: string) => <button type="button" disabled={disabled}
-    data-write-surface={surface} onClick={(event) => setReview({ id: ++reviewId.current, origin: event.currentTarget, attempt: { action, name: row.name, scope: row.scope, trusted: row.trusted, config: row.config, revision } })}>{actions[action]}</button>;
+  const trigger = (action: "start" | "logout", disabled: boolean, surface: string) => <Button variant="outline" type="button" disabled={disabled}
+    data-write-surface={surface} onClick={(event) => setReview({ id: ++reviewId.current, origin: event.currentTarget, attempt: { action, name: row.name, scope: row.scope, trusted: row.trusted, config: row.config, revision } })}>{actions[action]}</Button>;
 
-  return <section className="mcp-auth" aria-label="OAuth sign-in">
+  return <section className="my-4 grid gap-2 border-y py-3 [&_p]:text-sm" aria-label="OAuth sign-in">
     <p role="status" data-auth-state={state ?? "idle"}>{!online && ownPending ? "connection lost · sign-in result unknown until zeta reconnects" : captions[state ?? "idle"]}</p>
-    <div className="mcp-auth-buttons">
+    <div className="flex flex-wrap items-center gap-2">
       {trigger("start", !online || tracking, WRITE_SURFACE.mcpAuthStart)}
       {trigger("logout", !online || (tracking && !ownPending && name === row.name), WRITE_SURFACE.mcpAuthLogout)}
-      {ownPending && <button type="button" disabled={!online} onClick={() => void owner.auth.checkNow()}>check now</button>}
+      {ownPending && <Button variant="outline" type="button" disabled={!online} onClick={() => void owner.auth.checkNow()}>check now</Button>}
     </div>
     {state && state !== "idle" && state !== "unauthorized" && <Confirmation level={1} action={actions.cancel} label={reviewText("sign-in attempt")} value={reviewText("in progress or waiting for status")}
       surface={WRITE_SURFACE.mcpAuthCancel} disabled={!online || !ownPending} keep={keep} onCommitted={() => {}}

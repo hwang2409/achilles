@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useRef, useState } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { Confirmation, reviewText as t } from "../surface/Confirmation";
@@ -30,13 +32,13 @@ export function AgentSpawn({ client, owner, refresh }: Props) {
     return () => stop.abort();
   }, [open, client, unavailable]);
   const profile = parent?.profiles.find((entry) => entry.name === name);
-  return <section className="agents-spawn" aria-label="spawn an agent">
-    <button type="button" disabled={!!unavailable} aria-expanded={open} onClick={() => {
+  return <section className="border-b px-4 py-2" aria-label="spawn an agent">
+    <Button variant="outline" type="button" disabled={!!unavailable} aria-expanded={open} onClick={() => {
       if (!open) { setParent(undefined); setNote(""); }
       setOpen(!open);
-    }}>{open ? "close spawn form" : "+ spawn agent"}</button>
+    }}>{open ? "close spawn form" : "+ spawn agent"}</Button>
     {unavailable && <small>{unavailable}</small>}
-    {open && <form className="agents-spawn-form" onSubmit={(event) => {
+    {open && <form className="grid max-w-xl gap-3 py-3 [&_label]:grid [&_label]:gap-1 [&_label]:text-sm [&_label]:text-muted-foreground [&>div]:flex [&>div]:flex-wrap [&>div]:gap-2" onSubmit={(event) => {
       event.preventDefault();
       if (!unavailable && parent && profile && task.trim()) setReview({ id: (review?.id ?? 0) + 1, parent, profile, task });
     }}>
@@ -47,8 +49,8 @@ export function AgentSpawn({ client, owner, refresh }: Props) {
         {parent?.profiles.map(({ name }) => <option key={name} value={name}>{display(name)}</option>)}
       </select></label>
       {profile?.description && <small>{display(profile.description)}</small>}
-      <label>task <textarea required value={task} onChange={(event) => setTask(event.currentTarget.value)} /></label>
-      <button ref={opener} type="submit" disabled={!!unavailable || !profile || !task.trim()} data-write-surface={WRITE_SURFACE.agentsSpawn}>review spawn</button>
+      <label>task <Textarea required value={task} onChange={(event) => setTask(event.currentTarget.value)} /></label>
+      <Button variant="outline" ref={opener} type="submit" disabled={!!unavailable || !profile || !task.trim()} data-write-surface={WRITE_SURFACE.agentsSpawn}>review spawn</Button>
     </form>}
     <div ref={setActivity} />
     {review && <Confirmation key={review.id} level={2} title={t("spawn an agent")} action={t("spawn agent")} keep={t("keep draft")}
@@ -73,12 +75,12 @@ export function AgentCancel({ client, owner, refresh, row, title, parent, elapse
   const opener = useRef<HTMLButtonElement>(null);
   const unavailable = reason(client) ?? (row && isTerminal(row.status) ? "this run is already terminal." : undefined);
   return <>
-    {row && <div className="agents-cancel">
-      <button ref={opener} type="button" disabled={!!unavailable} data-write-surface={WRITE_SURFACE.agentsCancel}
-        onClick={() => setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed })}>cancel run</button>
+    {row && <div className="flex flex-wrap items-center gap-2">
+      <Button variant="outline" ref={opener} type="button" disabled={!!unavailable} data-write-surface={WRITE_SURFACE.agentsCancel}
+        onClick={() => setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed })}>cancel run</Button>
       {unavailable && <small>{unavailable}</small>}
     </div>}
-    <div ref={setActivity} className="agents-cancel-activity" />
+    <div ref={setActivity} className="empty:hidden" />
     {review && <CancelReview key={review.id} {...review} owner={owner} refresh={refresh} activity={activity ?? undefined} opener={() => opener.current} />}
   </>;
 }

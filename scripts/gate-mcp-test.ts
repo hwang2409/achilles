@@ -121,7 +121,7 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
     await Bun.sleep(300);
     await dialog(tab).locator("form").or(tab.locator("[data-test-result]")).first().waitFor(opts);
     await tab.waitForFunction(async () => {
-      const layout = () => JSON.stringify(document.querySelector("dialog[open], .mcp-test")?.getBoundingClientRect());
+      const layout = () => JSON.stringify(document.querySelector("[role='alertdialog'], [aria-label='connection test']")?.getBoundingClientRect());
       const before = layout();
       await new Promise(requestAnimationFrame);
       return before === layout();
@@ -186,7 +186,7 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
     await Bun.write(join(root, "release"), "go");
     await dropped.getByRole("alert").filter({ hasText: "result unknown" }).waitFor(opts);
     await until("observer reconnect after probe drop", () => roles.at(-1) === "observer");
-    await dropped.locator(".mcp-offline").waitFor({ state: "hidden", ...opts });
+    await dropped.locator("[data-connection-retained]").waitFor({ state: "hidden", ...opts });
     await reaped("slow");
     const next = await desktop.newPage();
     await next.goto(`${origin}/`, opts);

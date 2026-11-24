@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type RefObject } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { Confirmation, reviewText, type Result, type ReviewText } from "../surface/Confirmation";
@@ -10,7 +11,6 @@ import { McpAdd } from "./McpAdd";
 import { McpAuth, McpPendingElsewhere } from "./McpAuthActions";
 import { McpActions } from "./McpActions";
 import { needsMcpTestTrust, type McpOwner, type McpTestOutcome, type McpTestResult } from "./mcpOwner";
-import "./mcp.css";
 
 const LIST = connectionsRoute.path;
 const detailOf = (path: string) => {
@@ -98,18 +98,18 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
     project={project} retry={retryRead} reading={reading} offline={offline} />;
 
   const openAdd = () => setAdding(true);
-  return <ModuleFrame title="Connections" subtitle="Manage connections for new sessions and the current project." actions={snapshot && !adding && <button type="button" className="ui-button ui-button-primary" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!supported} onClick={openAdd}>Add connection</button>}>
-    <div className="mcp-place">
+  return <ModuleFrame title="Connections" subtitle="Manage connections for new sessions and the current project." actions={snapshot && !adding && <Button variant="outline" type="button" className="ui-button ui-button-primary" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!supported} onClick={openAdd}>Add connection</Button>}>
+    <div className="flex min-h-0 w-full flex-col overflow-auto">
       {client && !supported ? <ModuleState kind="unsupported" title="needs a newer zeta" detail="update zeta to manage MCP connections here" />
         : offline && !retained ? connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
           : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: retryConnection }} />
         : !snapshot ? <ModuleState kind="loading" title="Reading MCP configuration…" />
         : <>
-          {retained && <p className="mcp-offline" role="status">connection lost · showing the last read from disk · retrying automatically</p>}
-          {adding && <section className="mcp-add" aria-label="Add a connection"><McpAdd close={() => setAdding(false)} owner={owner} snapshot={snapshot} defaultScope={scope === "project" ? "project" : "user"} online={supported}
+          {retained && <p data-connection-retained className="border-b bg-muted px-4 py-2 text-sm text-muted-foreground" role="status">connection lost · showing the last read from disk · retrying automatically</p>}
+          {adding && <section className="border-b p-4" aria-label="Add a connection"><McpAdd close={() => setAdding(false)} owner={owner} snapshot={snapshot} defaultScope={scope === "project" ? "project" : "user"} online={supported}
             reviewTrust={(name) => { setScope("project"); navigate(`${LIST}/project/${encodeURIComponent(name)}`); }} /></section>}
           <McpPendingElsewhere owner={owner} row={detailOpen ? row : undefined} online={supported} />
-          <div className="mcp-grid" data-detail={detailOpen} data-has-selection={!!row || detailOpen} data-retained={Boolean(retained)}>
+          <div className="group grid min-h-0 flex-1 min-[961px]:grid-cols-[minmax(0,420px)_minmax(0,1fr)] data-[has-selection=false]:grid-cols-1 min-[961px]:data-[has-selection=false]:grid-cols-1 data-[retained=true]:text-muted-foreground" data-detail={detailOpen} data-has-selection={!!row || detailOpen} data-retained={Boolean(retained)}>
             <ConnectionList snapshot={snapshot} scope={scope} selectScope={(view) => { setScope(view); if (detailOpen) navigate(LIST); }}
               addConnection={supported && !adding ? openAdd : undefined} activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
             {(row || detailOpen) && <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
@@ -159,9 +159,9 @@ function McpTest({ owner, row, revision, online, heading }: {
     return { status: "failed", reason: "not-applied", message: testFailure(result?.status), final: true };
   }
 
-  return <section className="mcp-test" aria-label="connection test">
-    {needsTrust ? <p>{testTrust}</p> : <button ref={opener} type="button" disabled={!online} data-write-surface={WRITE_SURFACE.mcpTest}
-      onClick={() => setReview((prior) => ({ id: (prior?.id ?? 0) + 1, target }))}>{testAction}</button>}
+  return <section className="mb-4 flex flex-wrap items-center gap-2 [&_p]:text-sm [&_p]:tabular-nums" aria-label="connection test">
+    {needsTrust ? <p>{testTrust}</p> : <Button variant="outline" ref={opener} type="button" disabled={!online} data-write-surface={WRITE_SURFACE.mcpTest}
+      onClick={() => setReview((prior) => ({ id: (prior?.id ?? 0) + 1, target }))}>{testAction}</Button>}
     <div role="status">{last && <p data-test-result={last.status}>{testReceipt(last)}</p>}</div>
     {review && reviewed && <Confirmation key={review.id} level={2} external={{ opener: () => opener.current?.disabled === false ? opener.current : heading.current }}
       title={reviewText("review connection test")} action={testAction} keep={reviewText("keep without testing")}

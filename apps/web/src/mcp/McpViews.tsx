@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useState, type MouseEvent, type ReactNode, type Ref } from "react";
 import { ModuleState } from "../surface/ModuleState";
 import { connectionsRoute, surfaceHref } from "../surface/routes";
@@ -28,27 +30,27 @@ export function ConnectionList({ snapshot, scope, selectScope, activeScope, row,
 }) {
   const list = snapshot[scope];
   const rows = "rows" in list ? list.rows : [];
-  return <section className="mcp-list" aria-label="configured connections">
-    <div className="mcp-list-head">
-      <nav className="ui-tabs" aria-label="connection scope">
+  return <section className="min-w-0 overflow-auto min-[961px]:group-data-[has-selection=true]:border-e max-[960px]:group-data-[detail=true]:hidden" aria-label="configured connections">
+    <div className="px-4 py-2">
+      <nav className="flex flex-wrap gap-1" aria-label="connection scope">
         {mcpScopes.map((view) => {
           const entry = snapshot[view];
-          return <button key={view} type="button" ref={scope === view ? activeScope : undefined}
-            aria-pressed={scope === view} disabled={offline} onClick={() => selectScope(view)}>
-            {view[0].toUpperCase() + view.slice(1)} {"rows" in entry ? <span className="ui-meta">{entry.rows.length}</span> : <span aria-label="unavailable">—</span>}
-          </button>;
+          return <Button variant="outline" key={view} type="button" ref={scope === view ? activeScope : undefined}
+            className="aria-pressed:bg-accent aria-pressed:text-accent-foreground" aria-pressed={scope === view} disabled={offline} onClick={() => selectScope(view)}>
+            {view[0].toUpperCase() + view.slice(1)} {"rows" in entry ? <span className="text-xs text-muted-foreground">{entry.rows.length}</span> : <span aria-label="unavailable">—</span>}
+          </Button>;
         })}
       </nav>
     </div>
     {list && "failure" in list ? failure(list.failure, scope === "project")
       : rows.length === 0 ? <ModuleState kind="empty" title="No connections yet" detail="Add a connection to make its tools available in new sessions." action={addConnection && { label: "Add connection", run: addConnection }} />
-      : <ul className="mcp-rows">{rows.map((item) => {
+      : <ul className="divide-y border-y">{rows.map((item) => {
         const current = row?.name === item.name && row.scope === item.scope;
-        const contents = <><span className="mcp-row-title"><strong title={item.name}>{item.name}</strong><small>{item.scope} · {transportOf(item)}{shadows(item) && ` · ${shadows(item)}`}</small></span>
+        const contents = <><span className="grid min-w-0 [&_strong]:truncate [&_strong]:font-semibold [&_small]:truncate [&_small]:text-muted-foreground"><strong title={item.name}>{item.name}</strong><small>{item.scope} · {transportOf(item)}{shadows(item) && ` · ${shadows(item)}`}</small></span>
           <Status row={item} /></>;
         const next = detailPath(item);
-        return <li key={next} data-current={current}>
-          {offline ? <span className="mcp-row">{contents}</span> : <a className="mcp-row" href={surfaceHref(next)} aria-current={current && detailOpen ? "page" : undefined} onClick={(event) => go(event, next)}>{contents}</a>}
+        return <li key={next} className="group/row" data-current={current}>
+          {offline ? <span className="grid min-h-11 grid-cols-[minmax(0,1fr)_fit-content(40%)] items-center gap-2 px-4 py-2 group-data-[current=true]/row:bg-accent [&:is(a):hover]:bg-accent">{contents}</span> : <a className="grid min-h-11 grid-cols-[minmax(0,1fr)_fit-content(40%)] items-center gap-2 px-4 py-2 group-data-[current=true]/row:bg-accent [&:is(a):hover]:bg-accent" href={surfaceHref(next)} aria-current={current && detailOpen ? "page" : undefined} onClick={(event) => go(event, next)}>{contents}</a>}
         </li>;
       })}</ul>}
   </section>;
@@ -57,11 +59,11 @@ export function ConnectionList({ snapshot, scope, selectScope, activeScope, row,
 export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, detailList, project, go, failure, children }: ViewProps & {
   heading: Ref<HTMLHeadingElement>; detailList: Snapshot[McpScope] | null | undefined; project: boolean; children: ReactNode;
 }) {
-  return <section className="mcp-detail" aria-label="connection detail">
-    {!offline && detailOpen && <a className="mcp-back" href={surfaceHref(LIST)} onClick={(event) => go(event, LIST)}>‹ back to connections</a>}
-    <header className="mcp-detail-head">
+  return <section className="min-w-0 overflow-auto p-4 wrap-anywhere max-[960px]:group-data-[detail=false]:hidden lg:p-8 [&_h2]:text-xl [&_h2]:font-semibold [&_dl]:mb-4 [&_dl]:grid [&_dl]:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] [&_dt]:border-b [&_dt]:py-2 [&_dt]:pe-2 [&_dt]:text-muted-foreground [&_dd]:border-b [&_dd]:py-2" aria-label="connection detail">
+    {!offline && detailOpen && <a className="mb-2 inline-flex min-h-11 items-center text-sm text-accent-foreground hover:underline min-[961px]:hidden" href={surfaceHref(LIST)} onClick={(event) => go(event, LIST)}>‹ back to connections</a>}
+    <header className="mb-4 flex flex-wrap items-start justify-between gap-3 [&>div:empty]:hidden">
       {row ? <div><h2 ref={heading} tabIndex={-1}>{row.name}</h2>
-        <p className="mcp-detail-meta"><Status row={row} /><span>{row.scope === "user" ? "User" : "Project"} scope{shadows(row) ? ` (${shadows(row)})` : ""}</span></p></div>
+        <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Status row={row} /><span>{row.scope === "user" ? "User" : "Project"} scope{shadows(row) ? ` (${shadows(row)})` : ""}</span></p></div>
         : detailOpen ? <h2 ref={heading} tabIndex={-1}>connection detail</h2> : null}
       {children}
     </header>
@@ -72,13 +74,13 @@ export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, d
 
 function Status({ row }: { row: McpRow }) {
   const status = statusOf(row);
-  return <span className="mcp-status" data-status={status}>{labels[status]}</span>;
+  return <Badge variant="outline" className="justify-self-end whitespace-normal wrap-anywhere data-[status=malformed]:text-destructive" data-status={status}>{labels[status]}</Badge>;
 }
 
 function ConnectionFields({ row }: { row: McpRow }) {
   const config = row.config;
   return <>
-    <div className="mcp-rule"><h3>Configuration</h3><span>Secrets are hidden</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b py-2 text-sm text-muted-foreground [&_h3]:font-semibold [&_h3]:text-foreground"><h3>Configuration</h3><span>Secrets are hidden</span></div>
     <dl>
       <dt>transport</dt><dd>{transportOf(row)}</dd>
       {config.transport === "stdio" && <>
@@ -95,7 +97,7 @@ function ConnectionFields({ row }: { row: McpRow }) {
         <dt>client secret</dt><dd>{config.oauth.secretProvided ? "provided (redacted)" : "not provided"}</dd>
       </>}
     </dl>
-    <div className="mcp-rule"><h3>Tools <small>{row.toolCount}</small></h3><span>Reported by Zeta, not checked live</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b py-2 text-sm text-muted-foreground [&_h3]:font-semibold [&_h3]:text-foreground"><h3>Tools <small>{row.toolCount}</small></h3><span>Reported by Zeta, not checked live</span></div>
     {row.toolCount === 0 && <ModuleState kind="empty" title="No tools reported" detail="Zeta has not reported any tools for this connection." />}
   </>;
 }
@@ -107,12 +109,12 @@ export function FailedRead({ failure, project, retry, reading, offline }: { fail
     try { await navigator.clipboard.writeText(JSON.stringify(failure)); setCopied("details copied"); }
     catch { setCopied("could not copy details"); }
   };
-  return <div className="mcp-failure">
+  return <div className="grid gap-2">
     <ModuleState kind="failed" title="zeta could not read mcp configuration" detail={project ? "zeta’s current project is unavailable or its configuration could not be read."
       : failure.reason === "operation_busy" ? "zeta is busy. try again." : "retry to read the current configuration from disk."} />
-    {!offline && <div className="mcp-failure-actions">
-      <button type="button" className="primary" onClick={retry} disabled={reading}>{reading ? "reading…" : "retry"}</button>
-      <button type="button" onClick={() => void copy()}>copy details</button>
+    {!offline && <div className="flex flex-wrap items-center gap-2 px-4 pb-4">
+      <Button variant="outline" type="button"  onClick={retry} disabled={reading}>{reading ? "reading…" : "retry"}</Button>
+      <Button variant="outline" type="button" onClick={() => void copy()}>copy details</Button>
       <span role="status">{copied}</span>
     </div>}
   </div>;

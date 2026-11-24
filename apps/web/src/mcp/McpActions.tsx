@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useState, type RefObject } from "react";
 import { Confirmation, reviewText, type ReviewText, type Result } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
@@ -66,16 +67,16 @@ export function McpActions({ owner, row, revision, online, heading }: {
   };
   const enable = row && revision && { action: "enabled", name: row.name, scope: row.scope, revision, value: !row.enabled } as const;
   return <>
-    {row && <section className="mcp-actions" aria-label="configuration actions">
+    {row && <section className="flex flex-wrap items-start gap-2" aria-label="configuration actions">
       {enable && <Confirmation level={1} label={reviewText("new sessions")} value={row.enabled ? yes : no}
         action={row.enabled ? labels.disable : labels.enable} disabled={!available} surface={WRITE_SURFACE.mcpEnabled}
         keep={keep} effect={row.enabled ? reviewText(`new sessions will not receive this configured server; ${running}`)
           : reviewText(`new sessions can receive this configured server if it meets the trust and configuration requirements; ${running}`)}
         {...operation(owner, enable)} onCommitted={() => {}} />}
-      <div className="mcp-review-actions">
-        {row.scope === "project" && row.config.transport === "stdio" && <button type="button" disabled={!available} data-write-surface={WRITE_SURFACE.mcpTrusted}
-          className="ui-button" onClick={(event) => start(event.currentTarget, "trusted")}>{row.trusted ? labels.untrust : labels.trust}</button>}
-        <button type="button" disabled={!available} data-write-surface={WRITE_SURFACE.mcpRemove} className="ui-button mcp-remove" onClick={(event) => start(event.currentTarget, "remove")}>{labels.remove}</button>
+      <div className="flex flex-wrap items-center gap-2">
+        {row.scope === "project" && row.config.transport === "stdio" && <Button variant="outline" type="button" disabled={!available} data-write-surface={WRITE_SURFACE.mcpTrusted}
+           onClick={(event) => start(event.currentTarget, "trusted")}>{row.trusted ? labels.untrust : labels.trust}</Button>}
+        <Button variant="outline" type="button" disabled={!available} data-write-surface={WRITE_SURFACE.mcpRemove} className="text-destructive" onClick={(event) => start(event.currentTarget, "remove")}>{labels.remove}</Button>
       </div>
     </section>}
     <div ref={setActivity} />

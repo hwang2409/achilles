@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useEffect, useMemo, useRef, useSyncExternalStore, type MouseEvent, type ReactNode, type Ref } from "react";
 import { RunProvider, Timeline } from "@fulcrum/react";
 import type { ZetaClient } from "@fulcrum/zeta";
@@ -15,7 +17,7 @@ export const stamp = (time: number) => new Date(time).toLocaleTimeString([], { h
 export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
 const sessionHref = (id: string) => surfaceHref(`/sessions/${encodeURIComponent(id)}`);
 export function StateTag({ row }: { row: AgentRun }) {
-  return <span className="agents-state" data-status={row.status}>{row.status}</span>;
+  return <Badge variant="secondary" data-agent-state className="align-middle data-[status=failed]:text-destructive data-[status=running]:text-accent-foreground" data-status={row.status}>{row.status}</Badge>;
 }
 
 export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follow, client, send, controls, reportedAt, refreshing, refresh }: {
@@ -23,9 +25,9 @@ export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follo
   back: Ref<HTMLAnchorElement>; follow: (event: MouseEvent<HTMLAnchorElement>) => void;
   client: ZetaClient | null; send: ChildSendOwner; controls: ChildControls; reportedAt: number; refreshing: boolean; refresh: () => void;
 }) {
-  return <section className="agents-detail" aria-label="agent run detail">
-    <div className="agents-detail-scroll">
-      {(id || invalid) && <a className="agents-back" ref={back} href={surfaceHref("/agents")} data-back="true" onClick={follow}>‹ all runs</a>}
+  return <section className="min-w-0 flex flex-col overflow-hidden max-[760px]:group-data-[detail=false]:hidden [@media(max-height:500px)]:group-data-[detail=false]:hidden" aria-label="agent run detail">
+    <div className="min-h-0 flex-1 overflow-auto">
+      {(id || invalid) && <a className="inline-flex min-h-10 items-center text-sm text-accent-foreground hover:underline mx-4 md:mx-8" ref={back} href={surfaceHref("/agents")} data-back="true" onClick={follow}>‹ all runs</a>}
       {chosen ? <RunDetail key={id} row={chosen} parent={parent} rootTitle={title!} />
         : <ModuleState kind="empty" title={id || invalid ? "run not in this view" : "select a run"}
           detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
@@ -47,7 +49,7 @@ function RunDetail({ row, parent, rootTitle }: { row: AgentRun; parent?: AgentRu
     ["turns", row.turnsUsed], ["tool calls", row.toolCount], ["current step", row.currentStep],
     ["execution", row.background === undefined ? undefined : row.background ? "background" : "foreground"],
   ];
-  return <header className="agents-run-head">
+  return <header data-agent-run-heading className="grid gap-3 p-4 wrap-anywhere md:p-8 [&_h2]:text-xl [&_h2]:font-semibold [&_p]:text-sm [&_p]:text-muted-foreground [&_dl]:divide-y [&_dl]:border-y [&_dl>div]:grid [&_dl>div]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] [&_dl>div]:gap-2 [&_dl>div]:py-2 [&_dt]:text-muted-foreground [&_a]:underline">
       <h2>{row.agentType && row.description && <span>{row.agentType}</span>} {row.description || row.agentType || "agent run"}</h2>
       <p><StateTag row={row} /> <span title={row.runId}>· run {runDisplayId(row.agentType, row.runId)}</span></p>
       <dl>{fields.filter(([, value]) => value !== undefined && value !== false && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
@@ -55,7 +57,7 @@ function RunDetail({ row, parent, rootTitle }: { row: AgentRun; parent?: AgentRu
 }
 
 function RunActivity({ client, row }: { client: ZetaClient | null; row: AgentRun }) {
-  return <section aria-label="child activity" className="agents-activity">
+  return <section aria-label="child activity" className="grid gap-3 border-t p-4 text-muted-foreground md:p-8 [&_h3]:font-semibold [&_h3]:text-foreground">
       <h3>activity <small>stored transcript</small></h3>
       {client && childHistorySupported(client) ? <RunHistory client={client} row={row} /> : <p>{client ? newerHistory : "connect to zeta to read this transcript."}</p>}
   </section>;
@@ -73,7 +75,7 @@ function RunHistory({ client, row }: { client: ZetaClient; row: AgentRun }) {
     {result.loading && <ModuleState kind="loading" title="reading child history" />}
     {result.warning && <p role="status">{result.warning}</p>}
     {result.stale && <p role="status">run changed · refresh to read the latest stored history</p>}
-    {!result.limited && <button type="button" disabled={result.loading} onClick={() => void owner.refresh()}>refresh transcript</button>}
-    {result.result && (result.progress?.complete && result.progress.messages === 0 ? <p>no stored messages</p> : <div className="agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
+    {!result.limited && <Button variant="outline" type="button" disabled={result.loading} onClick={() => void owner.refresh()}>refresh transcript</Button>}
+    {result.result && (result.progress?.complete && result.progress.messages === 0 ? <p>no stored messages</p> : <div className="h-[clamp(10rem,50dvh,34rem)] [&_[data-part=timeline]]:py-2"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
   </>;
 }

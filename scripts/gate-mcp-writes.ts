@@ -14,7 +14,7 @@ const config = (name: string, enabled: boolean, args: string[]) => ({ servers: {
 const connection = (scope: string, name: string) => `/connections/${scope}/${name}`;
 const confirm = (tab: Page) => tab.locator(".confirmation-primary");
 const action = (tab: Page, kind: "enabled" | "trusted" | "remove") => tab.locator(`[data-write-surface="mcp.${kind}"]`);
-const settings = (tab: Page) => tab.locator(".mcp-actions");
+const settings = (tab: Page) => tab.locator("[aria-label='configuration actions']");
 
 export async function gateMcpWrites(browser: Browser, origin: string, home: string, project: string, screenshotDir?: string) {
   const homeConfig = join(home, "mcp.json"), projectConfig = join(project, ".zeta", "mcp.json"), trust = join(home, "mcp-trust.json");

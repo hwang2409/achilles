@@ -114,7 +114,7 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await dialog.getByRole("textbox", { name: /^type/ }).fill(await name(main));
     await dialog.getByRole("button", { name: "cancel run" }).click();
     await main.getByText("cancellation requested.", { exact: false }).waitFor();
-    await waitFor(async () => await main.locator(".agents-run-head .agents-state[data-status=canceled]").count() === 1, "terminal canceled row after refresh");
+    await waitFor(async () => await main.locator("[data-agent-run-heading] [data-agent-state][data-status=canceled]").count() === 1, "terminal canceled row after refresh");
     await capture(main, "canceled-run-390");
     const [spawn, cancel] = frames;
     if (frames.length !== 2 || spawn?.role !== "controller" || spawn.method !== "child_run_spawn" || spawn.params.session_id !== root || spawn.params.background !== true ||

@@ -8,7 +8,7 @@ const opts = { timeout: 10_000 };
 const texts = ["name", "command", "argument", "environment-key", "environment-value", "url", "header-key", "header-value", "id", "secret"] as const;
 const mark = (field: typeof texts[number]) => `mcp-add-canary-${field}`;
 const receipt = (tab: Page) => tab.getByText(/^new sessions use this configuration/);
-const addForm = (tab: Page) => tab.locator(".mcp-add-form");
+const addForm = (tab: Page) => tab.locator("[data-connection-add-form]");
 const startAdd = (tab: Page) => tab.locator(`[data-write-surface="${WRITE_SURFACE.mcpAdd}"]`).click(opts);
 const control = (tab: Page, name: string) => addForm(tab).locator(`[name="${name}"]`);
 const button = (tab: Page, name: string) => tab.getByRole("button", { name, exact: true });
@@ -69,7 +69,7 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
     // Allow resize and browser font layout to settle, then require a stable visible surface.
     await tab.evaluate(() => document.fonts.ready.then(() => undefined));
     await Bun.sleep(300);
-    const layout = () => tab.evaluate(() => JSON.stringify([innerWidth, innerHeight, ...[...document.querySelectorAll(".mcp-add, dialog")].map((node) => node.getBoundingClientRect().toJSON())]));
+    const layout = () => tab.evaluate(() => JSON.stringify([innerWidth, innerHeight, ...[...document.querySelectorAll("[aria-label='Add a connection'], [role='alertdialog'], [role='dialog']")].map((node) => node.getBoundingClientRect().toJSON())]));
     const before = await layout();
     await tab.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     if (before !== await layout()) throw new Error("add screenshot layout is not stable");
