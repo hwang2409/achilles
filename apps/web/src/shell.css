@@ -44,9 +44,10 @@
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible) { position: relative; }
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible)::after { content: ""; position: absolute; inset: 0 -6px; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 2px var(--fulcrum-accent); }
 /* the pencil shows only on the open or focused row, never on hover; F2 renames any row */
-.chat-row-rename { position: absolute; top: 1px; right: 1px; width: 40px; height: 40px; padding: 0; visibility: hidden; background: transparent; }
+/* full row height and end-aligned, so the glyph centers in the row and ends at the row's inner padding */
+.chat-row-rename { position: absolute; top: 0; bottom: 0; right: var(--g1-space-2); display: grid; place-items: center end; width: 24px; min-height: 0; padding: 0; visibility: hidden; color: var(--g1-muted); font-size: inherit; background: transparent; }
 :is(.chat-row.current, .chat-row:focus) .chat-row-rename { visibility: visible; }
-:is(.chat-row.current, .chat-row:focus):not(.editing) > strong { padding-right: 40px; }
+:is(.chat-row.current, .chat-row:focus):not(.editing) > strong { padding-right: 28px; }
 /* editing drops the pencil, so the input can use the row's full width instead of the pencil's gutter */
 /* the editor sits over the hidden title in one grid cell, so the row keeps its height and its page/time line */
 .chat-row.editing { display: grid; }

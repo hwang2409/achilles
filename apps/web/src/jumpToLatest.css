@@ -16,8 +16,6 @@
   min-height: 0;
 }
 .transcript [data-part="jump-to-latest-lane"]:not([data-jump-owned="true"]) { display: none !important; }
-/* Reserve the lane when no jump control is needed, keeping the scrollport stable. */
-.transcript:has(> [data-part="timeline-frame"]):not(:has(> [data-jump-owned="true"])) { padding-block-end: 48px; }
 .transcript > [data-part="jump-to-latest-lane"] {
   display: flex;
   flex: none;
