@@ -1,4 +1,4 @@
-.command-palette, .shortcuts-sheet { padding: 0; color: var(--fulcrum-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
+.command-palette, .shortcuts-sheet { padding: 0; color: var(--fulcrum-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid color-mix(in srgb, var(--g1-fg) 14%, transparent); border-radius: var(--g1-radius-container); box-shadow: var(--g1-shadow-floating); }
 .command-palette { width: min(680px, calc(100vw - 32px)); margin-top: 15vh; }
 .command-palette[open] { display: flex; flex-direction: column; max-height: 70vh; }
 
@@ -14,7 +14,7 @@
 .palette-results { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
 .palette-results > div + div { border-top: 1px solid var(--fulcrum-border); }
 .palette-results h2 { margin: 0; padding: 14px 20px 6px; color: var(--fulcrum-muted); font-size: inherit; font-weight: 600; }
-.palette-option { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: 40px; box-sizing: border-box; padding: 9px 20px; cursor: pointer; }
+.palette-option { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: var(--g1-control-height); box-sizing: border-box; margin-inline: 6px; padding: 6px 14px; border-radius: var(--g1-radius-control); cursor: pointer; }
 /* the label takes the free space, so a detail and a shortcut both sit in the right column */
 .palette-option > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-option small, .palette-option kbd { flex: none; color: var(--fulcrum-muted); }
@@ -30,7 +30,7 @@
 .shortcuts-sheet[open] { display: flex; flex-direction: column; }
 .sheet-title { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 20px; border-bottom: 1px solid var(--fulcrum-border); }
 .sheet-title h2 { margin: 0; font-size: var(--g1-type-title); }
-.sheet-title button { padding: 5px 9px; color: var(--fulcrum-fg); font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
+.sheet-title button { min-height: var(--g1-control-height); padding: 0 9px; color: var(--fulcrum-fg); font: inherit; background: transparent; border: 0; }
 .sheet-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 32px; min-height: 0; padding: 16px 20px 20px; overflow-y: auto; overscroll-behavior: contain; }
 .sheet-groups h3 { margin: 8px 0; color: var(--fulcrum-muted); font-size: inherit; font-weight: 600; }
 .sheet-groups dl { margin: 0; }
@@ -39,7 +39,7 @@
 .sheet-groups kbd { font: inherit; color: var(--fulcrum-accent); }
 
 @media (max-width: 760px) {
-  .command-palette, .shortcuts-sheet { width: 100vw; max-width: 100vw; margin: 0 0 auto; border-width: 0 0 1px; }
+  .command-palette, .shortcuts-sheet { width: 100vw; max-width: 100vw; margin: 0 0 auto; border-width: 0 0 1px; border-radius: 0; }
   .command-palette[open] { max-height: 85vh; }
   .shortcuts-sheet { max-height: 100vh; }
   .sheet-groups { grid-template-columns: minmax(0, 1fr); }
