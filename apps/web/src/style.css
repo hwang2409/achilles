@@ -2,6 +2,7 @@
   font-family: var(--achilles-ui-font, var(--g1-font-ui));
   font-size: var(--achilles-ui-size, var(--g1-type-chat));
   line-height: var(--g1-leading-chat);
+  letter-spacing: .01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;

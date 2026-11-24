@@ -21,7 +21,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
         ansi: style.getPropertyValue("--fulcrum-ansi-blue").trim(),
       };
     });
-    const background = scheme === "light" ? "rgb(255, 255, 255)" : "rgb(17, 17, 17)";
+    const background = scheme === "light" ? "rgb(255, 255, 255)" : "rgb(22, 22, 22)";
     if (appearance.scheme !== scheme || appearance.background !== background || !appearance.syntax || !appearance.ansi)
       throw new Error(`wrong ${scheme} appearance: ${JSON.stringify(appearance)}`);
   };
@@ -29,13 +29,13 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
     const style = getComputedStyle(node);
     const sample = document.createElement("span");
     sample.hidden = true;
-    sample.style.fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif";
+    sample.style.fontFamily = '"Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     document.body.append(sample);
     const expectedUi = getComputedStyle(sample).fontFamily;
     sample.remove();
     return { ui: style.fontFamily, expectedUi, mono: style.getPropertyValue("--achilles-code-font"), size: style.fontSize };
   });
-  if (fresh.ui !== fresh.expectedUi || fresh.mono.trim() !== 'ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace' || fresh.size !== "15px")
+  if (fresh.ui !== fresh.expectedUi || fresh.mono.trim() !== '"SF Mono", SFMono-Regular, ui-monospace, "Cascadia Code", Menlo, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace' || fresh.size !== "15px")
     throw new Error(`wrong fresh typography: ${JSON.stringify(fresh)}`);
   const jetBrainsFaces = () => page.evaluate(() => [...document.fonts].filter(face => face.family.includes("JetBrains Mono")).length);
   if (await jetBrainsFaces()) throw new Error("JetBrains Mono was registered with default settings");
@@ -94,7 +94,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
     await page.getByRole("button", { name: "reset to defaults" }).click();
     if (await theme(page) !== null) throw new Error("reset did not restore the automatic theme");
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
-    if (saved?.theme !== "auto" || saved.uiFont !== "system" || saved.codeFont !== "system-mono" || saved.size !== 15 || saved.autoApproveDefault !== autoApproveDefault) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
+    if (saved?.theme !== "auto" || saved.uiFont !== "geist" || saved.codeFont !== "system-mono" || saved.size !== 15 || saved.autoApproveDefault !== autoApproveDefault) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
     if (await focused() !== "reset to defaults") throw new Error(`reset dropped focus to ${await focused()}`);
   };
   await page.getByRole("switch", { name: "auto-approve default" }).click();
