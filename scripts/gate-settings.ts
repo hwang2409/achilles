@@ -48,13 +48,15 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   const switchSizes = await page.getByRole("switch").evaluateAll((switches) => switches.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
   if (switchSizes.some(({ width, height }) => width < 38 || height < 24)) throw new Error(`settings switches have the wrong target size: ${JSON.stringify(switchSizes)}`);
   if (screenshots) await page.screenshot({ path: `${screenshots}/04-settings-dialog.png` });
-  await page.getByRole("button", { name: "Light", exact: true }).click();
-  await page.getByRole("button", { name: "IBM Plex Sans" }).click();
-  await page.getByRole("button", { name: "JetBrains Mono", exact: true }).last().click();
+  const light = page.getByRole("radiogroup", { name: "theme", exact: true }).getByRole("radio", { name: "Light", exact: true });
+  await light.click();
+  if (await light.getAttribute("aria-checked") !== "true") throw new Error("Light was not selected");
+  await page.getByRole("radiogroup", { name: "UI font" }).getByRole("radio", { name: "IBM Plex Sans" }).click();
+  await page.getByRole("radiogroup", { name: "code font" }).getByRole("radio", { name: "JetBrains Mono", exact: true }).click();
   const checkSavedMono = async () => {
     await page.waitForFunction(() => [...document.fonts].some(face => face.family.includes("JetBrains Mono")));
     const loaded = await page.evaluate(async () => {
-      const faces = await document.fonts.load('14px "JetBrains Mono"', "text");
+      const faces = await document.fonts.load('14px "JetBrains Mono Variable"', "text");
       return faces.some(face => face.status === "loaded") && getComputedStyle(document.documentElement).getPropertyValue("--achilles-code-font").includes("JetBrains Mono");
     });
     if (!loaded) throw new Error("saved JetBrains Mono did not load and apply");
@@ -99,7 +101,8 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await page.getByRole("switch", { name: "auto-approve default" }).click();
   await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
   if (await focused() !== "auto-approve default") throw new Error(`confirming auto-approve dropped focus to ${await focused()}`);
-  await page.getByRole("button", { name: "Light", exact: true }).click();
+  await light.click();
+  if (await light.getAttribute("aria-checked") !== "true") throw new Error("Light was not selected");
   await resetKeeps(true);
   await page.getByRole("button", { name: "esc" }).click();
   await page.keyboard.press(appShortcut("Comma"));
@@ -135,7 +138,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("body-opened settings escape did not focus the composer"); });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator(".sidebar").waitFor({ state: "hidden" });
+  await page.locator("[data-shell-nav]").waitFor({ state: "hidden" });
   const menuButton = page.getByRole("button", { name: "open menu" });
   await menuButton.click();
   const settingsLink = page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "settings", exact: true });
@@ -155,23 +158,24 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await page.keyboard.press("Tab");
   if (!await firstControl.evaluate((node) => node === document.activeElement && document.activeElement !== document.body)) throw new Error("settings focus did not wrap forward to the first enabled control");
   await page.keyboard.press("Escape");
-  if (await narrowDialog.isVisible()) throw new Error("narrow settings escape did not close the dialog");
-  if (!await page.locator("aside.sidebar").isVisible()) throw new Error("settings escape closed the drawer before the dialog");
+  await gateWait.playwright(narrowDialog, "waitFor", { state: "hidden" }).catch(() => { throw new Error("narrow settings escape did not close the dialog"); });
+  if (!await page.locator("[data-shell-nav]").isVisible()) throw new Error("settings escape closed the drawer before the dialog");
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("href")?.startsWith("/settings")).catch(() => { throw new Error("narrow settings escape did not restore opener focus"); });
   await page.keyboard.press("Escape");
-  await page.locator("aside.sidebar").waitFor({ state: "hidden" });
+  await page.locator("[data-shell-nav]").waitFor({ state: "hidden" });
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu").catch(() => { throw new Error("drawer escape did not restore menu focus"); });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${origin}/allow`);
   const menu = page.getByRole("button", { name: "open menu" });
   await menu.click();
-  await page.mouse.click(380, 400);
+  await page.locator('[data-slot="sheet-overlay"]').click({ position: { x: 380, y: 400 } });
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu");
   await menu.click();
-  const sidebar = page.locator(".sidebar");
+  const sidebar = page.locator("[data-shell-nav]");
   // hold the drawer at the first frame of its slide-in, so Tab is pressed while the drawer is still off screen.
-  await sidebar.evaluate((element) => Promise.all(element.getAnimations().map(async (animation) => { animation.pause(); await animation.ready; animation.currentTime = 0; })));
-  await gateWait.playwright(page, "waitForFunction", () => document.querySelector(".sidebar")?.contains(document.activeElement)).catch(() => { throw new Error("opening the drawer did not move focus into it"); });
+  const drawerMotion = page.getByRole("dialog", { name: "navigation menu" });
+  await drawerMotion.evaluate((element) => Promise.all(element.getAnimations().map(async (animation) => { animation.pause(); await animation.ready; animation.currentTime = 0; })));
+  await gateWait.playwright(page, "waitForFunction", () => document.querySelector("[data-shell-nav]")?.contains(document.activeElement)).catch(() => { throw new Error("opening the drawer did not move focus into it"); });
   const first = await page.evaluateHandle(() => document.activeElement);
   const last = await sidebar.evaluateHandle((element, selector) => Array.from(element.querySelectorAll<HTMLElement>(selector)).filter((control) => control.tabIndex >= 0 && control.checkVisibility({ visibilityProperty: true })).at(-1)!, focusable);
   await last.focus();
@@ -179,7 +183,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control escaped the sidebar (last control)");
   await page.keyboard.press("Shift+Tab");
   if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control");
-  await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
+  await drawerMotion.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
   await openSettings(page, gateWait);
   const drawerSettings = page.getByRole("dialog", { name: "settings" });
   await gateWait.playwright(drawerSettings, "waitFor", { state: "visible" });
@@ -202,7 +206,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await last.focus();
   await page.keyboard.press("Tab");
   if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer focus trap did not resume after native settings closed");
-  await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
+  await drawerMotion.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
   if (screenshots) await page.screenshot({ path: `${screenshots}/drawer-focus.png` });
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 1440, height: 900 });

@@ -23,9 +23,9 @@ const densities: Array<[Density, string]> = [["comfortable", "Comfortable"], ["c
 const themeLabels: Record<ThemeChoice, string> = { auto: "System", "g1-light": "Light", "g1-dark": "Dark" };
 
 function Segments<T extends string | number>({ label, value, choices, onChange, surface }: { label: string; value: T; choices: Array<[T, string]>; onChange(value: T): void; surface: string }) {
-  return <ToggleGroup type="single" variant="outline" className="flex-wrap gap-1" aria-label={label} value={String(value)} data-write-surface={surface}
+  return <ToggleGroup type="single" role="radiogroup" variant="outline" className="flex-wrap gap-1" aria-label={label} value={String(value)} data-write-surface={surface}
     onValueChange={(next) => { const choice = choices.find(([item]) => String(item) === next); if (choice) onChange(choice[0]); }}>
-    {choices.map(([choice, text]) => <ToggleGroupItem key={choice} type="button" value={String(choice)} aria-pressed={choice === value} className="min-h-9 rounded-md border data-[state=on]:bg-primary data-[state=on]:text-primary-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]">{text}</ToggleGroupItem>)}
+    {choices.map(([choice, text]) => <ToggleGroupItem key={choice} type="button" value={String(choice)} className="min-h-9 rounded-md border data-[state=on]:bg-primary data-[state=on]:text-primary-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]">{text}</ToggleGroupItem>)}
   </ToggleGroup>;
 }
 
