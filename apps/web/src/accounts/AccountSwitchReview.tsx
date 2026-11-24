@@ -7,7 +7,7 @@ import { createAccountSwitch, type SwitchTarget } from "./accountSwitch";
 type OpenSwitch = (target: SwitchTarget, surface: WriteSurfaceId, opener: HTMLElement | null) => void;
 const Activity = createContext<(node: HTMLDivElement | null) => void>(() => {});
 export function AccountSwitchReceipt() {
-  return <div ref={useContext(Activity)} className="account-switch-receipt" />;
+  return <div ref={useContext(Activity)} className="not-has-[time]:hidden" />;
 }
 
 const SwitchReview = createContext<OpenSwitch>(() => {});

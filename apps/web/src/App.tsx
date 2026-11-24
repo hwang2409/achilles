@@ -39,7 +39,6 @@ import { backoff, supportsFeature, type Connection, type ConnectionState } from 
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
-import "./style.css";
 import { continuationNotification } from "./chat/continuation";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 
@@ -498,7 +497,7 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
   });
   const pending = item?.type === "approval" && !item.ended;
   const control = !pending ? null : observer ? <>
-    <button type="button" aria-label="take control to answer" aria-disabled={working || undefined} onClick={async () => {
+    <Button type="button" variant="outline" className="min-h-10 border-ring text-ring aria-disabled:cursor-wait aria-disabled:opacity-65" aria-label="take control to answer" aria-disabled={working || undefined} onClick={async () => {
       if (working) return;
       setWorking(true); setRefusal(null);
       // set before the take: the new client can render this card before the take resolves. a refusal keeps observer.
@@ -506,12 +505,12 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
       const reason = await takeControl();
       if (reason !== null) took.current = null;
       setRefusal(reason); setWorking(false);
-    }}>{working ? "taking control…" : "take control"}</button>
+    }}>{working ? "taking control…" : "take control"}</Button>
     {refusal && <span role="status">{refusal}</span>}
   </> : took.current?.id === id ? <span role="status">this tab is now in control</span> : null;
   return <>
     <Approval id={id} {...(observer ? { disabledReason: "this tab is not in control · take control to answer" } : decision)} />
-    {row && control && createPortal(<div className="approval-control">{control}</div>, row)}
+    {row && control && createPortal(<div className="flex basis-full flex-wrap items-center gap-x-3 gap-y-2 text-muted-foreground [&>span]:text-pretty">{control}</div>, row)}
   </>;
 }
 

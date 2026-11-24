@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useState, type ReactNode } from "react";
 import { formatBytes, formatCount, formatDuration, formatPercent } from "./format";
 import type { SpanEvent, TelemetrySpan } from "./telemetry-types";
@@ -20,7 +21,7 @@ const bool = (value: boolean | null) => value === null ? null : value ? "yes" : 
 type Field = [string, ReactNode];
 function Fields({ rows }: { rows: Field[] }) {
   const present = rows.filter(([, value]) => value != null);
-  return present.length > 0 && <dl className="td-fields">{present.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
+  return present.length > 0 && <dl className="mt-2 grid gap-1 text-xs [&>div]:grid [&>div]:grid-cols-[1fr_1.5fr] [&>div]:gap-2 [&_dt]:text-muted-foreground [&_dd]:wrap-anywhere">{present.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
 }
 
 export function SpanInspector({ span, first, traceId, inline = false, close }: { span: TelemetrySpan; first: number; traceId: string; inline?: boolean; close?: () => void }) {
@@ -34,16 +35,16 @@ export function SpanInspector({ span, first, traceId, inline = false, close }: {
   const cache = cacheShare === null ? count(span.cache_read_tokens) : `${count(span.cache_read_tokens)} · ${cacheShare}`;
   const tokens: Field[] = [["input", count(span.input_tokens)], ["cache read", cache], ["cache write", count(span.cache_write_tokens)], ["output", count(span.output_tokens)]];
   const full = !inline || expanded;
-  return <div className={inline ? "td-inspector-inline" : "td-inspector-detail"}>
-    {!inline && <header className="td-inspector-head"><div><h2><span aria-hidden="true" className={`td-mark td-${spanTone(span)}`}>{span.status === "error" ? "▲" : "■"}</span> {spanLabel(span)}</h2><p className="tm-dim">{span.operation} span · <span className={span.status === "error" ? "tm-danger" : "tm-ok"}>{state}</span></p></div><button type="button" className="tm-link" aria-label="close span inspector" onClick={close}>×</button></header>}
-    {inline && !expanded && <Fields rows={[["first token", duration(span.ttft_ns)], ...tokens, ["retry", retryCount ? <span className="tm-warn">{retryCount}{retries[0]?.retry_reason ? ` · ${retries[0].retry_reason}` : ""}{retries[0] ? ` · +${formatDuration(Math.max(0, retries[0].time_ns - span.start_ns))}` : ""}</span> : null]]} />}
+  return <div className="grid gap-3 [&_section]:border-b [&_section]:pb-3 [&_h3]:font-semibold">
+    {!inline && <header className="flex items-start justify-between gap-2 [&_h2]:font-semibold"><div><h2><span aria-hidden="true" data-tone={spanTone(span)} className="data-[tone=error]:text-destructive">{span.status === "error" ? "▲" : "■"}</span> {spanLabel(span)}</h2><p className="text-muted-foreground">{span.operation} span · <span className={span.status === "error" ? "text-destructive" : "tm-ok"}>{state}</span></p></div><Button variant="outline" type="button" aria-label="close span inspector" onClick={close}>×</Button></header>}
+    {inline && !expanded && <Fields rows={[["first token", duration(span.ttft_ns)], ...tokens, ["retry", retryCount ? <span className="text-muted-foreground">{retryCount}{retries[0]?.retry_reason ? ` · ${retries[0].retry_reason}` : ""}{retries[0] ? ` · +${formatDuration(Math.max(0, retries[0].time_ns - span.start_ns))}` : ""}</span> : null]]} />}
     {full && <>
-      <div className="td-inspector-times"><span className="tm-dim">duration<strong>{formatDuration(span.duration_ns)}</strong></span><span className="tm-dim">starts at<strong>+{start}</strong></span></div>
-      {span.status === "error" && <section><h3 className="tm-danger">error</h3><Fields rows={[["type", span.error_type], ["code", span.error_code]]} /></section>}
+      <div className="flex flex-wrap gap-3 border-y py-2 [&_strong]:block [&_strong]:text-foreground"><span className="text-muted-foreground">duration<strong>{formatDuration(span.duration_ns)}</strong></span><span className="text-muted-foreground">starts at<strong>+{start}</strong></span></div>
+      {span.status === "error" && <section><h3 className="text-destructive">error</h3><Fields rows={[["type", span.error_type], ["code", span.error_code]]} /></section>}
       {span.operation === "chat" && <>
         <section><h3>model</h3><Fields rows={[["provider", span.provider], ["request model", span.request_model], ["response model", span.response_model], ["finish reason", span.finish_reason], ["streamed", bool(span.stream)], ["first token", duration(span.ttft_ns)], ["retries", count(span.retry_count)]]} /></section>
-        {(span.total_tokens !== null || tokens.some(([, value]) => value !== null)) && <section><div className="td-split"><h3>tokens</h3>{span.total_tokens !== null && <span>{count(span.total_tokens)} <span className="tm-dim">total</span></span>}</div>
-          {span.input_tokens !== null && span.output_tokens !== null && span.input_tokens + span.output_tokens > 0 && <div className="td-token-bar" aria-hidden="true"><i style={{ width: formatPercent(span.input_tokens, span.input_tokens + span.output_tokens)! }} /></div>}
+        {(span.total_tokens !== null || tokens.some(([, value]) => value !== null)) && <section><div className="flex items-baseline justify-between gap-2"><h3>tokens</h3>{span.total_tokens !== null && <span>{count(span.total_tokens)} <span className="text-muted-foreground">total</span></span>}</div>
+          {span.input_tokens !== null && span.output_tokens !== null && span.input_tokens + span.output_tokens > 0 && <div className="mt-2 h-1 bg-primary [&>span]:block [&>span]:h-full [&>span]:bg-muted-foreground" aria-hidden="true"><i style={{ width: formatPercent(span.input_tokens, span.input_tokens + span.output_tokens)! }} /></div>}
           <Fields rows={tokens} />
         </section>}
       </>}
@@ -51,18 +52,18 @@ export function SpanInspector({ span, first, traceId, inline = false, close }: {
       {span.operation === "context_compact" && <section><h3>compaction</h3><Fields rows={[["emergency", bool(span.emergency)], ["tokens before", count(span.tokens_before)], ["tokens after", count(span.tokens_after)]]} /></section>}
       {(span.operation === "invoke_agent" || span.operation === "turn") && <section><h3>{span.operation === "turn" ? "turn" : "agent"}</h3><Fields rows={[["agent", span.agent_name], ["depth", span.agent_depth], ["background", bool(span.background)], ["turn number", span.turn_number], ["outcome", span.outcome], ["notification", bool(span.notification)], ["tool count", span.tool_count]]} /></section>}
       {(span.operation === "serve" || span.operation === "mcp") && <section><h3>{span.operation}</h3><Fields rows={[["rpc method", span.rpc_method], ["mcp method", span.mcp_method], ["server", span.mcp_server], ["tool", span.mcp_tool], ["prompt name", span.mcp_prompt], ["protocol", span.mcp_protocol]]} /></section>}
-      {span.events.length > 0 && <section><h3>events · {formatCount(span.events.length)}</h3><ul className="td-events">{span.events.map((event, index) => <li key={index}>
-        <div className="td-split"><span>{isRetry(event) ? <><span className="tm-warn" aria-hidden="true">◆</span> client retry</> : isApproval(event) ? "approval resolved" : event.name === "zeta.approval.requested" ? "approval requested" : event.name}</span><span className="tm-dim">+{formatDuration(Math.max(0, event.time_ns - span.start_ns))}</span></div>
-        <p className="tm-dim">{[event.retry_attempt !== null ? `attempt ${event.retry_attempt}` : null, event.retry_reason, event.retry_delay !== null ? `waited ${formatCount(event.retry_delay)} ms` : null, event.retry_after ? "retry-after" : null, event.decision, event.scope, duration(event.duration_ns)].filter((value) => value != null).join(" · ")}</p>
+      {span.events.length > 0 && <section><h3>events · {formatCount(span.events.length)}</h3><ul className="mt-2 divide-y text-xs [&>li]:py-2">{span.events.map((event, index) => <li key={index}>
+        <div className="flex items-baseline justify-between gap-2"><span>{isRetry(event) ? <><span className="text-muted-foreground" aria-hidden="true">◆</span> client retry</> : isApproval(event) ? "approval resolved" : event.name === "zeta.approval.requested" ? "approval requested" : event.name}</span><span className="text-muted-foreground">+{formatDuration(Math.max(0, event.time_ns - span.start_ns))}</span></div>
+        <p className="text-muted-foreground">{[event.retry_attempt !== null ? `attempt ${event.retry_attempt}` : null, event.retry_reason, event.retry_delay !== null ? `waited ${formatCount(event.retry_delay)} ms` : null, event.retry_after ? "retry-after" : null, event.decision, event.scope, duration(event.duration_ns)].filter((value) => value != null).join(" · ")}</p>
       </li>)}</ul></section>}
       <section><h3>identifiers</h3><Fields rows={[["span", span.span_id], ["parent", span.parent_span_id], ["trace", traceId], ["session", span.session_id], ["run", span.run_id], ["parent run", span.parent_run_id], ["request", span.request_id]]} />
-        <button className="tm-button" type="button" onClick={async () => {
+        <Button variant="outline" type="button" onClick={async () => {
           try { await navigator.clipboard.writeText(span.span_id); setCopy("span id copied"); }
           catch { setCopy("could not copy span id"); }
-        }}>copy span id</button>{copy && <p role="status">{copy}</p>}
-        <p className="td-privacy tm-dim">metadata only. no prompts, model output, reasoning, or tool arguments.</p>
+        }}>copy span id</Button>{copy && <p role="status">{copy}</p>}
+        <p className="mt-2 text-xs text-muted-foreground">metadata only. no prompts, model output, reasoning, or tool arguments.</p>
       </section>
     </>}
-    {inline && <button type="button" className="tm-button td-full-fields" aria-expanded={expanded} onClick={() => expand(!expanded)}>{expanded ? "fewer span fields" : "all span fields"}</button>}
+    {inline && <Button variant="outline" type="button" className="mt-2" aria-expanded={expanded} onClick={() => expand(!expanded)}>{expanded ? "fewer span fields" : "all span fields"}</Button>}
   </div>;
 }

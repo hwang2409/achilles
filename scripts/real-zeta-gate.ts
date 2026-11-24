@@ -797,12 +797,14 @@ with _database() as db:
         await observerTelemetry.screenshot({ path: join(screenshotDir, name), animations: "disabled" });
         telemetryArtifacts.push(name);
       };
-      for (const viewport of [{ width: 360, height: 740 }, { width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
+      // The compact layout can fit at 740px; a shorter viewport still exercises scrolling.
+      const scrollHeight = 680;
+      for (const viewport of [{ width: 360, height: scrollHeight }, { width: 360, height: 740 }, { width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
         const size = `${viewport.width}x${viewport.height}`;
         await observerTelemetry.setViewportSize(viewport);
         if (!await banner.isVisible()) throw new Error(`telemetry recovery ${size}: read-only banner is hidden`);
         await observerTelemetry.evaluate(() => document.fonts.ready.then(() => undefined));
-        const notice = observerTelemetry.locator(".telemetry-placeholder");
+        const notice = observerTelemetry.locator("[data-telemetry-unavailable]");
         if (await notice.evaluate(element => element.scrollTop) !== 0) throw new Error("telemetry recovery must be tested without scrolling");
         for (const action of [notice.getByRole("button", { name: "check again", exact: true }), notice.getByRole("link", { name: "back to chats", exact: true })]) {
           const geometry = await action.evaluate(element => {
@@ -818,10 +820,10 @@ with _database() as db:
             element.scrollTop = element.scrollHeight;
             const pane = element.getBoundingClientRect();
             const step = element.querySelector("ol li:last-child")!.getBoundingClientRect();
-            const row = element.querySelector(".telemetry-actions")!.getBoundingClientRect();
+            const row = element.querySelector("[data-telemetry-unavailable-actions]")!.getBoundingClientRect();
             return { scrollTop: element.scrollTop, stepTop: step.top, stepBottom: step.bottom, rowTop: row.top, visible: step.top >= Math.max(0, pane.top) && step.bottom <= Math.min(innerHeight, pane.bottom, row.top) };
           });
-          if (viewport.width === 360 && (!geometry.visible || (viewport.height === 740 && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
+          if (viewport.width === 360 && (!geometry.visible || (viewport.height === scrollHeight && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
           await captureRecovery(`${size}-bottom`);
           await notice.evaluate(element => { element.scrollTop = 0; });
         }
@@ -1533,7 +1535,7 @@ with _database() as db:
     const oneChatObserver = await browser.newPage();
     try {
       await oneChatObserver.goto(readingUrl);
-      await gateWait.playwright(oneChatObserver.locator(".observer-banner"), "waitFor");
+      await gateWait.playwright(oneChatObserver.getByRole("complementary", { name: "observer mode" }), "waitFor");
       await oneChat(oneChatObserver, "observer");
     } finally { await oneChatObserver.close(); }
     await setupMobileSheet(page, 844);
@@ -3402,7 +3404,7 @@ with _database() as db:
   });
   await observerPage.goto(`${origin}/reading?chat=${controllerChat}`);
   const observerStorageBefore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
-  const observerBanner = observerPage.locator(".observer-banner");
+  const observerBanner = observerPage.getByRole("complementary", { name: "observer mode" });
   await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
   await recordRenderedWriteSurfaces(observerPage);
   if (!(await observerBanner.innerText()).includes("another tab controls zeta") || !(await observerBanner.innerText()).includes("live and read-only")) throw new Error("observer banner did not explain the live read-only state");
