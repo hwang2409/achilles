@@ -230,7 +230,10 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
   const oldFormat = view.state === "data" && view.oldFormat;
   const [selection, setSelection] = useState<{ refresh: number; ids: Set<string> }>(() => ({ refresh, ids: new Set() }));
   const [selecting, setSelecting] = useState(false);
-  const [opened, setOpened] = useState<MemoryRow | null>(null);
+  const [openedId, setOpenedId] = useState<string | null>(null);
+  const opened = view.state === "data" ? view.rows.find(({ id }) => id === openedId) : undefined;
+  // A refresh can temporarily have no rows. Forget the id only once the new rows confirm it is gone.
+  if (view.state === "data" && openedId !== null && !opened) setOpenedId(null);
   const lastOpened = useRef<HTMLButtonElement>(null);
   const selected = selecting && selection.refresh === refresh ? selection.ids : new Set<string>();
   const canWrite = !!actions && !oldFormat && memoryWriteAccess(client, !control.observer);
@@ -282,7 +285,7 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
               </label>}
               <button type="button" className="projects-entry" aria-expanded={opened?.id === row.id} onClick={(event) => {
                 lastOpened.current = event.currentTarget;
-                setOpened(row);
+                setOpenedId(row.id);
               }}><span>{summary(row.summary)}</span></button>
             </li>)}
           </ul>
@@ -292,7 +295,7 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
       })}
     </Paged>
     {opened && <ReadingPanel title={kindLabel[opened.kind]} onClose={() => {
-      setOpened(null);
+      setOpenedId(null);
       requestAnimationFrame(() => lastOpened.current?.focus());
     }}>
       <ReadingMarkdown source={summary(opened.summary)} />

@@ -4,7 +4,8 @@ import { createElement } from "react";
 import { ZetaError, type ZetaClient } from "@fulcrum/zeta";
 
 // after test-dom: React must see the registered DOM.
-const { act, cleanup, fireEvent, render, waitFor } = await import("@testing-library/react");
+const { act, cleanup, fireEvent, render, waitFor, within } = await import("@testing-library/react");
+import type { MemoryActions } from "./MemoryActions";
 const { ProjectsModule } = await import("./ProjectsModule");
 
 afterEach(cleanup);
@@ -21,7 +22,7 @@ const answers: Record<string, (params: { cursor?: string | null }) => unknown> =
 
 /** One zeta: `held` methods never answer until the socket that asked closes; `release()` answers a held show.
  * `busy` requests ("method cursor") fail once with -32005 on a live socket. `asked` counts requests over every socket. */
-function fakeZeta() {
+function fakeZeta(responses = answers) {
   const held = new Set<string>();
   const busy = new Set<string>();
   const asked: string[] = [];
@@ -29,14 +30,14 @@ function fakeZeta() {
   const connect = () => {
     const rejects = new Set<(error: unknown) => void>();
     const client = {
-      features: ["state_read_v1"],
+      features: ["state_read_v1", "project_writes_v1"],
       closed: false,
       request: (method: string, params: { cursor?: string | null }) => new Promise((resolve, reject) => {
         if (client.closed) return reject(new ZetaError("closed", 1006));
         asked.push(method);
         if (busy.delete(`${method} ${params.cursor ?? null}`)) return reject(Object.assign(new Error("busy"), { code: -32005 }));
         rejects.add(reject);
-        const answer = () => { rejects.delete(reject); resolve(answers[method]!(params)); };
+        const answer = () => { rejects.delete(reject); resolve(responses[method]!(params)); };
         if (method === "project_show" && held.has(method)) shows.push(answer);
         else if (!held.has(method)) answer();
       }),
@@ -108,3 +109,38 @@ test.each([
     expect(view.getByRole("region", { name: "brief text" }).textContent).toContain("brief text body");
   }],
 ] as const)("%s", async (_name, run) => { await run(fakeZeta()); });
+
+test("an open memory entry follows refresh and closes when removed", async () => {
+  const row = { ...memory("m_review", "decision"), automatic: true, accepted: false };
+  let rows = [row];
+  const zeta = fakeZeta({ ...answers, state_memory: () => page(rows) });
+  const client = zeta.connect() as unknown as ZetaClient;
+  history.replaceState(null, "", "/projects/p_target/memory");
+  const control = { observer: true, dropped: new Set<string>(), withControl: async () => ({ refused: "not used" }) };
+  const actions: MemoryActions = { refresh: 0, working: false, feedback: null, dialog: null, start: async () => {}, dismiss: () => {} };
+  const element = (refresh: number) => createElement(ProjectsModule, { client, control, actions: { ...actions, refresh } });
+  const view = render(element(0));
+  fireEvent.click(await view.findByRole("button", { name: row.summary }));
+  const panel = () => within(view.getByRole("complementary", { name: "Decisions" }));
+  expect(panel().getByRole("button", { name: "review accept" })).toBeTruthy();
+  expect(panel().getByText(row.summary)).toBeTruthy();
+
+  const accepted = { ...row, accepted: true, summary: "refreshed summary" };
+  rows = [accepted];
+  view.rerender(element(1));
+  await view.findByRole("button", { name: accepted.summary });
+  expect(!!panel().queryByRole("button", { name: "review accept" })).toBe(false);
+  expect(!!panel().queryByText(row.summary)).toBe(false);
+  expect(panel().getByText(accepted.summary)).toBeTruthy();
+  expect(panel().getByText("Accepted")).toBeTruthy();
+
+  rows = [];
+  view.rerender(element(2));
+  await view.findByText("no memory");
+  expect(!!view.queryByRole("complementary", { name: "Decisions" })).toBe(false);
+
+  rows = [accepted];
+  view.rerender(element(3));
+  await view.findByRole("button", { name: accepted.summary });
+  expect(!!view.queryByRole("complementary", { name: "Decisions" })).toBe(false);
+});
