@@ -3,12 +3,14 @@
 .brand-mark { position: relative; width: 20px; height: 20px; flex: none; background: var(--g1-primary); }
 
 .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--g1-border); background: var(--g1-sidebar); overflow: hidden; z-index: 4; font-size: calc(var(--achilles-ui-size, var(--g1-type-chat)) - 2px); }
-.chat-group h2 { position: sticky; top: var(--g1-nav-row-height); z-index: 1; height: var(--g1-nav-row-height); box-sizing: border-box; margin: 0; padding: 0 var(--g1-sidebar-inset); background: var(--g1-sidebar); line-height: var(--g1-nav-row-height); }
+/* each date group is one rounded card a touch lighter than the sidebar (orca's grouped sidebar cards); its head is the card's label */
+.chat-group { --chat-group-fill: light-dark(color-mix(in srgb, var(--g1-bg) 60%, var(--g1-sidebar)), color-mix(in srgb, var(--g1-fg) 4%, var(--g1-sidebar))); margin: 0 var(--g1-sidebar-padding) var(--g1-space-2); padding: 0 var(--g1-space-1) var(--g1-space-1); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); background: var(--chat-group-fill); }
+.chat-group h2 { position: sticky; top: var(--g1-nav-row-height); z-index: 1; height: var(--g1-nav-row-height); box-sizing: border-box; margin: 0; padding: 0 calc(var(--g1-space-2) + 1px); background: var(--chat-group-fill); line-height: var(--g1-nav-row-height); }
 .chat-group h2::first-letter, .list-head > span::first-letter { text-transform: uppercase; }
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .brand-row { flex: 0 0 44px; display: flex; align-items: center; gap: var(--g1-space-2); padding: 0 var(--g1-sidebar-inset); }
 .list-head { width: 100%; min-height: var(--g1-nav-row-height); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--g1-sidebar-inset); border: 0; font-size: calc(1em - 1px); font-weight: 600; color: var(--g1-muted); }
-.chat-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--g1-space-2); align-items: baseline; min-height: var(--g1-nav-row-height); margin-inline: var(--g1-sidebar-padding); padding: 2px var(--g1-space-2); border: 1px solid transparent; border-radius: var(--g1-radius-container); align-content: center; }
+.chat-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--g1-space-2); align-items: baseline; min-height: var(--g1-nav-row-height); padding: 2px var(--g1-space-2); border: 1px solid transparent; border-radius: var(--g1-radius-control); align-content: center; }
 .chat-row:hover { background: var(--g1-hover); }
 .chat-row strong { display: -webkit-box; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: inherit; line-height: 18px; }
 .chat-row-meta { overflow: hidden; min-width: 0; color: var(--g1-muted); font: calc(1em - 1px) / 16px var(--achilles-code-font, var(--g1-font-mono)); white-space: nowrap; text-overflow: ellipsis; }
