@@ -2801,7 +2801,7 @@ with _database() as db:
   }, "reply published to the reloaded page while its history read and the reply's row are held");
   const heldHistoryControl = JSON.parse(await Bun.file(control).text());
   await writeControl(control, { ...heldHistoryControl, release_reload_history_barrier: true });
-  await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the kept turn running");
+  await waitFor(async () => await page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^running$/ }).first().isVisible(), "reloaded page shows the kept turn running");
   const heldRowControl = JSON.parse(await Bun.file(control).text());
   await writeControl(control, { ...heldRowControl, release_reload_row_barrier: true });
   await gateWait.playwright(page.getByText("reload book added", { exact: true }), "waitFor", { timeout: 20_000 }).catch(async (error) => {
@@ -2830,7 +2830,7 @@ with _database() as db:
   await allowField.press("Enter");
   await waitFor(async () => (await toolLines())[0] === 1, "running tool output shown before the reload");
   await page.reload();
-  await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the running tool's turn");
+  await waitFor(async () => await page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^running$/ }).first().isVisible(), "reloaded page shows the running tool's turn");
   const runningTool = page.locator('[data-part="tool"][data-state="streaming"]').filter({ hasText: "tool-line before-reload" });
   await waitFor(async () => (await runningTool.count()) === 1, "running tool output from before the reload shown on the reloaded page while the tool runs").catch(async (error) => {
     throw new Error(`${error}\ntranscript after the reload during a running tool: ${redact((await transcript.innerText()).slice(-1500))}`);
