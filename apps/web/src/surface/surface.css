@@ -17,9 +17,9 @@
 .surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0; color: var(--fulcrum-muted); border-color: transparent; }
 .surface-search .palette-button > span { display: none; }
 .place-nav { flex: none; margin: 0 var(--g1-sidebar-padding) var(--g1-space-3); }
-.place-nav h2, .chat-group h2 { font-size: inherit; font-weight: 600; color: var(--g1-muted); }
-.place-nav h2 { margin: var(--g1-space-3) 0 var(--g1-space-1); padding-inline: var(--g1-space-2); }
-.place-nav h2::first-letter, .place-link > span::first-letter { text-transform: uppercase; }
+.chat-group h2 { font-size: inherit; font-weight: 600; color: var(--g1-muted); }
+.place-nav section + section { margin-top: var(--g1-space-4); }
+.place-link > span::first-letter { text-transform: uppercase; }
 .place-link > span { display: block; }
 .place-link { display: flex; align-items: center; gap: var(--g1-space-2); min-height: var(--g1-nav-row-height); padding: 0 var(--g1-space-2); border-radius: var(--g1-radius-control); font-size: inherit; line-height: 1.25; }
 .place-link .waiting-count { margin-left: auto; color: var(--fulcrum-warn); }
@@ -34,7 +34,6 @@
 .sidebar > footer > button { flex: 1; display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-height: 40px; min-width: 0; padding: 0 var(--g1-space-2); border: 0; color: var(--g1-muted); font-size: inherit; }
 .collapse-label { display: block; }
 .collapse-label::first-letter { text-transform: uppercase; }
-.sidebar > footer > button kbd { margin-left: auto; }
 
 .module-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .module-frame > header { min-height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--g1-space-2); border-bottom: 1px solid var(--g1-border); padding: var(--g1-space-2) var(--g1-page-gutter); }
@@ -65,13 +64,12 @@
   .sidebar-collapsed .create-split .place-link span { display: block; font-size: var(--g1-type-kbd); }
   .sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
   .sidebar-collapsed .sidebar-scroll { scrollbar-width: none; }
-  .sidebar-collapsed .sidebar :is(.brand-row strong, .surface-connection, .new-chat b, .new-chat kbd, .surface-search .chat-search, .search-skeleton, .place-link span, .place-link small, .place-nav h2, .chat-list, .collapse-label, footer kbd) { display: none; }
+  .sidebar-collapsed .sidebar :is(.brand-row strong, .surface-connection, .new-chat b, .surface-search .chat-search, .search-skeleton, .place-link span, .place-link small, .chat-list, .collapse-label) { display: none; }
   .sidebar-collapsed :is(.surface-actions, .surface-search, .place-nav) { margin-inline: 6px; }
   .sidebar-collapsed :is(.place-link, .surface-actions > .place-link, .new-chat) { justify-content: center; min-height: 42px; padding: 0; }
   .sidebar-collapsed .surface-search .palette-button { position: static; min-width: 0; }
   .sidebar-collapsed .surface-search .palette-button > span { display: inline; }
   .sidebar-collapsed .surface-search .palette-button > kbd { display: none; }
-  .sidebar-collapsed .place-nav section { border-top: 1px solid var(--fulcrum-border); padding-top: 5px; margin-top: 5px; }
   .sidebar-collapsed .collapse-button { justify-content: center; padding: 0; }
 }
 

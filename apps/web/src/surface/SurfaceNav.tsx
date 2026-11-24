@@ -72,7 +72,6 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       <div className="sidebar-destinations">
         <nav className="place-nav" aria-label="places">
           {groups.map((group) => <section aria-label={group} key={group}>
-            <h2>{group}</h2>
             {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} count={counts[route.id]} />)}
           </section>)}
         </nav>
@@ -80,7 +79,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       </div>
     </div>
     {!narrow && <footer>
-      <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span><kbd>{modKey("B")}</kbd></button>
+      <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span></button>
     </footer>}
   </aside>;
 }

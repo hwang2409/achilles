@@ -8,7 +8,7 @@
 .sp-dim { color: var(--g1-muted); }
 .sp-note { color: var(--g1-warn); }
 .sp-row, .sp-defaults > div { display: grid; grid-template-columns: minmax(0, 30%) minmax(0, 1fr); align-items: baseline; gap: 4px 24px; padding: 14px 0; }
-.sp-row { border-top: 1px solid var(--g1-rule); scroll-margin-top: 16px; }
+.sp-row { scroll-margin-top: 16px; }
 .sp-row > :not(.sp-row-text) { grid-column: 2; }
 .sp-row-text { display: flex; flex-direction: column; gap: 4px; }
 .sp-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -42,7 +42,6 @@
 .sp-row:has(.confirmation-bar) :is(.sp-receipt, .sp-result), body:has(.confirmation-dialog[open]) .sp-row :is(.sp-receipt, .sp-result) { display: none; }
 .sp-defaults { margin: 0; }
 .sp-defaults-note { margin-top: var(--g1-space-2); font-size: inherit; }
-.sp-defaults > div { border-top: 1px solid var(--g1-rule); }
 .sp-defaults dd { margin: 0; grid-column: 2; }
 
 @media (max-width: 720px) {
@@ -50,7 +49,6 @@
   .sp-row, .sp-defaults > div { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .sp-row > :not(.sp-row-text), .sp-defaults dd { grid-column: 1; }
 }
-.sp-switch:has(.sp-note) { padding: 8px 12px; border: 1px dashed var(--g1-border); background: var(--g1-bg-subtle); }
 .sp-switch > [role="alert"] { color: var(--g1-danger); }
 
 .sp :is(.confirmation-trigger, .confirmation-row button) { min-height: var(--g1-touch-height); padding-inline: var(--g1-space-2); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }

@@ -21,10 +21,10 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-detail h2 { margin: 0 0 6px; font-size: var(--g1-type-title); font-weight: var(--g1-weight-title); text-wrap: balance; }
 .mcp-detail-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0; font-size: inherit; color: var(--fulcrum-muted); }
 .mcp-detail-meta .mcp-status { font-size: 1em; }
-.mcp-rule { display: flex; gap: 8px 16px; flex-wrap: wrap; justify-content: space-between; align-items: center; padding-bottom: 7px; border-bottom: 1px solid var(--fulcrum-border); color: var(--fulcrum-muted); font-size: inherit; }
+.mcp-rule { display: flex; gap: 8px 16px; flex-wrap: wrap; justify-content: space-between; align-items: center; padding-bottom: 4px; color: var(--fulcrum-muted); font-size: inherit; }
 .mcp-rule h3 { margin: 0; font-size: inherit; font-weight: 500; }
 .mcp-detail dl { display: grid; grid-template-columns: minmax(0, 144px) minmax(0, 1fr); margin: 0 0 24px; }
-.mcp-detail :is(dt, dd) { padding-block: 8px; margin: 0; border-bottom: 1px solid var(--g1-rule); }
+.mcp-detail :is(dt, dd) { padding-block: 6px; margin: 0; }
 .mcp-detail dt { padding-inline-end: 12px; color: var(--fulcrum-muted); }
 .mcp-back { display: none; }
 .mcp-place :is(a, button):focus-visible { outline-offset: -2px; }
@@ -70,7 +70,6 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-review-actions { margin-block-start: 0; }
 .mcp-remove { color: var(--g1-danger); text-transform: capitalize; }
 .mcp-detail .module-state { padding-inline: 0; }
-.mcp-rule small { color: var(--g1-muted); font-variant-numeric: tabular-nums; }
 
 .mcp-test { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--g1-space-2) var(--g1-space-4); margin-block: 0 var(--g1-space-5); }
 .mcp-test button { min-height: 44px; padding-inline: var(--g1-space-3); }
