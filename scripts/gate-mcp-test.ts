@@ -66,7 +66,7 @@ async function until(operation: string, check: () => boolean | Promise<boolean>)
   throw new Error(`timed out: ${operation}`);
 }
 const trigger = (tab: Page) => tab.locator(`[data-write-surface="${WRITE_SURFACE.mcpTest}"]`);
-const dialog = (tab: Page) => tab.getByRole("dialog", { name: "review connection test" });
+const dialog = (tab: Page) => tab.getByRole("alertdialog", { name: "review connection test" });
 async function review(tab: Page, expected: string) {
   await trigger(tab).click(opts);
   await dialog(tab).getByText(expected, { exact: false }).waitFor(opts);

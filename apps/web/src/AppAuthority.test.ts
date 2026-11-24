@@ -126,7 +126,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
 
 const click = (element: Element) => act(async () => { fireEvent.click(element); });
 const select = (app: RenderResult, selector: string) => {
-  const element = app.container.querySelector<HTMLElement>(selector);
+  const element = app.baseElement.querySelector<HTMLElement>(selector);
   expect(element, selector).not.toBeNull();
   return element!;
 };
@@ -161,6 +161,10 @@ const setting = (id: WriteSurfaceId, key: keyof ReturnType<typeof getSettings>, 
     expect(localStorage.getItem(SETTINGS_KEY)).toBe(storageBefore);
     expect(app.getByText("only a tab that controls zeta can change auto-approve or reset.")).toBeTruthy();
   } else {
+    if (key === "autoApproveDefault" && !before) {
+      expect(getSettings()[key]).toBe(before);
+      await click(app.getByRole("button", { name: "allow without asking" }));
+    }
     expect(getSettings()[key]).not.toBe(before);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)[key]).toBe(getSettings()[key]);
   }
@@ -291,7 +295,7 @@ const accountFixture = (requests: { method: string; params: Record<string, unkno
 });
 
 async function proveSwitch(app: RenderResult, writes: string[]) {
-  const dialog = app.getByRole("dialog", { name: "review chat account switch" });
+  const dialog = app.getByRole("alertdialog", { name: "review chat account switch" });
   const submit = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!;
   expect(dialog.textContent).toContain("Fixture chat");
   expect(dialog.textContent).toContain(fromAccount);
@@ -321,7 +325,7 @@ const recoveryWrite = (id: WriteSurfaceId, request: string): Row => {
       window.open = (() => ({ opener: window, closed: false, close() {} })) as typeof window.open;
       try {
         await click(control);
-        const dialog = app.getByRole("dialog", { name: "review browser sign-in" });
+        const dialog = app.getByRole("alertdialog", { name: "review browser sign-in" });
         await click(dialog.querySelector("input")!);
         await click(dialog.querySelector('button[type="submit"]')!);
         expect(calls).toContainEqual({ method: "login_start", params: { provider: "claude", account: fromAccount } });
@@ -408,7 +412,7 @@ const browserLogin = (cancel: boolean): Row => {
     window.open = (() => ({ opener: window, closed: false, close() {}, location: { replace: (url: string) => locations.push(url) } })) as typeof window.open;
     try {
       await click(await app.findByRole("button", { name: "sign in to claude" }));
-      const dialog = app.getByRole("dialog", { name: "review browser sign-in" });
+      const dialog = app.getByRole("alertdialog", { name: "review browser sign-in" });
       expect(writes).toEqual([]);
       expect(disabled(dialog.querySelector('button[type="submit"]')!)).toBe(true);
       await click(dialog.querySelector('input[type="checkbox"]')!);
@@ -419,7 +423,7 @@ const browserLogin = (cancel: boolean): Row => {
       if (cancel) {
         await click(select(app, tag("accounts.login-cancel")));
         expect(writes).toEqual(["login_start"]);
-        await click(app.getByRole("group").querySelector(".confirmation-primary")!);
+        await click(app.getByRole("group").querySelector("[data-confirmation-action]")!);
         expect(writes).toEqual(["login_start", "login_cancel"]);
         expect(app.getByText(/^signed in at/)).toBeTruthy();
         expect(requests.filter(method => method === "account_list")).toHaveLength(2);
@@ -462,7 +466,7 @@ function mcpAdd(): Row {
     expect(document.body.innerHTML).not.toContain(mcpAddCanary);
     expect(roles).toHaveLength(start);
     expect(writes).toEqual([]);
-    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    const confirm = document.querySelector<HTMLButtonElement>("[data-confirmation-action]")!;
     expect(confirm.disabled).toBe(true);
     await click(app.getByRole("checkbox", { name: "i reviewed the scope for this connection" }));
     expect(confirm.disabled).toBe(false);
@@ -503,7 +507,7 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test",
     expect(roles).toHaveLength(requestStart);
     if (id === "mcp.test") await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
     else if (id !== "mcp.enabled") await change(app.getByRole("textbox", { name: "type fixture-project to confirm" }), "fixture-project");
-    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    const confirm = document.querySelector<HTMLButtonElement>("[data-confirmation-action]")!;
     expect(confirm.disabled).toBe(false);
     if (id === "mcp.enabled") await click(confirm);
     else await act(async () => { fireEvent.submit(confirm.form!); });
@@ -548,7 +552,7 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
     try {
       const startReview = async () => {
         await click(select(app, tag("mcp.auth-start")));
-        const dialog = app.getByRole("dialog", { name: "review OAuth sign-in" });
+        const dialog = app.getByRole("alertdialog", { name: "review OAuth sign-in" });
         expect(disabled(dialog.querySelector("button[type=submit]")!)).toBe(true);
         await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
         await act(async () => {
@@ -559,7 +563,7 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
       const initial = roles.length;
       if (action === "logout") {
         await click(select(app, tag("mcp.auth-logout")));
-        const dialog = app.getByRole("dialog", { name: "review saved sign-in deletion" });
+        const dialog = app.getByRole("alertdialog", { name: "review saved sign-in deletion" });
         const proof = app.getByRole("textbox", { name: `type ${name} to confirm` });
         await change(proof, "not-the-name");
         expect(disabled(dialog.querySelector("button[type=submit]")!)).toBe(true);
@@ -589,7 +593,7 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
         await click(select(app, tag("mcp.auth-cancel")));
         const group = app.getByRole("group", { name: /started saving the credential/ });
         expect(writes).toEqual(["mcp_auth_start"]);
-        await click(group.querySelector(".confirmation-primary")!);
+        await click(group.querySelector("[data-confirmation-action]")!);
       }
       expect(writes).toEqual(action === "cancel" ? ["mcp_auth_start", "mcp_auth_cancel"] : [`mcp_auth_${action}`]);
       expect(roles.slice(initial)).toEqual(action === "cancel" ? ["controller", "observer", "controller", "observer"] : ["controller", "observer"]);
@@ -638,7 +642,7 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
     } else await click(select(app, tag(id)));
     expect(roles).toHaveLength(before);
     expect(writes).toEqual([]);
-    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    const confirm = document.querySelector<HTMLButtonElement>("[data-confirmation-action]")!;
     expect(confirm.disabled).toBe(true);
     if (spawning) await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
     else await change(app.getByRole("textbox", { name: /type fixture-profile · ture-run to confirm/ }), "fixture-profile · ture-run");
@@ -751,7 +755,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
     expect(writes).not.toContain("send");
   } },
-  "settings.theme": setting("settings.theme", "theme", ' button[aria-selected="false"]'),
+  "settings.theme": setting("settings.theme", "theme", ' button[aria-pressed="false"]'),
   "settings.ui-font": setting("settings.ui-font", "uiFont", ' button[aria-pressed="false"]'),
   "settings.code-font": setting("settings.code-font", "codeFont", ' button[aria-pressed="false"]'),
   "settings.size": setting("settings.size", "size", ' button[aria-pressed="false"]'),
@@ -855,9 +859,9 @@ const rows: Record<WriteSurfaceId, Row> = {
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
     // the settings place browses as an observer; confirming the change borrows control for the one update.
     await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
-    const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
+    const dialog = await app.findByRole("alertdialog", { name: "turn on telemetry" });
     await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
-    await click(dialog.querySelector<HTMLElement>(".confirmation-primary")!);
+    await click(dialog.querySelector<HTMLElement>("[data-confirmation-action]")!);
     if (authority === "observer") {
       expect((await app.findByRole("alert")).textContent).toBe("not changed. another tab has control; a chat tab keeps it while it is open. try again after it finishes or closes.");
       return;
@@ -922,7 +926,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     if (authority === "controller") didWrite(writes, 'PATCH /api/chats/session {"first_message":"Fixture history title"');
   } },
   "palette.commands": { kind: "command", options: { browserPreference: "vim" }, check: async (app, authority, writes) => {
-    await click(select(app, ".palette-button"));
+    await click(app.getByRole("button", { name: "command palette" }));
     expect(WRITE_SURFACES.find(({ id }) => id === "palette.commands")).toMatchObject({ channel: "http-and-storage", observer: "browser-only" });
     expect(Boolean(app.queryByText("toggle create mode", { exact: true }))).toBe(authority === "controller");
     await click(app.getByText("toggle vim mode", { exact: true }));
@@ -1144,12 +1148,12 @@ test.each([
   await withApp("controller", options, async (app, writes) => {
     if (start === "off") {
       await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
-      const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
+      const dialog = await app.findByRole("alertdialog", { name: "turn on telemetry" });
       await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
-      await click(dialog.querySelector<HTMLElement>(".confirmation-primary")!);
+      await click(dialog.querySelector<HTMLElement>("[data-confirmation-action]")!);
     } else {
       await click(await app.findByText("turn off", { selector: tag("settings.telemetry") }));
-      await click(document.querySelector<HTMLElement>("#telemetry .confirmation-primary")!);
+      await click(document.querySelector<HTMLElement>("#telemetry [data-confirmation-action]")!);
     }
     await app.findByText(reason);
     const turnOff = app.getByText("turn off", { selector: tag("settings.telemetry") });

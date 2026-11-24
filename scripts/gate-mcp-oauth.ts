@@ -48,7 +48,7 @@ export function oauthFixture() {
 
 async function startReview(tab: Page) {
   await trigger(tab, WRITE_SURFACE.mcpAuthStart).click(options);
-  const dialog = tab.getByRole("dialog", { name: "review OAuth sign-in" });
+  const dialog = tab.getByRole("alertdialog", { name: "review OAuth sign-in" });
   const confirm = dialog.getByRole("button", { name: "sign in", exact: true });
   if (await confirm.isEnabled(options)) throw new Error("OAuth start missed scope proof");
   await dialog.getByRole("checkbox").check(options);
@@ -133,7 +133,7 @@ async function checkBlocked(tab: Page, wire: ReturnType<typeof observeWire>) {
 
 async function logout(tab: Page, dir: string | undefined) {
   await trigger(tab, WRITE_SURFACE.mcpAuthLogout).click(options);
-  const dialog = tab.getByRole("dialog", { name: "review saved sign-in deletion" });
+  const dialog = tab.getByRole("alertdialog", { name: "review saved sign-in deletion" });
   const confirm = dialog.getByRole("button", { name: "delete saved sign-in" });
   if (await confirm.isEnabled(options)) throw new Error("OAuth logout missed name proof");
   await dialog.getByRole("textbox").fill(name, options);

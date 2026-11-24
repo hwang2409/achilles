@@ -1,46 +1,27 @@
-:root {
-  font-family: var(--achilles-ui-font, var(--g1-font-ui));
-  font-size: var(--achilles-ui-size, var(--g1-type-chat));
-  line-height: var(--g1-leading-chat);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-variant-numeric: tabular-nums;
-  color: var(--fulcrum-fg);
-  background: var(--fulcrum-bg);
-}
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; overflow: hidden; }
-body { margin: 0; }
-button, input, textarea, select { color: inherit; font: inherit; }
-.sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
-button, input, textarea, select { border-radius: var(--g1-radius-control); }
-:where(button, .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }
+:where(button:not([data-slot]), .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }
 :where(.ui-icon-button) { display: inline-grid; place-items: center; min-width: var(--g1-icon-height); min-height: var(--g1-icon-height); padding: 0; }
 :is(.primary, .ui-button-primary) { background: var(--g1-primary); color: var(--g1-primary-text); }
-:where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):active { background: var(--g1-selected); color: var(--g1-fg); }
+:where(button:not([data-slot]), .ui-button):where(:not(:disabled, [aria-disabled="true"])):active { background: var(--g1-selected); color: var(--g1-fg); }
 :where(.ui-card, [data-part="composer"]) { border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); background: var(--g1-panel); }
 :where(.ui-empty) { padding: var(--g1-space-4) 0; }
 :where(.ui-empty) p { margin: var(--g1-space-2) 0; color: var(--g1-muted); text-wrap: pretty; }
 :where(.ui-meta, .ui-status) { color: var(--g1-muted); font-size: var(--g1-type-meta); font-variant-numeric: tabular-nums; }
 :where(.ui-page-header) h1 { font-size: var(--g1-type-page-title); font-weight: var(--g1-weight-title); line-height: 32px; text-wrap: balance; }
 @media (max-width: 760px), (pointer: coarse) { :where(.ui-button, .ui-icon-button) { min-height: var(--g1-touch-height); } :where(.ui-icon-button) { min-width: var(--g1-touch-height); } }
-:where(input:not([type="checkbox"], [type="radio"]), textarea, select) {
+:where(input:not([data-slot], [type="checkbox"], [type="radio"]), textarea:not([data-slot]), select:not([data-slot])) {
   background: var(--g1-bg);
   border: var(--g1-border-width) solid var(--g1-border);
 }
-:where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
+:where(button:not([data-slot]), .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
 :is(.primary, .ui-button-primary):hover { background-color: color-mix(in srgb, var(--g1-primary) 88%, var(--g1-primary-text)); }
 [data-part="composer"]:focus-within { border-color: var(--g1-control-border); }
 [data-part="composer"] [data-part="composer-field"] textarea:focus-visible,
 [data-part="composer"] .cm-content:focus-visible { outline: none; box-shadow: none; }
 :where(button, input, textarea, select):is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: .65; }
-:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
-:is(input:not([type="checkbox"], [type="radio"]), textarea, select):focus-visible {
+:is(input:not([data-slot], [type="checkbox"], [type="radio"]), textarea:not([data-slot]), select:not([data-slot])):focus-visible {
   border-color: var(--g1-accent);
   box-shadow: var(--g1-focus-halo);
 }
-a { color: inherit; text-decoration: none; }
-kbd { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
 .observer-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; flex: none; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--fulcrum-border); background: color-mix(in srgb, var(--fulcrum-accent) 8%, var(--fulcrum-bg)); color: var(--fulcrum-fg); }
 .observer-banner div { display: grid; gap: 2px; min-width: 0; }

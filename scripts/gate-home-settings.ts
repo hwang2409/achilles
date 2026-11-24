@@ -27,7 +27,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     const confirmOn = async () => {
       await tab.setViewportSize({ width: 720, height: 450 });
       await turnOn.click();
-      const dialog = tab.getByRole("dialog", { name: "turn on telemetry" });
+      const dialog = tab.getByRole("alertdialog", { name: "turn on telemetry" });
       const proof = dialog.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" });
       // The effective 200% viewport must show the acknowledgement without first scrolling it into view.
       await proof.evaluate((node) => {

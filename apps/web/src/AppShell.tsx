@@ -1,8 +1,12 @@
 import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Menu, Plus } from "lucide-react";
 import { CommandPalette, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
-import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFocus, useFocusAfterCommit, useModalFocus } from "./keyboard";
+import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFocus, useFocusAfterCommit } from "./keyboard";
 import { PageChatCatalog, titleOf, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
 import { WRITE_SURFACE } from "./writeSurfaces";
 
@@ -34,9 +38,6 @@ export type AppShellProps = {
   children: ReactNode;
 };
 
-// Short screens use a drawer too. Keep this breakpoint in sync with shell.css.
-const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
-
 export function AppShell({ activity, current, nav, workspace, newChat, connectionStatus, hasComposer, banner, header, children }: AppShellProps) {
   const { canWrite = false, serverForcesAsk = false, createMode } = workspace ?? {};
   const settingsPlace = current.id === "settings";
@@ -49,7 +50,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const settings = useSettings();
-  const [narrow, setNarrow] = useState(() => matchMedia(DRAWER_MEDIA).matches);
+  const narrow = useIsMobile();
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const settingsOpener = useRef<Element>(null);
@@ -64,7 +65,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   }, [newChat]);
   const collapse = () => setCollapsed((value) => !value);
   const dismissDrawer = () => setDrawer(false);
-  const closeDrawer = () => { requestFocus(() => restorableFocus(menuButton.current)); setDrawer(false); };
+  const closeDrawer = () => setDrawer(false);
   const openSettings = (opener: Element | null) => {
     setSettingsOpen((open) => {
       if (!open) settingsOpener.current = opener;
@@ -83,36 +84,25 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   });
   const closeSettings = () => {
     if (!settingsOpen) return;
-    focusBack(settingsOpener);
     setSettingsOpen(false);
   };
   const activeElement = () => document.activeElement instanceof Element ? document.activeElement : null;
   const openPalette = () => { if (!paletteOpen) paletteOpener.current = activeElement(); setPaletteOpen(true); };
-  const closePalette = () => { focusBack(paletteOpener); setPaletteOpen(false); };
+  const closePalette = () => setPaletteOpen(false);
   const openShortcuts = (opener: Element | null) => { if (!shortcutsOpen) shortcutsOpener.current = opener; setShortcutsOpen(true); };
-  const closeShortcuts = () => { focusBack(shortcutsOpener); setShortcutsOpen(false); };
+  const closeShortcuts = () => setShortcutsOpen(false);
 
-  useEffect(() => { const media = matchMedia(DRAWER_MEDIA); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
   useEffect(() => { if (!narrow) setDrawer(false); }, [narrow]);
   useEffect(() => {
-    const layers: Array<() => void> = [];
-    if (query) layers.push(clearSearch);
-    if (drawer) layers.push(closeDrawer);
-    if (settingsOpen) layers.push(closeSettings);
-    if (shortcutsOpen) layers.push(closeShortcuts);
-    if (paletteOpen) layers.push(closePalette);
-    const top = layers.at(-1);
-    if (!top) return;
+    if (!query || drawer || settingsOpen || shortcutsOpen || paletteOpen) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename], .page-chat-head[data-popup], .confirmation-bar"))) return;
+      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename], [role='dialog'], [role='alertdialog'], [role='menu'], .page-chat-head[data-popup]"))) return;
       event.preventDefault();
-      event.stopPropagation();
-      top();
+      clearSearch();
     };
-    document.addEventListener("keydown", escape, true);
-    return () => document.removeEventListener("keydown", escape, true);
-  }, [drawer, query, settingsOpen, shortcutsOpen, paletteOpen]);
-  useModalFocus(narrow && drawer, sidebar);
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [drawer, query, settingsOpen, shortcutsOpen, paletteOpen, clearSearch]);
   useEffect(() => {
     // capture on window runs before the composer (CodeMirror vim too) sees app shortcuts.
     const key = (event: KeyboardEvent) => {
@@ -146,7 +136,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   }, [workspace, displaySettings, canWrite, loading, narrow, startNewChat, createMode, paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (isEditableTarget(event)) return;
+      if (event.defaultPrevented || isEditableTarget(event) || (event.target instanceof Element && event.target.closest("[role=dialog], [role=alertdialog], [role=menu]"))) return;
       if (event.key === "/") {
         event.preventDefault();
         const search = restorableFocus(sidebar.current?.querySelector(".chat-search input") ?? null);
@@ -176,14 +166,14 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     if (!pending) return;
     // The text is set, and the completion marked announced, only while a screen reader can reach the region.
     const speak = () => {
-      if ((narrow && drawer) || !liveRegion.current || liveRegion.current.closest("[inert], [aria-hidden='true']") || document.querySelector("dialog[open]:modal")) return;
+      if (settingsOpen || shortcutsOpen || paletteOpen || (narrow && drawer) || !liveRegion.current || liveRegion.current.closest("[inert], [aria-hidden='true']") || document.querySelector("dialog[open]:modal")) return;
       setSpoken(pending);
       activity.markAnnounced();
     };
     speak();
     document.addEventListener("close", speak, true);
     return () => document.removeEventListener("close", speak, true);
-  }, [pending, narrow, drawer]);
+  }, [pending, narrow, drawer, settingsOpen, shortcutsOpen, paletteOpen]);
   // One in-flow slot under the route's bar: the chat header here, or the module/create/telemetry bar via ShellDock.
   const status = !showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />;
   const dock = (status || receipt) ? <div className="build-dock">
@@ -199,25 +189,24 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
       <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
     </aside>}
   </div> : null;
-  return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
-    <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
-    <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
-    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={showNavActivity ? activity : undefined}
-      action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>{newChat.pending ? "Starting…" : "New chat"}</b><kbd>{modKey("⇧O")}</kbd></button>}
+  return <SidebarProvider data-shell data-sidebar-collapsed={collapsed} className="h-dvh min-h-0 overflow-hidden bg-background" open={!collapsed} onOpenChange={(open) => setCollapsed(!open)} mobile={narrow} openMobile={drawer} onOpenMobileChange={setDrawer}>
+    <a className="fixed top-2 left-2 z-60 -translate-y-[150%] bg-primary px-3 py-2 text-primary-foreground focus:translate-y-0" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
+    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} collapsed={collapsed} restoreDrawerFocus={() => requestFocus(() => restorableFocus(menuButton.current))} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={showNavActivity ? activity : undefined}
+      action={<Button variant="ghost" className="new-chat w-full justify-start group-data-[collapsible=icon]:justify-center" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><Plus aria-hidden="true" /><b className="font-medium group-data-[collapsible=icon]:hidden">{newChat.pending ? "Starting…" : "New chat"}</b><kbd className="ml-auto group-data-[collapsible=icon]:hidden">{modKey("⇧O")}</kbd></Button>}
       search={nav.searchControl(dismissDrawer)} counts={{ ...nav.counts, chats: nav.counts.chats && { ...nav.counts.chats, waiting: (nav.counts.chats.waiting ?? 0) + activity.needsYou } }} recent={nav.recent(dismissDrawer, activity.rows, activity.onScreen)} />
-    <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
+    <main data-main-pane className="main-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}
-      <div className="shell-header">
-        <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
+      <div className={narrow ? "relative shrink-0" : "contents"}>
+        {narrow && <Button ref={menuButton} variant="ghost" size="icon-lg" className="menu-button absolute top-0.5 left-2 z-2 min-h-11 min-w-11" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}><Menu aria-hidden="true" /></Button>}
         {header}
       </div>
       {workspace && dock}
       <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows, onScreen: activity.onScreen }}>{settingsPlace ? <DisplaySettings.Provider value={() => openSettings(activeElement())}>{children}</DisplaySettings.Provider> : children}</PageChatCatalog.Provider></ShellDock.Provider>
     </main>
     {/* outside main and the drawer, so it is never inert or aria-hidden */}
-    <span ref={liveRegion} className="visually-hidden" role="status">{spoken}</span>
-    {displaySettings && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
-    {workspace && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
-    {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={nav.searchChats(dismissDrawer)} onClose={closePalette} />}
-  </div>;
+    <span ref={liveRegion} className="sr-only" role="status">{spoken}</span>
+    {displaySettings && <SettingsDialog open={settingsOpen} onClose={closeSettings} restoreFocus={() => focusBack(settingsOpener)} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
+    {workspace && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} restoreFocus={() => focusBack(shortcutsOpener)} />}
+    {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={nav.searchChats(dismissDrawer)} onClose={closePalette} restoreFocus={() => focusBack(paletteOpener)} />}
+  </SidebarProvider>;
 }

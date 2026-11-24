@@ -301,7 +301,7 @@ try {
         socket.send(raw);
       });
     });
-    const review = authPage.getByRole("dialog", { name: "review chat account switch" });
+    const review = authPage.getByRole("alertdialog", { name: "review chat account switch" });
     const capture = async (name: string, locator: Locator, device?: CDPSession) => {
       if (!screenshotDir) return;
       await locator.evaluate(async element => {
@@ -348,7 +348,7 @@ try {
     const occupied = authPage.getByText(/another tab had control/, { selector: "#account-switch-reason" });
     if (await authPage.getByRole("button", { name: "try again", exact: true }).isVisible()) await authPage.getByRole("button", { name: "try again", exact: true }).click();
     await authPage.getByRole("button", { name: "sign in again to anthropic:failed", exact: true }).click();
-    const login = authPage.getByRole("dialog", { name: "review browser sign-in" });
+    const login = authPage.getByRole("alertdialog", { name: "review browser sign-in" });
     await login.getByRole("checkbox").check();
     const popupEvent = authPage.waitForEvent("popup", { timeout: 10_000 });
     const [popup, confirmed] = await Promise.allSettled([popupEvent, login.getByRole("button", { name: "sign in again", exact: true }).click()]);
@@ -373,10 +373,13 @@ try {
     // At 200% a 1440×900 surface has a 720×450 CSS-pixel layout viewport.
     const cdp = await authPage.context().newCDPSession(authPage);
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 720, height: 450, deviceScaleFactor: 2, mobile: false });
-    if (!await review.evaluate(dialog => [...dialog.querySelectorAll(".confirmation-name input, .confirmation-actions button")].every(node => {
-      const box = node.getBoundingClientRect();
-      return box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth;
-    }))) throw new Error("typed proof and actions are not visible at 200% zoom");
+    const clippedProof = await review.evaluate(dialog => {
+      const bounds = (node: Element) => node.getBoundingClientRect().toJSON();
+      const clipped = [...dialog.querySelectorAll("[data-confirmation-proof] input, [data-confirmation-actions] button")].map(bounds)
+        .filter(box => box.top < 0 || box.bottom > innerHeight || box.left < 0 || box.right > innerWidth);
+      return clipped.length ? { clipped, dialog: bounds(dialog), viewport: [innerWidth, innerHeight], style: getComputedStyle(dialog).maxHeight } : null;
+    });
+    if (clippedProof) throw new Error(`typed proof and actions are not visible at 200% zoom: ${JSON.stringify(clippedProof)}`);
     await capture("page-review-1440-200pct", review, cdp);
     await confirm("anthropic:working", title);
     await authPage.getByText(/switched to anthropic:working/).waitFor();

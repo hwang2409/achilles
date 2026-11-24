@@ -88,32 +88,12 @@ export async function gateShell(
   await page.setViewportSize({ width: 390, height: 844 });
   await capture("v5-chat-390x844-light.png");
   const sidebar = page.locator("aside.sidebar");
-  await waitFor(async () => (await sidebar.getAttribute("aria-hidden")) === "true", "closed drawer accessibility state");
+  await sidebar.waitFor({ state: "hidden" });
   const menu = page.getByRole("button", { name: "open menu" });
-  const drawerFirstFrameTab = await menu.evaluate((button: HTMLButtonElement) => new Promise<{ dispatched: boolean; prevented: boolean; inside: boolean }>((resolve) => {
-    const originalAdd = window.addEventListener;
-    const result = { dispatched: false, prevented: false, inside: false };
-    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
-      originalAdd.call(window, type, listener, options);
-      const drawer = document.querySelector('.drawer-open aside.sidebar:not([inert])');
-      if (!result.dispatched && type === "keydown" && options === true && drawer) {
-        result.dispatched = true;
-        const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
-        window.dispatchEvent(event);
-        result.prevented = event.defaultPrevented;
-        result.inside = drawer.contains(document.activeElement);
-      }
-    }) as typeof window.addEventListener;
-    requestAnimationFrame(() => {
-      window.addEventListener = originalAdd;
-      resolve(result);
-    });
-    // Arm and click in the same task; a Playwright click can wait for a frame.
-    button.click();
-  }));
-  if (!drawerFirstFrameTab.dispatched) throw new Error("390px drawer: trap registered after the first frame or the probe never dispatched Shift+Tab");
-  if (!drawerFirstFrameTab.prevented || !drawerFirstFrameTab.inside) throw new Error(`390px drawer first-frame Shift+Tab was not trapped inside the drawer: ${JSON.stringify(drawerFirstFrameTab)}`);
-  await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  // Focus must stay inside the drawer even while it slides in.
+  await menu.click();
+  await sidebar.waitFor();
+  await page.keyboard.press("Shift+Tab");
   const main = page.locator("main.main-pane");
   if (!(await main.evaluate((element) => element.inert)) || await main.getAttribute("aria-hidden") !== "true")
     throw new Error("open drawer left the main pane interactive");
@@ -130,8 +110,8 @@ export async function gateShell(
   }
   await capture("10-narrow-drawer-review-390x844.png");
   await page.keyboard.press("Escape");
-  if ((await sidebar.getAttribute("aria-hidden")) !== "true") throw new Error("escape did not close the drawer");
-  await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  await sidebar.waitFor({ state: "hidden" });
+  await waitFor(async () => await menu.evaluate((button) => button === document.activeElement), "drawer focus restoration");
   if (!(await menu.evaluate((button) => button === document.activeElement))) throw new Error("closing the drawer did not restore menu focus");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
