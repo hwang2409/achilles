@@ -2,6 +2,10 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObjec
 import { fieldError, formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
 import { schemaColumns } from "./listColumns";
 import { usePageTools, type PageTool } from "./usePageTools";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { EnumListbox } from "./EnumListbox";
 import { WRITE_SURFACE } from "../writeSurfaces";
 
@@ -71,7 +75,7 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
     : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} formRef={formRef} disabled={!canWrite} disabledReason={disabledReason} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
     : <RecordForm key={row ? String(row.record_id) : "no-selection"} tool={tool} order={order} row={row ?? undefined} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} disabled={!row || !canWrite} disabledReason={disabledReason} formRef={formRef} />;
-  return <section className={`record-form${tool?.operation === "update" && !row ? " record-form-no-selection" : ""}`} data-write-surface={tool?.operation === "update" ? WRITE_SURFACE.recordUpdate : WRITE_SURFACE.recordInsert} data-collection={tool?.collection} data-operation={tool?.operation}><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
+  return <section data-record-form="" data-no-selection={tool?.operation === "update" && !row ? "" : undefined} className="min-w-0 data-[no-selection]:[&_form]:opacity-50 [&>p]:text-sm [&>p]:text-muted-foreground" data-write-surface={tool?.operation === "update" ? WRITE_SURFACE.recordUpdate : WRITE_SURFACE.recordInsert} data-collection={tool?.collection} data-operation={tool?.operation}><h2 className="mb-3 text-base font-semibold text-balance">{heading} {headingNote && <small data-record-form-note="" className="col-span-full text-xs font-normal text-muted-foreground">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 // The form finds its row back after cancel or save: the row that opened it while it is still on the page, else the first
@@ -107,7 +111,7 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
   const idPrefix = useId();
   // a new notice can render below the visible part of the scrolling page blocks (M-3 in firstrun-2a2a863); a
   // successful save on a row scrolls to the row instead, since that is what "saved" means to the user here
-  useEffect(() => { if (!message) return; (row && message.kind === "status" ? tableRow(opener, tool.collection, row.record_id) : form.current?.querySelector(".record-form-actions"))?.scrollIntoView({ block: "nearest" }); }, [message]);
+  useEffect(() => { if (!message) return; (row && message.kind === "status" ? tableRow(opener, tool.collection, row.record_id) : form.current?.querySelector("[data-record-form-actions]"))?.scrollIntoView({ block: "nearest" }); }, [message]);
   if ("unsupported" in mapped) return <p aria-disabled="true">this form needs the chat: unsupported field {mapped.unsupported}</p>;
 
   const focusField = (name?: string) => form.current?.querySelector<HTMLElement>(name ? `[name="${CSS.escape(name)}"]` : "[name]")?.focus();
@@ -176,19 +180,19 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
   };
 
   return <>
-    <form ref={form} noValidate onSubmit={(event) => void submit(event)} onKeyDown={(event) => { if (event.key === "Escape" && row && !event.defaultPrevented && !event.nativeEvent.isComposing) { event.preventDefault(); cancel(); } }}>
-    {disabled && disabledReason && <p className="form-note" role="note">{disabledReason}</p>}
+    <form className="grid grid-cols-1 gap-4 min-[761px]:grid-cols-[minmax(0,1fr)_minmax(0,280px)]" ref={form} noValidate onSubmit={(event) => void submit(event)} onKeyDown={(event) => { if (event.key === "Escape" && row && !event.defaultPrevented && !event.nativeEvent.isComposing) { event.preventDefault(); cancel(); } }}>
+    {disabled && disabledReason && <p data-record-form-note="" className="col-span-full text-xs font-normal text-muted-foreground" role="note">{disabledReason}</p>}
     {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={disabled ? field.kind === "boolean" ? false : "" : values[field.name]} error={fieldErrors[field.name] ?? null} disabled={disabled} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
-    <div className="record-form-actions">
+    <div data-record-form-actions="" className="col-span-full flex flex-wrap items-center gap-2 [&>p]:text-sm [&>p]:text-muted-foreground [&>p[role=alert]]:text-destructive">
       {/* a mouse save keeps focus where the user was (webkit never focuses a clicked button), and the button is not disabled
           while busy, since a disabled button drops focus; submit() ignores a second click */}
-      <button type="submit" className="primary" disabled={disabled || busy} aria-disabled={busy || undefined} onMouseDown={(event) => event.preventDefault()}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
-      {row && <button type="button" onClick={cancel}>cancel</button>}
-      {message?.kind === "row-changed" && <button type="button" onClick={() => { setTyped({}); setMessage(null); focusField(); }}>discard</button>}
+      <Button type="submit" disabled={disabled || busy} aria-disabled={busy || undefined} onMouseDown={(event) => event.preventDefault()}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</Button>
+      {row && <Button variant="outline" type="button" onClick={cancel}>cancel</Button>}
+      {message?.kind === "row-changed" && <Button variant="outline" type="button" onClick={() => { setTyped({}); setMessage(null); focusField(); }}>discard</Button>}
       {/* a changed record is news, not an error: the user's edits are safe */}
       {message && <p role={message.kind === "status" || message.kind === "row-changed" ? "status" : "alert"}>{message.text}</p>}
-      {message?.kind === "row-conflict" && <button type="button" onClick={() => void reloadRow()}>reload row</button>}
-      {message?.kind === "conflict" && <button type="button" onClick={() => { setMessage(null); onReloadTool(); focusField(); }}>reload tool</button>}
+      {message?.kind === "row-conflict" && <Button variant="outline" type="button" onClick={() => void reloadRow()}>reload row</Button>}
+      {message?.kind === "conflict" && <Button variant="outline" type="button" onClick={() => { setMessage(null); onReloadTool(); focusField(); }}>reload tool</Button>}
     </div>
     </form>
   </>;
@@ -197,15 +201,15 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
 function Field({ id, field, value, error, disabled = false, onChange }: { id: string; field: FormField; value: string | boolean; error: string | null; disabled?: boolean; onChange: (value: string | boolean) => void }) {
   const described = [field.description ? `${id}-help` : "", error ? `${id}-error` : ""].filter(Boolean).join(" ") || undefined;
   const common = { id, name: field.name, "aria-required": field.required, "aria-invalid": error ? true : undefined, "aria-describedby": described, disabled };
-  const control = field.kind === "boolean" ? <input {...common} type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} />
-    : field.kind === "enum" ? <EnumListbox id={common.id} name={common.name} required={common["aria-required"]} value={String(value)} options={["", ...field.options.map((option) => JSON.stringify(option))]} onChange={onChange} label={`${field.name}${field.required ? " *" : ""}`} aria-describedby={described} invalid={Boolean(error)} disabled={disabled} />
-    : field.kind === "string" ? <input {...common} placeholder={disabled ? "—" : undefined} type="text" value={String(value)} onChange={(event) => onChange(event.target.value)} />
+  const control = field.kind === "boolean" ? <Checkbox {...common} checked={value === true} onCheckedChange={(checked) => onChange(checked === true)} />
+    : field.kind === "enum" ? <EnumListbox id={id} name={field.name} required={field.required} label={`${field.name}${field.required ? " *" : ""}`} value={String(value)} options={["", ...field.options.map((option) => JSON.stringify(option))]} onChange={onChange} aria-describedby={described} invalid={!!error} disabled={disabled} />
+    : field.kind === "string" ? <Input {...common} className="max-[760px]:min-h-11" placeholder={disabled ? "—" : undefined} type="text" value={String(value)} onChange={(event) => onChange(event.target.value)} />
     // a phone keypad without a minus key only when the schema rules out negatives
-    : <input {...common} placeholder={disabled ? "—" : undefined} type="number" step={field.multipleOf ?? (field.kind === "integer" ? 1 : "any")} min={field.minimum} inputMode={field.minimum !== undefined && field.minimum >= 0 ? (field.kind === "integer" ? "numeric" : "decimal") : undefined} value={String(value)} onChange={(event) => onChange(event.target.value)} />;
-  return <div className={`record-field${field.kind === "boolean" ? " record-field-check" : ""}`}>
-    {field.kind !== "enum" && <label htmlFor={id}>{field.name}{field.required && <span className="required-mark" aria-hidden="true"> *</span>}</label>}
+    : <Input {...common} className="max-[760px]:min-h-11" placeholder={disabled ? "—" : undefined} type="number" step={field.multipleOf ?? (field.kind === "integer" ? 1 : "any")} min={field.minimum} inputMode={field.minimum !== undefined && field.minimum >= 0 ? (field.kind === "integer" ? "numeric" : "decimal") : undefined} value={String(value)} onChange={(event) => onChange(event.target.value)} />;
+  return <div className={field.kind === "boolean" ? "col-span-full flex min-h-10 min-w-0 flex-wrap items-center gap-2" : "grid min-w-0 gap-1.5"}>
+    {field.kind !== "enum" && <Label className={field.kind === "boolean" ? "order-2 max-[760px]:min-h-11" : "text-xs text-muted-foreground"} htmlFor={id}>{field.name}{field.required && <span className="text-warning" aria-hidden="true"> *</span>}</Label>}
     {control}
-    {field.description && <small id={`${id}-help`}>{field.description}</small>}
-    {error && <p id={`${id}-error`} className="field-error">{error}</p>}
+    {field.description && <small className="text-xs text-muted-foreground" id={`${id}-help`}>{field.description}</small>}
+    {error && <p id={`${id}-error`} className="text-sm text-destructive [overflow-wrap:anywhere]">{error}</p>}
   </div>;
 }

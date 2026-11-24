@@ -143,80 +143,6 @@
   }
 }
 
-/* Compatibility for remaining route CSS; removed by the last screen PR. */
-:root {
-  --g1-bg: var(--background);
-  --g1-bg-subtle: var(--card);
-  --g1-surface: var(--secondary);
-  --g1-selected: var(--sidebar-accent);
-  --g1-hover: var(--control-hover);
-  --g1-rule: var(--sidebar-border);
-  --g1-border: var(--border);
-  --g1-control-border: var(--input);
-  --g1-fg: var(--foreground);
-  --g1-fg-2: var(--secondary-foreground);
-  --g1-fg-3: var(--strong-muted-foreground);
-  --g1-muted: var(--muted-foreground);
-  --g1-accent: var(--ring);
-  --g1-accent-tint: var(--accent);
-  --g1-accent-ink: var(--accent-foreground);
-  --g1-primary: var(--primary);
-  --g1-primary-text: var(--primary-foreground);
-  --g1-ok: var(--success);
-  --g1-warn-fill: var(--warning-fill);
-  --g1-warn-text-on-fill: var(--warning-foreground);
-  --g1-warn: var(--warning);
-  --g1-danger-mark: var(--destructive-mark);
-  --g1-danger: var(--destructive);
-  --g1-selection: var(--selection);
-  --g1-focus-glow: var(--focus-glow);
-  --g1-panel: var(--panel);
-  --g1-link: var(--link);
-  --g1-font-ui: var(--font-sans);
-  --g1-font-mono: var(--font-mono);
-  --g1-type-kbd: 11px;
-  --g1-type-meta: 13px;
-  --g1-type-small: 13px;
-  --g1-type-ui: 14px;
-  --g1-type-chat: 15px;
-  --g1-leading-chat: 1.6;
-  --g1-type-reply-h2: 20px;
-  --g1-tracking-reply-h2: -.02em;
-  --g1-type-page-title: 26px;
-  --g1-tracking-page-title: -.03em;
-  --g1-weight-title: 600;
-  --g1-radius-container: 8px;
-  --g1-radius-control: 6px;
-  --g1-control-height: 40px;
-  --g1-icon-height: 32px;
-  --g1-touch-height: 44px;
-  --g1-type-section: 18px;
-  --g1-radius-chip: 4px;
-  --g1-status-mark: 6px;
-  --g1-border-width: 1px;
-  --g1-selection-width: 2px;
-  --g1-shadow-rest: none;
-  --g1-shadow-overlay: none;
-  --g1-focus-ring: 2px solid var(--g1-accent);
-  --g1-focus-halo: 0 0 0 3px var(--g1-focus-glow);
-  --g1-space-1: 4px;
-  --g1-space-2: 8px;
-  --g1-space-3: 12px;
-  --g1-space-4: 16px;
-  --g1-space-5: 20px;
-  --g1-space-6: 24px;
-  --g1-space-7: 28px;
-  --g1-space-8: 32px;
-  --g1-space-10: 40px;
-  --g1-sidebar-padding: var(--g1-space-2);
-  --g1-sidebar-inset: calc(var(--g1-sidebar-padding) + var(--g1-space-2));
-  --g1-nav-row-height: var(--g1-space-7);
-  --g1-page-gutter: var(--g1-space-6);
-  --g1-page-padding: var(--g1-space-6) var(--g1-page-gutter);
-  --g1-list-row-height: 52px;
-  --g1-content-max: 944px;
-}
-
 /* Match the specificity of Fulcrum’s system rule. */
 :root:not([data-fulcrum-theme]), :root[data-fulcrum-theme] {
   --fulcrum-bg: var(--background);
@@ -233,10 +159,6 @@
   --fulcrum-cursor: var(--ring);
   --fulcrum-live: var(--ring);
   --fulcrum-gap: 12px;
-}
-
-@media (max-width: 760px), (max-height: 500px) {
-  :root { --g1-page-gutter: 16px; }
 }
 
 @layer base {
@@ -256,4 +178,294 @@
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
   /* Native dialogs left on routes use the user-agent centering behavior. */
   dialog:modal { margin: auto; }
+}
+
+/* Fulcrum / CodeMirror adapter — public parts and editor internals. */
+/* Host skin for Fulcrum's public parts. Keep its scroll roots, cursor gutter and state text. */
+[data-part="message"] {
+  --fulcrum-measure: 944px;
+}
+[data-part="message"], [data-part="item"][data-kind="user"] {
+  font-size: 15px;
+  line-height: 1.6;
+}
+[data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+[data-part="item"][data-kind="user"] > [data-part="delivery-note"] { grid-column: 1; }
+[data-part="message-prompt"] { display: none; }
+[data-part="delivery-note"],
+[data-part="run-end-marker"] {
+  font-family: var(--achilles-code-font, var(--font-mono));
+}
+
+/* The same card skin applies in live chat and agent timelines. Leave the pinned
+   per-tool viewers, syntax colors, and disclosure sizing in charge of their bodies. */
+:is([data-part="tool"], [data-part="approval"]) {
+  border-width: 1px;
+  border-radius: var(--radius);
+  font-family: var(--achilles-code-font, var(--font-mono));
+  font-size: 13px;
+}
+[data-part="tool"] { border-color: var(--border); }
+[data-part="approval"][data-decision="approve"] { --rail: var(--success); }
+[data-part="approval"][data-decision="deny"] { --rail: var(--destructive); }
+[data-part="tool-header"] {
+  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 36px;
+  column-gap: 8px;
+  background: var(--card);
+}
+[data-part="tool"][data-state="streaming"] > [data-part="tool-header"] { background: var(--accent); }
+[data-part="approval"] > [data-part="tool-header"] { background: color-mix(in srgb, var(--warning-fill) 6%, var(--background)); }
+[data-part="tool-name"] { color: var(--foreground); }
+[data-part="tool-summary"] { color: var(--muted-foreground); }
+[data-part="tool-status"] { font-size: 13px; }
+:is([data-part="tool-status"], [data-part="text-viewer-status"], [data-part="delivery-note"])::before {
+  width: 6px;
+  height: 6px;
+}
+[data-part="approval-actions"] button {
+  border-radius: var(--radius);
+  border-color: var(--input);
+}
+[data-part="approval-actions"] button[data-action="approve"]:not(:disabled, [aria-disabled="true"]) {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-part="approval-actions"] button[data-action="deny"]:not(:disabled, [aria-disabled="true"]) { color: var(--destructive); }
+[data-part="approval-actions"]:has(> [data-action="approve-always"]) { display: flex; }
+[data-part="approval-actions"] button:focus-visible { outline: 2px solid var(--ring); }
+
+[data-part="composer"] {
+  background: var(--background);
+}
+[data-part="composer"][data-error] { border-color: var(--destructive); }
+[data-part="jump-to-approval"] { border-radius: var(--radius); }
+[data-part="composer"] :is([data-part="composer-reason"], [data-part="composer-message"])::before {
+  width: 6px;
+  height: 6px;
+}
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  summary[data-part="tool-header"] { min-height: 44px; }
+}
+
+/* Markdown rendered inside Fulcrum messages. */
+[data-part="message"] [data-part="message-content"] > :first-child { margin-top: 0; }
+[data-part="message"] [data-part="message-content"] > :last-child { margin-bottom: 0; }
+[data-part="message"] [data-part="md-paragraph"] { margin: 0 0 12px; }
+[data-part="message"] [data-part="md-heading"] { margin: 20px 0 8px; font-weight: 700; line-height: 1.5; text-wrap: balance; }
+[data-part="message"] [data-part="md-heading"][data-level="1"] { font-size: 20px; line-height: 28px; letter-spacing: -.01em; }
+[data-part="message"] [data-part="md-heading"][data-level="2"] { margin-top: 28px; font-size: 20px; line-height: 1.6; letter-spacing: -.02em; }
+[data-part="message"] [data-part="md-heading"][data-level="3"] { font-size: 14px; line-height: 22px; color: var(--fulcrum-muted); }
+[data-part="message"] [data-part="md-list"] { margin: 0 0 12px; padding-left: 20px; }
+[data-part="message"] ul[data-part="md-list"] { padding-left: 0; list-style: none; }
+[data-part="message"] ol[data-part="md-list"] { padding-left: 28px; }
+[data-part="message"] ul[data-part="md-list"] > [data-part="md-list-item"] { position: relative; padding-left: 16px; margin: 0 0 4px; }
+[data-part="message"] ul[data-part="md-list"] > [data-part="md-list-item"]::before { content: "–"; position: absolute; left: 0; color: var(--fulcrum-muted); }
+[data-part="message"] ol[data-part="md-list"] > [data-part="md-list-item"] { padding-left: 4px; margin: 0 0 4px; }
+[data-part="message"] [data-part="md-blockquote"] { margin: 0 0 12px; padding-left: 16px; border-left: 2px solid var(--fulcrum-border); color: var(--fulcrum-muted); font-style: italic; }
+[data-part="message"] [data-part="md-link"] { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+[data-part="message"] [data-part="md-code-inline"] {
+  padding: 0 5px;
+  border: 0;
+  background: color-mix(in srgb, var(--fulcrum-fg) 7%, transparent);
+  font: 13px/20px var(--achilles-code-font, var(--font-mono));
+}
+[data-part="message"] [data-part="code-fence"] {
+  margin: 0 0 12px;
+  border: 1px solid var(--fulcrum-border);
+  background: var(--fulcrum-surface);
+}
+[data-part="message"] [data-part="code-fence-head"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--fulcrum-border);
+  color: var(--fulcrum-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+[data-part="message"] [data-part="code-fence-head"] button { min-width: 32px; min-height: 24px; padding: 2px 4px; border: 0; color: var(--fulcrum-muted); font-size: 12px; }
+[data-part="message"] [data-part="code-fence-head"] button:hover { color: var(--fulcrum-fg); background: transparent; }
+[data-part="message"] [data-part="code-fence-head"] button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"] {
+  margin: 0;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  font: 13px/20px var(--achilles-code-font, var(--font-mono));
+}
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"]::before { display: none; }
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"] {
+  tab-size: 2;
+}
+[data-part="message"] :is(pre, pre code, time) { font-family: var(--achilles-code-font, var(--font-mono)); }
+[data-part="message"] [data-part="md-code-block"][data-language]::before { margin: -4px 0 8px; font-size: 12px; color: var(--fulcrum-muted); }
+[data-part="message"] [data-part="code-fence"]:has([data-part="md-code-block"][data-size="large"]) {
+  display: contents;
+}
+[data-part="message"] [data-part="code-fence"]:has([data-part="md-code-block"][data-size="large"]) > [data-part="code-fence-head"] {
+  display: none;
+}
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"][data-size="large"] {
+  padding: 0;
+}
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"]:not([data-size="large"])::before {
+  display: none;
+  content: none;
+}
+[data-part="message"] [data-part="md-table"] {
+  display: block;
+  max-width: 100%;
+  margin: 0 0 12px;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+}
+[data-part="message"] [data-part="md-table"] :is(th, td) {
+  min-width: 8ch;
+  padding: 6px 12px;
+  border: 1px solid var(--fulcrum-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+[data-part="message"] [data-part="md-table"] th { background: var(--fulcrum-surface); font-weight: 700; }
+[data-part="message"] [data-part="md-table"] :is(th, td)[align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  [data-part="message"] [data-part="code-fence-head"] button { min-width: 44px; min-height: 44px; }
+}
+
+/* fulcrum's timeline rows use content-visibility for long logs; disclosures must remeasure in normal flow. */
+[data-chat-transcript] [data-part="tool"] { display: flow-root; content-visibility: visible; contain: none; }
+/* virtual rows carry inline containment; raw disclosure growth must reach the owner observer after reloads and breakpoint changes. */
+[data-chat-transcript] [data-part="timeline"][data-virtual="true"] > [data-virtual-id] { contain: none !important; }
+[data-chat-transcript] [data-part="tool-summary-preview"] {
+  padding: 8px 12px 8px 12px;
+  color: var(--fulcrum-fg);
+  white-space: pre-wrap;
+}
+[data-chat-transcript] [data-part="tool-summary-preview"] > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-chat-transcript] [data-part="tool-summary-preview"] > div:first-child,
+[data-chat-transcript] [data-part="tool-summary-preview"] > div:last-child { color: var(--fulcrum-muted); }
+[data-chat-transcript] [data-part="tool-summary-preview"] > div + div { margin-top: 2px; }
+/* keep the disclosure in normal flow so its open pre moves every later transcript row. */
+[data-chat-transcript] [data-part="tool-raw"] { display: block; margin: 0 12px 8px 12px; color: var(--fulcrum-muted); }
+[data-chat-transcript] [data-part="tool-raw"] summary { cursor: pointer; min-height: 24px; }
+[data-chat-transcript] [data-part="tool-raw"] summary:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 2px; }
+[data-chat-transcript] [data-part="tool-raw"] pre { max-height: 40vh; margin: 8px 0 0; color: var(--fulcrum-fg); white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  [data-chat-transcript] [data-part="tool-header"] { grid-template-columns: 12px minmax(0, 1fr) auto; grid-template-rows: 24px 24px; row-gap: 0; }
+  [data-chat-transcript] [data-part="tool-name"] { grid-column: 2; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-chat-transcript] [data-part="tool-summary"] { grid-column: 2; grid-row: 2; }
+  [data-chat-transcript] [data-part="tool-status"] { grid-column: 3; grid-row: 1; }
+}
+[data-chat-transcript] [data-part="tool-foot"] { display: none; }
+
+@media (max-width: 640px) {
+  [data-chat-transcript] [data-compact-tool] > [data-part="tool-header"] { grid-template-columns: 12px minmax(0, 2fr) minmax(0, 3fr) auto; grid-template-rows: auto; }
+  [data-chat-transcript] [data-compact-tool] [data-part="tool-summary"] { grid-column: 3; grid-row: 1; }
+  [data-chat-transcript] [data-compact-tool] [data-part="tool-status"] { grid-column: 4; }
+}
+
+[data-vim-composer] .cm-editor {
+  max-height: calc(10 * 1.55em + var(--inset));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-family: var(--achilles-code-font, var(--font-mono));
+}
+
+[data-vim-composer] .cm-editor.cm-focused { outline: none; }
+[data-vim-composer] .cm-scroller { overflow: auto; font: inherit; }
+[data-vim-composer] .cm-content {
+  min-height: calc(1.55em + 2 * var(--inset));
+  padding: var(--inset);
+  caret-color: var(--fulcrum-accent);
+  font: inherit;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-vim-composer] .cm-line { padding: 0; }
+[data-vim-composer] [data-part="composer-field"][data-empty="true"] .cm-content::before {
+  color: var(--fulcrum-muted);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+[data-vim-composer] .cm-cursor { border-left-color: var(--fulcrum-accent); }
+[data-vim-composer] .cm-selectionBackground,
+[data-vim-composer] .cm-content ::selection { background: var(--fulcrum-accent) !important; color: var(--fulcrum-bg) !important; }
+[data-vim-composer][data-mode="normal"] .cm-fat-cursor,
+[data-vim-composer][data-mode="visual"] .cm-fat-cursor { background: var(--fulcrum-fg); color: var(--fulcrum-bg); }
+
+[data-vim-composer]:not([data-focused]) .cm-fat-cursor,
+[data-vim-composer]:not([data-focused]) .cm-cursor { display: none; }
+
+[data-chat-composer] { --composer-font: var(--achilles-ui-font, var(--font-sans)); }
+:root[data-code-font]:not([data-code-font="system-mono"]) [data-chat-composer] { --composer-font: var(--achilles-code-font, var(--font-mono)); }
+[data-chat-composer] :is([data-part="composer-field"], .cm-editor) { font: var(--achilles-ui-size, 14px) / 1.55 var(--composer-font); }
+[data-chat-composer] [data-part="composer-field"] > textarea { font: inherit; }
+[data-chat-composer] [data-part="composer-field"] > textarea:focus-visible,
+[data-chat-composer] .cm-content:focus-visible { outline: none; box-shadow: none; }
+[data-vim-composer] [data-part="composer-field"] { display: block; min-height: calc(1.55em + 2 * var(--inset)); }
+[data-chat-composer] button[data-slot="button"] { font-size: var(--achilles-ui-size, 14px); font-family: var(--achilles-ui-font, var(--font-sans)); border-radius: var(--radius); }
+[data-chat-composer] button[data-slot="button"]:hover { text-decoration: none; }
+[data-chat-composer] button[data-part="composer-submit"][data-action="steer"]:not([aria-disabled="true"]) { background: var(--background); color: var(--foreground); }
+[data-chat-composer] button[data-part="composer-stop"] { min-width: 0; }
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  [data-chat-composer] button[data-slot="button"], [data-part="approval"] button { min-height: 40px; }
+  [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
+}
+
+/* Fulcrum's frame stays in flex flow; only its internal scrollport scrolls. */
+[data-chat-transcript] > [data-part="timeline-frame"] { display: flex; flex: 1 1 0; flex-direction: column; width: 100%; max-width: none; height: auto; min-height: 0; margin: 0; }
+[data-chat-transcript] [data-part="timeline-scroll"] { flex: 1 1 0; min-height: 0; scroll-behavior: auto; }
+[data-chat-transcript] [data-part="timeline"] { width: 100%; max-width: none; margin: 0; padding: 32px 0 16px; }
+[data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: min(944px, calc(100% - 48px)); margin-inline: auto; }
+[data-chat-transcript] [data-part="jump-to-latest-lane"] { display: none !important; }
+[data-chat-transcript]:has(> [data-part="timeline-frame"]):not(:has(> [data-jump-lane])) { padding-block-end: 48px; }
+[data-page-chat-docked] [data-part="timeline-scroll"] { margin-top: 8px; }
+[data-page-chat-docked] [data-part="timeline"] { padding: 12px 0 16px; }
+[data-page-chat-docked] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: calc(100% - 32px); }
+[data-chat-composer] { --inset: 12px; width: min(944px, calc(100% - 48px)); margin: 0 auto 24px; }
+[data-chat-composer] [data-part="composer-field"] { min-height: 64px; }
+[data-chat-composer] [data-part="composer-field"] textarea { min-height: 64px; padding: 12px 14px; line-height: 22px; }
+[data-chat-composer] [data-part="composer-field"] textarea::placeholder,
+[data-vim-composer] .cm-content::before { font-family: var(--achilles-ui-font, var(--font-sans)); }
+[data-chat-composer] [data-part="composer-bar"] { gap: 8px; min-height: 36px; padding: 6px 8px 8px 14px; }
+[data-chat-composer] [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 12px; line-height: 16px; }
+[data-chat-composer] [data-part="composer-hint"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; font-size: calc(var(--achilles-ui-size, 14px) - 1px); }
+[data-page-chat-docked] [data-chat-composer] { width: calc(100% - 32px); margin-bottom: 16px; }
+@media (max-width: 760px), (max-height: 500px) {
+  [data-chat-transcript] [data-part="timeline"] { padding: 14px 12px 8px; }
+  [data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: 100%; }
+  [data-chat-composer] { width: calc(100% - 24px); margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  [data-chat-composer] :is([data-part="composer-submit"], [data-part="composer-stop"]) { min-width: 44px; min-height: 44px; }
+}
+
+@media (width < 1280px) {
+  [data-page-chat-docked] [data-chat-transcript] { padding-inline: 16px; }
+  [data-page-chat-docked] [data-chat-transcript] [data-part="timeline"] { padding-inline: 0; }
+  [data-page-chat-docked] [data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: 100%; }
 }

@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ToolBody, type ItemState, type ToolBodyProps, type ToolItem } from "@fulcrum/react";
-import "./tool-summary.css";
 
 const MAX_INPUT = 64_000;
 const MAX_TEXT = 180;

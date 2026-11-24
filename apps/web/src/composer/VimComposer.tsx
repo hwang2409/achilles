@@ -1,3 +1,5 @@
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useCallback, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { history } from "@codemirror/commands";
 import { Compartment, EditorState } from "@codemirror/state";
@@ -9,7 +11,6 @@ import { composerStatus, enterAction, submitAction, type ComposerModel } from ".
 import { QueuedMessages } from "./QueuedMessages";
 import { ComposerHint } from "./hint";
 import { useComposerDelivery, type ComposerAdapterProps } from "./useComposerDelivery";
-import "./vim-composer.css";
 
 type Mode = "insert" | "normal" | "visual";
 
@@ -165,20 +166,20 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     return () => { if (document.activeElement === button) viewRef.current?.focus(); };
   }, []);
 
-  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-write-surface={WRITE_SURFACE.composerSend} data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
+  return <form className={cn("relative rounded-md", className)} data-chat-composer="" data-vim-composer="" data-part="composer" data-write-surface={WRITE_SURFACE.composerSend} data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
     <QueuedMessages model={model} onRetry={(id) => { retry(id); viewRef.current?.focus(); }} onRestore={restore} onCancel={(id) => { cancel(id); viewRef.current?.focus(); }} />
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
-      <div className="vim-guidance">
-        <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
+      <div data-vim-guidance="" className="flex min-w-0 flex-1 items-center gap-2 @max-[480px]:order-1 @max-[480px]:basis-full [&_[data-part=composer-hint]]:block [&_[data-part=composer-hint]]:whitespace-nowrap">
+        <span data-vim-mode="" className="shrink-0 min-w-[62px] rounded-sm border border-input px-2 text-center text-xs leading-5 text-muted-foreground data-[mode=normal]:bg-muted data-[mode=visual]:bg-muted" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
         <p data-part="composer-status" data-tone={tone} title={model.error?.text}>
           <ComposerHint id={`${id}-hint`} state={state} mode={mode} queues={queues} focused={focused} questionWaiting={questionWaiting} override={note || undefined} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>{message}</span>
         </p>
       </div>
-      <span className="vim-pending" aria-hidden="true">{mode === "visual" && selectionLength ? `${selectionLength} chars` : pending}</span>
-      {running && onStop ? <button ref={stopButtonRef} type="button" data-part="composer-stop" data-write-surface={WRITE_SURFACE.composerAbort} data-action="stop" aria-label="stop the running turn" aria-disabled={model.stopping || undefined} onClick={stop}>{model.stopping ? "stopping" : "stop"}</button> : null}
-      <button type="submit" data-part="composer-submit" data-write-surface={steer ? WRITE_SURFACE.composerSteer : WRITE_SURFACE.composerSend} data-action={queues ? "queue" : steer ? "steer" : "send"} aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"} aria-disabled={!action || undefined}>{queues ? "queue" : steer ? "steer" : "send"}</button>
+      <span className="min-w-[3ch] shrink-0 text-right text-xs @max-[480px]:order-2" aria-hidden="true">{mode === "visual" && selectionLength ? `${selectionLength} chars` : pending}</span>
+      {running && onStop ? <Button ref={stopButtonRef} type="button" variant="outline" className="@max-[480px]:order-3" data-part="composer-stop" data-write-surface={WRITE_SURFACE.composerAbort} data-action="stop" aria-label="stop the running turn" aria-disabled={model.stopping || undefined} onClick={stop}>{model.stopping ? "stopping" : "stop"}</Button> : null}
+      <Button type="submit" className="@max-[480px]:order-3" data-part="composer-submit" data-write-surface={steer ? WRITE_SURFACE.composerSteer : WRITE_SURFACE.composerSend} data-action={queues ? "queue" : steer ? "steer" : "send"} aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"} aria-disabled={!action || undefined}>{queues ? "queue" : steer ? "steer" : "send"}</Button>
     </div>}
   {props.commandOutput}
     </form>;

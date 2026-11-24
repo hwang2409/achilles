@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { draftStore } from "./draftStore";
 import { keyboardFocusToComposer } from "./keyboard";
@@ -88,9 +89,9 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
     sendingRef.current = true; setSending(true);
     try { await onSelect(); } finally { sendingRef.current = false; setSending(false); }
   };
-  return <div className="empty-chat">
-    <h1 title={`New chat on ${page.title}`}>New chat on {page.title}</h1>
-    <p>create mode is only for making or changing pages and tools; tools already assigned to this page work with it on or off.</p>
-    <div className="chat-starters" data-write-surface={WRITE_SURFACE.emptySend}>{starters.map((starter, index) => <button key={index} title={!canWrite ? disabledReason : undefined} aria-describedby={!canWrite ? "read-only-reason" : undefined} disabled={sending || !canWrite} onClick={(event) => { keyboardFocusToComposer(event); void select(starter.onSelect); }}><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
+  return <div data-empty-chat="" className="absolute inset-0 z-10 overflow-y-auto px-[max(24px,calc((100%_-_944px)/2))] pt-[min(20vh,180px)] pb-8 max-[760px]:px-3 max-[760px]:pt-4 max-[760px]:pb-6 in-[[data-page-chat-docked]]:pt-4">
+    <h1 className="mb-3 line-clamp-2 max-w-[34ch] text-[26px] leading-8 font-semibold tracking-tight text-balance in-[[data-page-chat-docked]]:text-lg" title={`New chat on ${page.title}`}>New chat on {page.title}</h1>
+    <p className="max-w-[68ch] text-[15px] leading-relaxed text-pretty text-muted-foreground">create mode is only for making or changing pages and tools; tools already assigned to this page work with it on or off.</p>
+    <div className="mt-6 border-t" data-write-surface={WRITE_SURFACE.emptySend}>{starters.map((starter, index) => <Button variant="ghost" className="grid h-auto min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] justify-start gap-2 rounded-none border-b px-2 py-2 text-start whitespace-normal max-[760px]:grid-cols-1 max-[760px]:gap-1" key={index} title={!canWrite ? disabledReason : undefined} aria-describedby={!canWrite ? "read-only-reason" : undefined} disabled={sending || !canWrite} onClick={(event) => { keyboardFocusToComposer(event); void select(starter.onSelect); }}><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <span className="text-xs font-normal text-muted-foreground">{starter.tag}</span> : null}</Button>)}</div>
   </div>;
 }

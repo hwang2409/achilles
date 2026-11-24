@@ -174,13 +174,13 @@ function ObserverBanner({ connection, readOnly }: { connection: Connection; read
     setWorking(false);
     setFeedback(reason);
   };
-  return <aside className="observer-banner" aria-label="observer mode">
-    <div>
-      <strong>{readOnly ? "this page is read-only" : "another tab controls zeta"}</strong>
-      <span id="tab-authority-description">{readOnly ? "open a chat to control zeta." : "this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled."}</span>
+  return <aside className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b bg-ring/8 px-4 py-2.5 text-foreground" aria-label="observer mode">
+    <div className="grid min-w-0 flex-1 gap-0.5">
+      <strong className="text-ring">{readOnly ? "this page is read-only" : "another tab controls zeta"}</strong>
+      <span className="text-pretty text-muted-foreground" id="tab-authority-description">{readOnly ? "open a chat to control zeta." : "this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled."}</span>
     </div>
-    {!readOnly && <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>}
+    {!readOnly && <div className="grid shrink-0 justify-items-end"><button className="min-h-10 rounded-md border border-ring px-3 text-ring hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring aria-disabled:cursor-wait aria-disabled:opacity-65" type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>}
     {/* its own full-width row under the text and the button, so a long refusal does not squeeze the text */}
-    {!readOnly && <span id="take-control-feedback" role="status">{feedback}</span>}
+    {!readOnly && <span className="basis-full text-pretty text-muted-foreground empty:hidden" id="take-control-feedback" role="status">{feedback}</span>}
   </aside>;
 }

@@ -10,8 +10,25 @@ export function ToolDisclosure({ sessionId, children }: { sessionId: string; chi
   return <OpenTools.Provider value={open}>{children}</OpenTools.Provider>;
 }
 
+const withNotice = (text: string, notice: string) => `${text}${text && !text.endsWith("\n") ? "\n" : ""}${notice}`;
+const humanBytes = (bytes: number) => bytes < 1024 ? `${bytes} bytes` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+// Match Fulcrum's sourceText (not exported by the pinned @fulcrum/react).
 function readText(source: ToolBodyProps["output"]): string {
-  return Array.from(source.chunks()).join("");
+  const { omission, protocolTruncated } = source;
+  let head = "", tail = "";
+  for (const chunk of source.chunks()) {
+    if (omission && chunk.start >= omission.end) tail += chunk.text;
+    else head += chunk.text;
+  }
+  if (omission) {
+    const bytes = humanBytes(omission.bytes);
+    const notice = omission.whole && omission.reason === "run-cap"
+      ? `output not kept (${bytes}) to save memory in this long run` : `${bytes} not kept`;
+    const reset = head.includes("\u001b") ? "\u001b[0m" : "";
+    head = withNotice(head, reset + notice) + (tail ? `\n${tail}` : "");
+  }
+  return protocolTruncated ? withNotice(head, "host did not provide the complete output") : head;
 }
 
 export function CompactTool({ id }: { id: string }) {
@@ -26,7 +43,7 @@ export function CompactTool({ id }: { id: string }) {
   const name = item.tool_call.name.trim().slice(0, 260) || "unnamed tool";
   const summary = toolArgumentSummary(item);
   const duration = item.view?.durationMs;
-  return <details className="compact-tool" open={open} data-part="tool" data-kind="tool" data-id={id} data-tool={name} data-tool-view={item.view?.kind} data-state={state}>
+  return <details data-compact-tool="" open={open} data-part="tool" data-kind="tool" data-id={id} data-tool={name} data-tool-view={item.view?.kind} data-state={state}>
       <summary data-part="tool-header" onClick={(event) => {
         event.preventDefault();
         if (open) choices?.delete(id); else choices?.add(id);
@@ -40,7 +57,7 @@ export function CompactTool({ id }: { id: string }) {
           {approval !== "deny" && !(approval === "abort" && status === "canceled") && status}
           {duration !== undefined && <span data-part="tool-duration">{duration < 1000 ? `${Math.round(duration)}ms` : `${(duration / 1000).toFixed(1)}s`}</span>}
         </span>
-        {state === "error" && !open && <span className="compact-tool-error">{toolErrorLine(item.output)}</span>}
+        {state === "error" && !open && <span className="col-start-2 col-end-[-1] row-start-2 truncate text-destructive">{toolErrorLine(item.output)}</span>}
       </summary>
       {opened && <div data-part="tool-body">
           {item.output.omission && !item.output.omission.whole && <p data-part="tool-gap" data-cut="">{item.output.omission.bytes} bytes not kept from the middle of this output</p>}

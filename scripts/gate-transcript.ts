@@ -81,10 +81,10 @@ export async function gateTranscript(
     root.style.setProperty("--achilles-code-font", '"IBM Plex Mono"');
     root.style.setProperty("--achilles-ui-size", "16px");
     root.dataset.density = "compact";
-    const transcript = getComputedStyle(document.querySelector(".transcript")!);
-    const prose = getComputedStyle(document.querySelector('.transcript [data-part="message"][data-format="markdown"]')!);
-    const code = getComputedStyle(document.querySelector(".transcript pre code")!);
-    const timeline = document.querySelector('.transcript [data-part="timeline"]')!;
+    const transcript = getComputedStyle(document.querySelector("[data-chat-transcript]")!);
+    const prose = getComputedStyle(document.querySelector('[data-chat-transcript] [data-part="message"][data-format="markdown"]')!);
+    const code = getComputedStyle(document.querySelector("[data-chat-transcript] pre code")!);
+    const timeline = document.querySelector('[data-chat-transcript] [data-part="timeline"]')!;
     return {
       font: transcript.fontFamily,
       proseFont: prose.fontFamily,
@@ -173,16 +173,16 @@ export async function gateTranscript(
   const afterMoreDeltas = await scroll.evaluate((element) => element.scrollTop);
   if (Math.abs(afterMoreDeltas - scrolledUp) > 4)
     throw new Error(`streaming transcript jumped after scroll up: ${scrolledUp} -> ${afterMoreDeltas}`);
-  const jump = page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible');
+  const jump = page.locator('[data-jump-lane] [data-jump-to-latest]:visible');
   await gateWait(() => jump.waitFor({ state: "visible", timeout: 20_000 }));
-  if (await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 1)
+  if (await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').count() !== 1)
     throw new Error("tool-call stream rendered more than one visible jump to latest control");
   // keyboard focus on the control must survive a new row arriving below while the user reads above
   const focusKept = (mark: string) => page.evaluate((mark) => (document.activeElement as HTMLElement | null)?.dataset.gateFocused === mark, mark);
   await jump.evaluate((element) => { (element as HTMLElement).dataset.gateFocused = "stream-jump"; });
   await jump.focus();
   if (!(await focusKept("stream-jump"))) throw new Error("tool-call stream jump to latest control is not keyboard focusable");
-  await gateWait(() => page.locator('[data-part="jump-to-latest-lane"] [data-part="jump-to-latest"]').waitFor({ state: "attached", timeout: 20_000 }));
+  await gateWait(() => page.locator('[data-jump-lane] [data-jump-to-latest]').waitFor({ state: "attached", timeout: 20_000 }));
   if (!(await focusKept("stream-jump"))) {
     const active = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 160) ?? "none");
     throw new Error(`jump to latest lost keyboard focus when a new row arrived; focus is on ${active}`);
@@ -233,16 +233,16 @@ export async function gateTranscript(
   await page.mouse.wheel(0, -1200);
   await waitFor(async () => await distanceFromBottom() > 100, "user scroll up during text-only stream");
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 080"), "text-only line 080 for this turn");
-  const textOnlyJump = page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible');
+  const textOnlyJump = page.locator('[data-jump-lane] [data-jump-to-latest]:visible');
   await gateWait(() => textOnlyJump.waitFor({ state: "visible", timeout: 20_000 }));
-  if (await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 1)
+  if (await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').count() !== 1)
     throw new Error("text-only stream rendered more than one visible jump to latest control");
   const jumpDiagnostics = async () => page.evaluate(() => {
     const scroll = document.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
-    const pane = document.querySelector<HTMLElement>('.transcript');
+    const pane = document.querySelector<HTMLElement>('[data-chat-transcript]');
     const frame = document.querySelector<HTMLElement>('[data-part="timeline-frame"]');
-    const lane = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"]');
-    const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]');
+    const lane = document.querySelector<HTMLElement>('[data-jump-lane]');
+    const control = document.querySelector<HTMLElement>('[data-jump-lane] [data-jump-to-latest]');
     const rect = (element: HTMLElement | null) => element && (() => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height }; })();
     return {
       scrollTop: scroll?.scrollTop,
@@ -271,22 +271,22 @@ export async function gateTranscript(
     if (width === 390) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
     if (width === 390) {
-      const bar = page.locator(".page-chat-bar");
+      const bar = page.locator("[data-page-chat-bar]");
       await gateWait.playwright(bar, "waitFor", { state: "visible" });
       await bar.click();
       const sheet = page.getByRole("dialog", { name: "page chat" });
       await gateWait.playwright(sheet, "waitFor", { state: "visible" });
       if (!(await sheet.evaluate((node) => node.contains(document.activeElement))))
         throw new Error("390px page chat manual opener did not move focus into the sheet");
-      await gateWait.playwright(sheet.locator(".transcript"), "waitFor", { state: "visible" });
-      if (await sheet.locator(".transcript").evaluate((element) => element.clientHeight <= 0)) throw new Error("390px page chat jump sheet has no usable transcript height");
+      await gateWait.playwright(sheet.locator("[data-chat-transcript]"), "waitFor", { state: "visible" });
+      if (await sheet.locator("[data-chat-transcript]").evaluate((element) => element.clientHeight <= 0)) throw new Error("390px page chat jump sheet has no usable transcript height");
     }
     await waitForJump(async () => await page.evaluate((narrow) => {
       const shell = document.querySelector<HTMLElement>("[data-shell]");
       const main = document.querySelector<HTMLElement>(".main-pane");
       const sidebar = document.querySelector<HTMLElement>("[data-shell-nav]");
       const scrim = document.querySelector<HTMLElement>('[data-slot="sheet-overlay"]');
-      const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]');
+      const control = document.querySelector<HTMLElement>('[data-jump-lane] [data-jump-to-latest]');
       if (!shell || !main || !control || !control.isConnected || !control.getClientRects().length) return false;
       const style = getComputedStyle(control);
       const scrimStyle = scrim && getComputedStyle(scrim);
@@ -300,12 +300,12 @@ export async function gateTranscript(
       return !shell.querySelector('[aria-controls="surface-sidebar"][aria-expanded="true"]') && !main.inert && main.getAttribute("aria-hidden") !== "true" &&
         (hit === control || control.contains(hit)) && !hit?.closest('[data-slot="sheet-overlay"]') && (!dialog || dialog === pageChatSheet);
     }, width <= 760), `responsive shell and unobscured jump control at ${width}`);
-    const geometry = await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').evaluate((control) => {
+    const geometry = await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').evaluate((control) => {
       const rect = (element: Element) => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height }; };
       const controlRect = rect(control);
-      const pane = document.querySelector<HTMLElement>('.transcript')!;
+      const pane = document.querySelector<HTMLElement>('[data-chat-transcript]')!;
       const paneRect = rect(pane);
-      const lane = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"]')!;
+      const lane = document.querySelector<HTMLElement>('[data-jump-lane]')!;
       const laneRect = rect(lane);
       const full = document.querySelector<HTMLElement>('[data-jump-label="full"]')!;
       const compact = document.querySelector<HTMLElement>('[data-jump-label="compact"]')!;
@@ -329,7 +329,7 @@ export async function gateTranscript(
     if (width === 390) {
       const sheet = page.getByRole("dialog", { name: "page chat" });
       await sheet.getByRole("button", { name: "close page chat" }).click();
-      const bar = page.locator(".page-chat-bar");
+      const bar = page.locator("[data-page-chat-bar]");
       await gateWait.playwright(bar, "waitFor", { state: "visible" });
       await bar.evaluate((element) => { if (document.activeElement !== element) throw new Error("390px page chat close did not restore focus to the bar"); });
     }
@@ -353,35 +353,55 @@ export async function gateTranscript(
   });
   await waitForJump(async () => (JSON.parse(await Bun.file(controlPath).text()).jump_stream_barrier ?? null) === "held", "held jump stream chunks");
   // Desktop CSS can show the jump before the closed mobile sheet drops inert.
-  const desktopJump = page.locator(".page-chat-docked #page-chat-sheet:not([inert], [role], [aria-modal])").locator(textOnlyJump);
+  const desktopJump = page.locator("#page-chat-sheet[data-page-chat-docked]:not([inert], [role], [aria-modal])").locator(textOnlyJump);
   await gateWait.playwright(desktopJump, "waitFor", { state: "visible" });
   await desktopJump.focus();
   if (!(await desktopJump.evaluate((element) => document.activeElement === element))) throw new Error("text-only jump to latest control is not keyboard focusable");
   await desktopJump.click();
-  await waitForJump(async () => await scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop <= 4 && !document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]')?.getClientRects().length), "jump to latest lands before releasing held chunks");
-  const jumpedBeforeRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]')?.getClientRects().length) }));
+  await waitForJump(async () => await scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop <= 4 && !document.querySelector<HTMLElement>('[data-jump-lane] [data-jump-to-latest]')?.getClientRects().length), "jump to latest lands before releasing held chunks");
+  const jumpedBeforeRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector<HTMLElement>('[data-jump-lane] [data-jump-to-latest]')?.getClientRects().length) }));
   if (jumpedBeforeRelease.gap > 4 || jumpedBeforeRelease.jumpVisible)
     throw new Error(`jump to latest did not land before releasing held chunks: ${JSON.stringify(jumpedBeforeRelease)}\njump diagnostics: ${JSON.stringify(await jumpDiagnostics())}`);
   const heldJumpControl = JSON.parse(await Bun.file(controlPath).text());
   await writeControl(controlPath, { ...heldJumpControl, release_jump_stream_barrier: true });
   await waitForJump(async () => (await textStream.innerText()).includes("text-only line 081"), "several chunks after jump");
-  const jumpedAfterRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]')?.getClientRects().length) }));
+  const jumpedAfterRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector('[data-jump-lane] [data-jump-to-latest]')?.getClientRects().length) }));
   if (jumpedAfterRelease.gap > 4 || jumpedAfterRelease.jumpVisible)
     throw new Error(`mid-stream jump did not stay at bottom after several chunks: ${JSON.stringify(jumpedAfterRelease)}`);
-  await waitForJump(async () => await distanceFromBottom() <= 4 && await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() === 0, "jump to latest for this turn");
+  await waitForJump(async () => await distanceFromBottom() <= 4 && await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').count() === 0, "jump to latest for this turn");
   const jumped = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop }));
-  if (jumped.gap > 4 || await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 0)
+  if (jumped.gap > 4 || await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').count() !== 0)
     throw new Error(`mid-stream jump did not resume following: ${JSON.stringify(jumped)}`);
   await waitForJump(async () => (await textStream.innerText()).includes("text-only line 100") && await distanceFromBottom() <= 4, "mid-stream jump resumes following");
-  if (await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 0)
+  if (await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').count() !== 0)
     throw new Error("mid-stream jump to latest control stayed visible after returning to the bottom");
   await capture("streaming-midstream-jump-1440x900.png");
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-  await waitForJump(async () => (await textStream.innerText()).includes("text-only line 119") && await distanceFromBottom() <= 4 && await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() === 0, "text-only stream completes at the bottom after jump");
+  await waitForJump(async () => (await textStream.innerText()).includes("text-only line 119") && await distanceFromBottom() <= 4 && await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').count() === 0, "text-only stream completes at the bottom after jump");
   const finalJump = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop }));
-  if (finalJump.gap > 4 || await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 0)
+  if (finalJump.gap > 4 || await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').count() !== 0)
     throw new Error(`final text-only stream did not settle at the bottom: ${JSON.stringify(finalJump)}`);
   await waitForIdleTurn(page, waitFor);
+
+  // Run after releasing the stream barrier so the mobile round trip cannot change the desktop jump setup.
+  await page.setViewportSize({ width: 390, height: 760 });
+  const bar = page.locator("[data-page-chat-bar]");
+  const sheet = page.getByRole("dialog", { name: "page chat" });
+  const sheetScroll = sheet.locator('[data-part="timeline-scroll"]');
+  const close = sheet.getByRole("button", { name: "close page chat" });
+  if (await bar.getAttribute("aria-expanded") === "false") await bar.click();
+  const atBottom = (node: Element) => node.scrollHeight - node.clientHeight - node.scrollTop <= 4;
+  await waitForJump(async () => await sheetScroll.evaluate(atBottom), "390px page chat keeps following on resize");
+  await close.click();
+  await bar.click();
+  await waitForJump(async () => await sheetScroll.evaluate(atBottom), "390px page chat remains at the end after reopening");
+  const top = await sheetScroll.evaluate((node) => { node.scrollTop = Math.round((node.scrollHeight - node.clientHeight) / 2); return node.scrollTop; });
+  if (top < 20) throw new Error("390px page chat did not have a mid-transcript point to preserve");
+  await close.click();
+  await bar.click();
+  await waitForJump(async () => await sheetScroll.evaluate((node, saved) => Math.abs(node.scrollTop - saved) <= 4, top), "390px page chat preserves the reading position after closing");
+  await close.click();
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 // A reload in the middle of a streaming reply keeps the turn (`turn_reconnect`): the reloaded page attaches to it with
@@ -443,8 +463,8 @@ export async function gateReloadMidTurn(
       if (count === 0) missing.push(index); else if (count > 1) repeated.push(index);
     }
     if (missing.length || repeated.length) throw new Error(`reply after reload lost lines ${JSON.stringify(missing)} and repeated lines ${JSON.stringify(repeated)}`);
-    const prompts = await page.locator(".transcript").getByText("stream across a reload", { exact: true }).count();
-    if (prompts !== 1) throw new Error(`reload showed the prompt ${prompts} times: ${(await page.locator(".transcript").innerText()).slice(-1500)}`);
+    const prompts = await page.locator("[data-chat-transcript]").getByText("stream across a reload", { exact: true }).count();
+    if (prompts !== 1) throw new Error(`reload showed the prompt ${prompts} times: ${(await page.locator("[data-chat-transcript]").innerText()).slice(-1500)}`);
     const cancelled = requests().slice(framesBeforeReload).some((frame) => JSON.stringify(frame).includes('"reason":"disconnect"'));
     if (cancelled) throw new Error("zeta cancelled the turn on reload (reason disconnect)");
     if (await page.getByRole("alert").count()) throw new Error(`reload mid-turn showed a notice: ${await page.getByRole("alert").first().innerText()}`);

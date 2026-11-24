@@ -27,23 +27,24 @@ function fitMetricStrip(strip: HTMLElement) {
   const usableWidth = strip.getBoundingClientRect().width - parseFloat(stripStyle.borderLeftWidth) - parseFloat(stripStyle.borderRightWidth);
   if (!(usableWidth > 0)) return;
   strip.style.removeProperty("--metric-value-size");
-  const tiles = [...strip.querySelectorAll<HTMLElement>(".metric-block")];
+  const tiles = [...strip.querySelectorAll<HTMLElement>("[data-metric-block]")];
   const measures = tiles.flatMap(tile => {
     const style = getComputedStyle(tile);
     const inner = getComputedStyle(tile.querySelector(":scope > div")!);
-    const mark = tile.querySelector<HTMLElement>(":scope > .record-mark");
+    const mark = tile.querySelector<HTMLElement>(":scope > [data-record-mark]");
     const marker = mark && getComputedStyle(mark);
     const markerWidth = marker && marker.position !== "absolute"
       ? mark.getBoundingClientRect().width + parseFloat(marker.marginLeft) + parseFloat(marker.marginRight) + parseFloat(style.columnGap)
       : 0;
-    const insets = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(inner.paddingRight) + markerWidth;
-    const tokens = [...tile.querySelectorAll<HTMLElement>(".metric-value-number, .metric-word")];
+    const insets = parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth)
+      + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(inner.paddingRight) + markerWidth;
+    const tokens = [...tile.querySelectorAll<HTMLElement>("[data-metric-number], [data-metric-word]")];
     return tokens.map((token, i) => ({ token, insets, word: token.textContent!, preceding: tokens[i - 1]?.textContent, probe: document.createElement("span") }));
   });
   if (!measures.length) return;
   // Measure real DOM text, including font fallback and the browser's glyph rounding.
   for (const { token, word, probe } of measures) {
-    probe.className = "metric-measure";
+    probe.className = "absolute invisible w-max whitespace-nowrap";
     probe.textContent = word;
     token.append(probe);
   }

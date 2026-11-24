@@ -128,20 +128,20 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
       await page.unroute("**/assets/VimComposer-*.js", holdVimChunk);
     }
   }
-  const composer = page.locator('.vim-composer[data-part="composer"]');
+  const composer = page.locator('[data-vim-composer][data-part="composer"]');
   const field = page.getByRole("textbox", { name: "message", exact: true });
   const vimDraft = () => composer.locator('[data-part="composer-field"]').getAttribute("data-value");
   await gateWait.playwright(composer, "waitFor", { state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "first\n\n  third") throw new Error(`vim did not preserve the multiline stock draft: ${JSON.stringify(await vimDraft())}`);
-  await gateWait.playwright(page.locator('.vim-composer[data-state="idle"]'), "waitFor", { state: "visible", timeout: 20_000 });
-  const vimTypography = await page.locator(".vim-composer .cm-editor").evaluate((element) => { const style = getComputedStyle(element); return { family: style.fontFamily, size: style.fontSize }; });
+  await gateWait.playwright(page.locator('[data-vim-composer][data-state="idle"]'), "waitFor", { state: "visible", timeout: 20_000 });
+  const vimTypography = await page.locator("[data-vim-composer] .cm-editor").evaluate((element) => { const style = getComputedStyle(element); return { family: style.fontFamily, size: style.fontSize }; });
   if (!vimTypography.family.includes("IBM Plex Mono") || vimTypography.size !== "16px") throw new Error(`vim composer ignored code font or size settings: ${JSON.stringify(vimTypography)}`);
   const hintSize = await composer.locator('[data-part="composer-hint"]').evaluate((element) => getComputedStyle(element).fontSize);
   if (hintSize !== "15px") throw new Error(`composer guidance did not scale with the 16 px setting: ${hintSize}`);
   if (screenshotDir) {
     await page.setViewportSize({ width: 760, height: 900 });
-    const guidanceAligned = await composer.locator(".vim-guidance").evaluate((element) => {
-      const chip = element.querySelector(".vim-mode-chip")?.getBoundingClientRect();
+    const guidanceAligned = await composer.locator("[data-vim-guidance]").evaluate((element) => {
+      const chip = element.querySelector("[data-vim-mode]")?.getBoundingClientRect();
       const hint = element.querySelector('[data-part="composer-status"]')?.getBoundingClientRect();
       return Boolean(chip && hint && chip.top < hint.bottom && hint.top < chip.bottom);
     });
@@ -316,9 +316,9 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await pendingApproval.count()) await pendingApproval.last().getByRole("button", { name: "deny", exact: true }).click();
   await waitFor(async () =>
     await page.locator('[data-part="composer"][data-state="idle"]').count() === 1 &&
-    await page.locator(".run-state").innerText() === "idle", "reconnected turn idle after denial");
+    await page.locator("[data-chat-status]").getAttribute("data-chat-status") === "idle", "reconnected turn idle after denial");
   await setVim(true);
-  await gateWait.playwright(page.locator('.vim-composer[data-state="idle"]'), "waitFor", { state: "visible", timeout: 20_000 });
+  await gateWait.playwright(page.locator('[data-vim-composer][data-state="idle"]'), "waitFor", { state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "kept draft") throw new Error("switching to vim changed the reconnected draft");
   await field.focus();
   await field.press("Escape");

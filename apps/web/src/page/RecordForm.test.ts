@@ -37,8 +37,8 @@ function serve(tool: { version: number; input_schema: unknown }) {
 
 const block = (refreshKey: string, canWrite = true) => createElement(FormBlock, { title: "add book", toolName: "add_book", pageId: "books", credential: "c", refreshKey, canWrite, disabledReason: "this tab is read-only; take control to make changes" });
 const done = JSON.stringify("done");
-const statusButton = () => view().getByRole("button", { name: /status/ });
-const chooseStatus = async (value: string) => { const button = await view().findByRole("button", { name: /status/ }); fireEvent.click(button); fireEvent.click(view().getByRole("option", { name: value })); };
+const statusButton = () => view().getByRole("combobox", { name: /status/ });
+const chooseStatus = async (value: string) => { const button = await view().findByRole("combobox", { name: /status/ }); fireEvent.keyDown(button, { key: "Enter" }); fireEvent.click(await view().findByRole("option", { name: value })); };
 
 test("read-only insert shows the shared reason and never invokes the tool", async () => {
   const calls = serve({ version: 1, input_schema: schema() });
@@ -51,7 +51,7 @@ test("read-only insert shows the shared reason and never invokes the tool", asyn
 test("a chat turn end (refreshKey change) keeps typed values and the same inputs", async () => {
   serve({ version: 1, input_schema: schema() });
   mounted = render(block("0:0"));
-  const status = await view().findByRole("button", { name: /status/ });
+  const status = await view().findByRole("combobox", { name: /status/ });
   expect(status.getAttribute("name")).toBe("status");
   await chooseStatus("done");
   // The tool gains a field during the turn; the form takes the new schema in place.
@@ -74,7 +74,7 @@ test("reload tool after a 409 keeps typed values and focuses the first field", a
   await waitFor(() => expect(calls.filter((call) => call.endsWith("/tools")).length).toBe(1));
   await act(async () => { await Promise.resolve(); });
   expect(statusButton().textContent).toContain("done");
-  expect(document.activeElement).toBe(statusButton());
+  expect(document.activeElement === statusButton()).toBe(true);
   // The retry now carries the new version and succeeds.
   fireEvent.click(view().getByRole("button", { name: "add" }));
   expect(await view().findByText("added")).toBeTruthy();
@@ -113,7 +113,7 @@ test("a selected row fills the update form and its record_id and revision are se
   expect((view().getByLabelText(/title/) as HTMLInputElement).disabled).toBe(true);
   expect((view().getByLabelText(/title/) as HTMLInputElement).placeholder).toBe("—");
   act(() => selectRow("books", { collection: "books", record: { ...stored } }));
-  const status = await view().findByRole("button", { name: /status/ });
+  const status = await view().findByRole("combobox", { name: /status/ });
   expect(status.textContent).toContain("to read");
   expect((view().getByLabelText(/title/) as HTMLInputElement).value).toBe("Dune");
   expect(view().queryByLabelText(/record_id/)).toBeNull();
@@ -195,26 +195,26 @@ const enumHarness = () => {
   const [value, setValue] = useState("music");
   return createElement(EnumListbox, { value, options: enumOptions, onChange: setValue, label: "kind" });
 };
-const enumButton = () => view().getByRole("button", { name: "kind" });
-const enumMenu = () => view().getByRole("listbox");
+const enumButton = () => view().getByRole("combobox", { name: "kind" });
 const openEnum = async (key = "Enter") => { fireEvent.keyDown(enumButton(), { key }); await act(async () => Promise.resolve()); };
 
 test("enum listbox opens, navigates, type-aheads, and selects through its public interface", async () => {
   mounted = render(createElement(enumHarness));
+  const trigger = enumButton();
   await openEnum();
-  expect(enumButton().getAttribute("aria-expanded")).toBe("true");
-  fireEvent.keyDown(enumMenu(), { key: "ArrowDown" });
-  fireEvent.keyDown(enumMenu(), { key: "ArrowDown" });
-  fireEvent.keyDown(enumMenu(), { key: "Home" });
-  expect(enumMenu().getAttribute("aria-activedescendant")).toContain("option-0");
-  fireEvent.keyDown(enumMenu(), { key: "End" });
-  expect(enumMenu().getAttribute("aria-activedescendant")).toContain("option-3");
-  fireEvent.keyDown(enumMenu(), { key: "f" });
-  fireEvent.keyDown(enumMenu(), { key: "o" });
-  expect(enumButton().textContent).toContain("jump fo");
-  expect(enumMenu().getAttribute("aria-activedescendant")).toContain("option-0");
-  expect(enumMenu().querySelector('[aria-selected="false"] u')?.textContent).toBe("fo");
-  fireEvent.keyDown(enumMenu(), { key: "Enter" });
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  const option = (name: string) => view().getByRole("option", { name });
+  await waitFor(() => expect(document.activeElement === option("music")).toBe(true));
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+  await waitFor(() => expect(document.activeElement === option("travel")).toBe(true));
+  fireEvent.keyDown(document.activeElement!, { key: "Home" });
+  await waitFor(() => expect(document.activeElement === option("food")).toBe(true));
+  fireEvent.keyDown(document.activeElement!, { key: "End" });
+  await waitFor(() => expect(document.activeElement === option("travel")).toBe(true));
+  fireEvent.keyDown(document.activeElement!, { key: "f" });
+  fireEvent.keyDown(document.activeElement!, { key: "o" });
+  await waitFor(() => expect(document.activeElement === option("food")).toBe(true));
+  fireEvent.keyDown(document.activeElement!, { key: "Enter" });
   expect(enumButton().textContent).toContain("food");
   expect(enumButton().getAttribute("aria-expanded")).toBe("false");
 });
@@ -222,10 +222,13 @@ test("enum listbox opens, navigates, type-aheads, and selects through its public
 test("enum listbox escape cancels and returns focus, while selected semantics stay explicit", async () => {
   mounted = render(createElement(enumHarness));
   await openEnum("ArrowUp");
-  expect(enumMenu().getAttribute("aria-activedescendant")).toContain("option-3");
-  fireEvent.keyDown(enumMenu(), { key: "Escape" });
+  const selected = view().getByRole("option", { name: "music" });
+  expect(selected.getAttribute("aria-selected")).toBe("true");
+  fireEvent.keyDown(selected, { key: "End" });
+  await waitFor(() => expect(document.activeElement === view().getByRole("option", { name: "travel" })).toBe(true));
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   expect(enumButton().textContent).toContain("music");
-  expect(document.activeElement).toBe(enumButton());
-  fireEvent.click(enumButton());
-  expect(view().getByRole("option", { name: "music" }).getAttribute("aria-selected")).toBe("true");
+  await waitFor(() => expect(document.activeElement === enumButton()).toBe(true));
+  await openEnum();
+  await waitFor(() => expect(view().getByRole("option", { name: "music" }).getAttribute("aria-selected")).toBe("true"));
 });

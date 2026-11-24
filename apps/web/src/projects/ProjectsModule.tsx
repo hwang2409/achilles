@@ -232,6 +232,8 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
   const [selecting, setSelecting] = useState(false);
   const [openedId, setOpened] = useState<string | null>(null);
   const opened = view.state === "data" ? view.rows.find((row) => row.id === openedId) : undefined;
+  // A refresh can temporarily have no rows. Forget the id only once the new rows confirm it is gone.
+  if (view.state === "data" && openedId !== null && !opened) setOpened(null);
   const lastOpened = useRef<HTMLButtonElement>(null);
   const selected = selecting && selection.refresh === refresh ? selection.ids : new Set<string>();
   const canWrite = !!actions && !oldFormat && memoryWriteAccess(client, !control.observer);

@@ -1,3 +1,10 @@
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { Ellipsis } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { AccountSwitchReceipt } from "./accounts/AccountSwitchReview";
 import type { createAccountLogin } from "./accounts/accountLogin";
 import { PageChatHeader } from "./PageChatHeader";
@@ -32,14 +39,8 @@ import { backoff, supportsFeature, type Connection, type ConnectionState } from 
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
-import "./style.css";
 import { continuationNotification } from "./chat/continuation";
-import "./chat/continuation.css";
-import "./shell.css";
-import "./chat/markdown.css";
-import "./chat/fulcrum-g1.css";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
-import "./jumpToLatest.css";
 
 export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 
@@ -60,7 +61,7 @@ function ErrorRow({ id }: { id: string }) {
 function ChatNotification({ id }: { id: string }) {
   const item = useItem(id);
   if (item?.type !== "notification" || item.event.type !== "notification" || item.event.notification_id !== continuationNotification || typeof item.event.data?.text !== "string") return <Notification id={id} />;
-  return <p className="chat-continuation" role="status">{item.event.data.text}</p>;
+  return <p className="my-3 border-t py-3 text-sm text-muted-foreground [overflow-wrap:anywhere]" role="status">{item.event.data.text}</p>;
 }
 
 const renderers: Renderers = { notification: ChatNotification, message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: CompactTool, error: ErrorRow };
@@ -86,7 +87,7 @@ function usePageChatSheet() {
     const media = matchMedia(PAGE_CHAT_SHEET_QUERY);
     const update = () => {
       // Keep the live composer in view when its rail becomes a modal sheet.
-      setOpen(media.matches && Boolean(document.activeElement?.closest(".page-chat-docked #message-composer")));
+      setOpen(media.matches && Boolean(document.activeElement?.closest("[data-page-chat-docked] #message-composer")));
       setMatches(media.matches);
     };
     setMatches(media.matches);
@@ -139,7 +140,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
 }
 
 function VimLoading() {
-  return <div className="vim-loading" data-part="composer" data-state="read-only" role="group" aria-label="message" aria-disabled="true"><div data-part="composer-field"><textarea rows={1} aria-label="message" placeholder="loading vim…" disabled /></div></div>;
+  return <div data-vim-loading="" data-chat-composer="" data-part="composer" data-state="read-only" role="group" aria-label="message" aria-disabled="true"><div data-part="composer-field"><Textarea className="min-h-0" rows={1} aria-label="message" placeholder="loading vim…" disabled /></div></div>;
 }
 
 function activeLastState(waiting: number, outcome: string, turn: "idle" | "running") {
@@ -250,11 +251,11 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const { narrow, open: mobileChatOpen, setOpen: setMobileChatOpen } = usePageChatSheet();
   const mobilePageChat = narrow && hasBlocks;
   const pageChatSheetOpen = mobilePageChat && mobileChatOpen;
-  const pageChatSheetClosed = mobilePageChat && !mobileChatOpen;
-  const mobileChatWasOpen = useRef(false);
   const pageChatButton = useRef<HTMLButtonElement | null>(null);
   const pageChatClose = useRef<HTMLButtonElement | null>(null);
-  const pageChatSurface = useRef<HTMLDivElement | null>(null);
+  const pageChatSurface = useRef<HTMLElement>(null);
+  const mobileChatWasOpen = useRef(false);
+  const sheetClosed = mobilePageChat && !pageChatSheetOpen;
   const [pageChatFocusRequest, setPageChatFocusRequest] = useState(0);
   const [transcript, setTranscript] = useState<HTMLElement | null>(null);
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
@@ -304,7 +305,6 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     setMobileChatOpen(!!openContinuation);
     setPageChatFocusRequest(openContinuation ? 1 : 0);
   }, [ready?.sessionId, activePage?.id, ready?.continued, setMobileChatOpen]);
-  useModalFocus(pageChatSheetOpen, pageChatSurface, pageChatClose, true);
   const askPageChat = (draft: string) => {
     const sessionId = ready?.sessionId ?? (activePage ? `new:${activePage.id}` : null);
     if (!sessionId) return;
@@ -312,6 +312,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     setPageChatFocusRequest((value) => value + 1);
     if (mobilePageChat) { setMobileChatOpen(true); }
   };
+  useModalFocus(pageChatSheetOpen, pageChatSurface, pageChatClose, true);
   useEffect(() => {
     if (!pageChatSheetOpen) {
       if (mobileChatWasOpen.current && mobilePageChat) pageChatButton.current?.focus();
@@ -320,7 +321,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     }
     mobileChatWasOpen.current = true;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.key !== "Escape" || event.defaultPrevented || event.composedPath().some((node) => node instanceof HTMLElement && node.matches('[data-page-chat-popup], [data-slot="dialog-content"], [data-slot="alert-dialog-content"]'))) return;
       event.preventDefault();
       event.stopPropagation();
       setMobileChatOpen(false);
@@ -354,7 +355,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     // a successful retry removes the notice and its focused button; give focus back to the visible header control
     const hadNotice = shownToggleError.current !== null; shownToggleError.current = active.toggleError;
     if (!hadNotice || active.toggleError !== null || document.activeElement !== document.body) return;
-    [...document.querySelectorAll<HTMLElement>(".chat-actions > button")].find((button) => button.offsetParent !== null)?.focus();
+    [...document.querySelectorAll<HTMLElement>(`[data-chat-actions] button[data-write-surface="${WRITE_SURFACE.headerCreate}"], [data-chat-actions] button[aria-label="chat options"]`)].find((button) => button.offsetParent !== null)?.focus();
   }, [active.toggleError]);
   useEffect(() => {
     // without `turn_reconnect`, zeta ends a running turn when this tab disconnects: a reload, a close, or a full page
@@ -416,27 +417,8 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       if (result && !result.error && result.createMode !== null) setCreateReceipt({ pageId: activePage!.id, sessionId: ready?.sessionId, enabled: result.createMode, at: new Date() });
     },
   } : undefined;
-  const content = <>
-    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
-    {activePage && active.toggleError && <div className="create-mode-alert" role="alert" hidden={hasBlocks && !active.toggleRetryable}><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
-    {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
-    {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
-    {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
-    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
-      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
-      : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
-      : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
-      : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
-      : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
-      : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
-      : <RunProvider store={activeStore}>
-        <div className={hasBlocks ? "page-view docked" : "page-view"}>
-        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
-        <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetClosed ? " page-chat-sheet-closed" : ""}`}>
-        {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>Page chat</span>{state !== "idle" && <span className="page-chat-bar-state">{stateLabel}</span>}<span aria-hidden="true">⌃</span></button>}
-        {pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
-        <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={pageChatSheetOpen ? "dialog" : undefined} aria-modal={pageChatSheetOpen ? "true" : undefined} aria-label={pageChatSheetOpen ? "page chat" : undefined} inert={pageChatSheetClosed}>
-        {hasBlocks && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${pageChatSheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
+  const chatPane = activePage && (ready ?? empty) && <>
+        {hasBlocks && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${sheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
           onSelect={active.selectChat} newChat={newPageChatReason ? undefined : active.newChat} newReason={canWrite ? newPageChatReason : undefined}
           approval={{ checked: (activePage.approval_mode ?? "allow") === "allow", action: canWrite ? active.toggleApprovalMode : undefined,
             reason: !canWrite ? readOnlyReason : (ready ?? empty)?.serverApprovalMode === "ask" ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
@@ -446,17 +428,40 @@ export function AgentSurface({ connection, client, connectionState, observerBann
             pending: createMode?.pending ? "saving…" : undefined, error: createMode?.error,
             savedAt: createReceipt?.pageId === activePage.id && createReceipt?.sessionId === ready?.sessionId && createReceipt?.enabled === activePage.create_mode ? createReceipt.at : undefined }}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="relative isolate flex min-h-0 flex-1 flex-col overflow-hidden leading-[1.5] [[data-density=compact]_&]:leading-[1.35]" data-chat-transcript="" data-follow-request={followRequest}>{active.creatingChat ? <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 overflow-auto p-4 sm:p-8"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div className="flex h-12 shrink-0 items-center justify-end px-[max(12px,calc((100%_-_944px)/2))]" data-jump-lane=""><Button variant="outline" className="max-[480px]:size-11 max-[480px]:p-0" type="button" data-jump-to-latest="" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
           const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "auto" });
-        }} aria-label="jump to latest" title="jump to latest"><span data-jump-label="full">jump to latest</span><span data-jump-label="compact" aria-hidden="true">↓</span></button></div>}
+        }} aria-label="jump to latest" title="jump to latest"><span className="max-[480px]:hidden" data-jump-label="full">jump to latest</span><span className="hidden text-lg max-[480px]:inline" data-jump-label="compact" aria-hidden="true">↓</span></Button></div>}
         </section>
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={canWrite && settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} chat={ready ? { id: ready.sessionId, title } : null} canWrite={canWrite} />
-        </div>
-        </div>
+  </>;
+  const content = <>
+    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
+    {activePage && active.toggleError && <div data-create-mode-alert="" className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b bg-background px-4 py-2 text-destructive" role="alert" hidden={hasBlocks && !active.toggleRetryable}><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
+    {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
+    {unsentNew > 0 && <div data-create-mode-alert="" className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b bg-background px-4 py-2 text-destructive" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
+    {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
+    {active.creationError ? <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 overflow-auto p-4 sm:p-8"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} data-kept-message="" className="max-w-[60ch] [&_figcaption]:text-muted-foreground [&_blockquote]:mt-1 [&_blockquote]:max-h-[12em] [&_blockquote]:overflow-auto [&_blockquote]:border-s-2 [&_blockquote]:px-3 [&_blockquote]:py-2 [&_blockquote]:whitespace-pre-wrap"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="flex flex-wrap gap-3"><Button data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</Button><Button variant="outline" type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</Button></div></div>
+      : active.state.phase === "missing" ? <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 overflow-auto p-4 sm:p-8"><p role="alert">this chat no longer exists</p><Button data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</Button></div>
+      : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
+      : active.state.phase === "error" ? <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 overflow-auto p-4 sm:p-8"><p role="alert">{active.state.error}</p></div>
+      : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
+      : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
+      : !activePage || !activeStore ? <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 overflow-auto p-4 sm:p-8"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <Button type="button" onClick={active.retryAttachment}>Retry</Button>}</div>
+      : <RunProvider store={activeStore}>
+        <div data-page-view="" data-docked={hasBlocks || undefined} className={cn("flex min-h-0 min-w-0 flex-auto flex-col", hasBlocks && "min-[1280px]:grid min-[1280px]:grid-cols-[minmax(0,1fr)_360px] min-[1280px]:grid-rows-[minmax(0,1fr)]")}>
+          {hasBlocks && <div data-page-reading="" className="flex min-h-0 min-w-0 flex-1 flex-col" inert={pageChatSheetOpen} aria-hidden={pageChatSheetOpen || undefined}><PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} /></div>}
+          {mobilePageChat && <Button variant="secondary" ref={pageChatButton} data-page-chat-bar="" aria-controls="page-chat-sheet" aria-expanded={pageChatSheetOpen} inert={pageChatSheetOpen} className="h-14 w-full shrink-0 justify-between rounded-none border-t px-4 min-[1280px]:hidden" type="button" onClick={() => setMobileChatOpen(true)}><span>Page chat</span>{state !== "idle" && <span className="ml-auto text-xs text-muted-foreground">{stateLabel}</span>}<span aria-hidden="true">⌃</span></Button>}
+          {pageChatSheetOpen && <div data-page-chat-backdrop="" className="fixed inset-0 z-40 bg-black/50 min-[1280px]:hidden" aria-hidden="true" onClick={() => setMobileChatOpen(false)} />}
+          <ToolDisclosure sessionId={ready?.sessionId ?? ""}>
+            <aside ref={pageChatSurface} id={hasBlocks ? "page-chat-sheet" : undefined} data-page-chat-surface="" data-page-chat-docked={hasBlocks || undefined} role={pageChatSheetOpen ? "dialog" : undefined} aria-modal={pageChatSheetOpen || undefined} aria-label={pageChatSheetOpen ? "page chat" : undefined} aria-hidden={sheetClosed || undefined} inert={sheetClosed}
+              className={cn("flex min-h-0 min-w-0 flex-auto flex-col bg-background", hasBlocks && "[overflow-wrap:anywhere]", hasBlocks && "min-[1280px]:border-l max-[1280px]:fixed max-[1280px]:inset-x-0 max-[1280px]:bottom-0 max-[1280px]:z-50 max-[1280px]:h-[clamp(min(320px,100dvh),66.666dvh,640px)] max-[1280px]:border-t max-[1280px]:shadow-lg", sheetClosed && "max-[1280px]:invisible max-[1280px]:pointer-events-none")}>
+              {chatPane}
+            </aside>
+          </ToolDisclosure>
         </div>
       </RunProvider>}
   </>;
@@ -492,7 +497,7 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
   });
   const pending = item?.type === "approval" && !item.ended;
   const control = !pending ? null : observer ? <>
-    <button type="button" aria-label="take control to answer" aria-disabled={working || undefined} onClick={async () => {
+    <Button type="button" variant="outline" className="min-h-10 border-ring text-ring aria-disabled:cursor-wait aria-disabled:opacity-65" aria-label="take control to answer" aria-disabled={working || undefined} onClick={async () => {
       if (working) return;
       setWorking(true); setRefusal(null);
       // set before the take: the new client can render this card before the take resolves. a refusal keeps observer.
@@ -500,12 +505,12 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
       const reason = await takeControl();
       if (reason !== null) took.current = null;
       setRefusal(reason); setWorking(false);
-    }}>{working ? "taking control…" : "take control"}</button>
+    }}>{working ? "taking control…" : "take control"}</Button>
     {refusal && <span role="status">{refusal}</span>}
   </> : took.current?.id === id ? <span role="status">this tab is now in control</span> : null;
   return <>
     <Approval id={id} {...(observer ? { disabledReason: "this tab is not in control · take control to answer" } : decision)} />
-    {row && control && createPortal(<div className="approval-control">{control}</div>, row)}
+    {row && control && createPortal(<div className="flex basis-full flex-wrap items-center gap-x-3 gap-y-2 text-muted-foreground [&>span]:text-pretty">{control}</div>, row)}
   </>;
 }
 
@@ -518,11 +523,11 @@ function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: 
     : open ? `"${titleOf(busy.chat!)}" is still running. open it to approve or stop it, then try again.`
     : busy.sessionId ? "another chat is still running. approve or stop it, then try again."
     : "zeta was busy a moment ago and is ready now. try again.";
-  return <div className="create-mode-alert" role="alert"><span>{text}</span><span>{open && <button type="button" onClick={onOpen}>open it</button>}<button type="button" data-write-surface={WRITE_SURFACE.busyRetry} disabled={!canWrite} onClick={onRetry}>try again</button></span></div>;
+  return <div data-create-mode-alert="" className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b bg-background px-4 py-2 text-destructive" role="alert"><span>{text}</span><span>{open && <button type="button" onClick={onOpen}>open it</button>}<button type="button" data-write-surface={WRITE_SURFACE.busyRetry} disabled={!canWrite} onClick={onRetry}>try again</button></span></div>;
 }
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
-  return <div className="full-state not-found-state"><p role="alert">page not found</p><div><a className="primary" href="/">go home</a><button className="primary" onClick={() => void onNewChat()}>new chat</button></div></div>;
+  return <div data-full-state="" className="grid min-h-0 flex-1 place-content-center gap-5 p-4 sm:p-8"><p role="alert">page not found</p><div><Button asChild variant="outline"><a href="/">go home</a></Button> <Button onClick={() => void onNewChat()}>new chat</Button></div></div>;
 }
 
 function runStateLabel(state: string, queued: number, building: boolean) {
@@ -530,27 +535,7 @@ function runStateLabel(state: string, queued: number, building: boolean) {
 }
 
 function ChatHeader({ page, docked, sessionId, title, state, stateLabel, createMode, onRename, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; createMode: CreateModeOwner; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
-  const [overflow, setOverflow] = useState(false);
   const overflowButton = useRef<HTMLButtonElement>(null);
-  const actions = useRef<HTMLDivElement>(null);
-  const closeOverflow = () => { setOverflow(false); overflowButton.current?.focus(); };
-  useEffect(() => {
-    // the open menu covers the notice below the header, so Escape (from anywhere, even a table row that handles it:
-    // capture runs first), a tap outside, and focus moving outside (Tab) close it
-    if (!overflow) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOverflow(false);
-      if (actions.current?.contains(document.activeElement)) overflowButton.current?.focus();
-    };
-    const onDown = (event: PointerEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
-    // focus landing anywhere outside, not focus leaving the box: WebKit does not focus a clicked •••, so focus may never enter it
-    const onFocusIn = (event: FocusEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
-    addEventListener("keydown", onKey, true);
-    addEventListener("pointerdown", onDown);
-    addEventListener("focusin", onFocusIn);
-    return () => { removeEventListener("keydown", onKey, true); removeEventListener("pointerdown", onDown); removeEventListener("focusin", onFocusIn); };
-  }, [overflow]);
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
   const startRename = () => { if (onRename && sessionId) rename.start(title === "new chat" ? "" : title, (value) => onRename(sessionId, value)); };
@@ -577,17 +562,38 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, createM
     return () => removeEventListener("keydown", onKey);
   }, [onRename, rename.editing, sessionId, title]);
   const modeLabel = createMode.pending ? `turning ${createMode.enabled ? "off" : "on"} create mode…` : `Create ${createMode.enabled ? "on" : "off"}`;
-  const controls = (inMenu: boolean, withHistory = true) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "Auto-approve" : "Ask before tools"}</span><button type="button" data-write-surface={WRITE_SURFACE.headerCreate} aria-label={createMode.pending ? modeLabel : createMode.enabled ? "create mode on" : "create mode off"} aria-pressed={createMode.enabled ? "true" : "false"} disabled={!createMode.available || createMode.pending} onClick={() => { if (inMenu) closeOverflow(); void createMode.toggle(); }}>{modeLabel}</button>{withHistory && <button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>History</button>}</>;
+  const approvalLabel = page.approval_mode === "allow" ? "Auto-approve" : "Ask before tools";
+  const modeName = createMode.pending ? modeLabel : createMode.enabled ? "create mode on" : "create mode off";
+  const createButton = <Button variant="outline" size="sm" type="button" data-write-surface={WRITE_SURFACE.headerCreate} aria-label={modeName} aria-pressed={createMode.enabled} disabled={!createMode.available || createMode.pending} onClick={() => void createMode.toggle()}>{modeLabel}</Button>;
+  const history = <Button variant="ghost" size="sm" className="max-sm:min-h-11" type="button" onClick={(event) => onHistory(event.currentTarget)}>History</Button>;
   const titleNode = rename.editing
-    ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
-    : <strong ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
+    ? <Input className="min-w-0 max-w-72 flex-1 max-sm:min-h-11" aria-label="chat title" {...rename.bind()} />
+    : <strong className="min-w-0 truncate text-sm font-semibold outline-offset-2 [&[role=button]]:cursor-pointer [&[role=button]]:hover:underline" ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   // the fold hides the full controls into the ••• menu below 64em, but an enabled mode must stay visible
   // without opening it (spec.md:36, :109): a short word mark per mode that is on sits beside •••.
   const autoApprove = page.approval_mode === "allow";
-  const foldMarkers = (autoApprove || createMode.enabled) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">Auto<span className="fold-long">-approve</span></span>}{createMode.enabled && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on">Create</span>}</span>;
+  const foldMarkers = (autoApprove || createMode.enabled) && <span className="flex gap-1 @min-[760px]:hidden max-[385px]:hidden">{autoApprove && <Badge variant="outline" role="img" aria-label="auto-approve is on" title="auto-approve is on">Auto</Badge>}{createMode.enabled && <Badge variant="outline" role="img" aria-label="create mode is on" title="create mode is on">Create</Badge>}</span>;
   const routeLabel = page.route === "/" ? "Home" : page.title;
-  if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {routeLabel}</span>{titleNode}</div><div className="chat-actions"><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
-  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel} /</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  return <header data-chat-header="" className="@container flex h-12 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 min-[761px]:h-14 min-[761px]:px-6 max-[760px]:pl-[60px]">
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <span className="hidden max-w-[35%] shrink-0 truncate text-xs text-muted-foreground sm:block" title={routeLabel}>{docked ? <>Pages <span aria-hidden="true">/</span> {routeLabel}</> : `${routeLabel} /`}</span>
+      {titleNode}
+    </div>
+    {docked ? history : <div className="flex shrink-0 items-center gap-2" data-chat-actions="">
+      <Badge variant="outline" role="status" className="max-[440px]:sr-only" hidden={state === "idle"} data-chat-status={state}>{stateLabel}</Badge>
+      {foldMarkers}
+      <div className="hidden items-center gap-2 @min-[760px]:flex"><Badge variant="outline" aria-label={approvalLabel.toLowerCase()}>{approvalLabel}</Badge>{createButton}{history}</div>
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild><Button ref={overflowButton} variant="ghost" size="icon-lg" className="size-11 @min-[760px]:hidden" aria-label="chat options"><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger>
+        <DropdownMenuContent align="end" aria-label="chat options">
+          <DropdownMenuLabel aria-label={approvalLabel.toLowerCase()}>{approvalLabel}</DropdownMenuLabel>
+          <DropdownMenuItem data-write-surface={WRITE_SURFACE.headerCreate} aria-label={modeName} disabled={!createMode.available || createMode.pending} onSelect={() => void createMode.toggle()}>{modeLabel}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onHistory(overflowButton.current)}>History</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>}
+  </header>;
+
 }
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
@@ -599,14 +605,20 @@ const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
   const text = connectionFailure(state) ?? "connecting to zeta…";
-  if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="connection-banner" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><button onClick={() => connection.retryNow()}>retry now</button></div>; }
+  if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="flex shrink-0 items-center justify-between gap-4 border-b border-s-2 border-destructive/30 bg-destructive/10 px-4 py-2 text-xs sm:px-6" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><Button variant="outline" onClick={() => connection.retryNow()}>retry now</Button></div>; }
   const command = connection.startCommand;
   // a short heading, the full sentence as body text; the time of the last try (not a rising attempt
   // count alone, which read as a failure) plus the count itself, so a click has something to confirm it worked.
   const heading = connectionHeadings[state.phase];
   const attempt = "attempt" in state ? state.attempt : 0;
   const status = "retryAt" in state
-    ? <>retrying by itself · last try <span className="local-time">{new Date(state.retryAt - backoff(attempt)).toLocaleTimeString().toLowerCase()}</span> · tried {attempt} time{attempt === 1 ? "" : "s"}</>
+    ? <>retrying by itself · last try <span className="whitespace-nowrap">{new Date(state.retryAt - backoff(attempt)).toLocaleTimeString().toLowerCase()}</span> · tried {attempt} time{attempt === 1 ? "" : "s"}</>
     : "retrying…";
-  return <section className="full-state connection-state" role="alert"><p><span className="retry-mark" />{status}</p><h1>{heading ?? text}</h1>{heading && <p className="connection-detail">{text}</p>}{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
+  return <section className="m-auto w-full max-w-[720px] min-w-0 overflow-auto p-4 sm:p-8" role="alert">
+    <p className="text-muted-foreground"><span className="me-3 inline-block size-2 bg-warning" aria-hidden="true" />{status}</p>
+    <h1 className="mt-6 mb-3 max-w-[26ch] text-[clamp(26px,4vw,42px)] font-semibold max-h-[420px]:mt-3">{heading ?? text}</h1>
+    {heading && <p className="mb-3 text-muted-foreground">{text}</p>}
+    {state.phase === "not_running" && <div className="grid grid-cols-[1fr_auto] items-center border-s-2 border-s-success bg-card"><span className="px-3 text-muted-foreground">shell</span><Button variant="ghost" type="button" onClick={() => navigator.clipboard.writeText(command)}>copy</Button><code className="col-span-full border-t px-3 py-4 whitespace-pre-wrap [overflow-wrap:anywhere]">$ {command}</code></div>}
+    <Button className="mt-4" onClick={() => connection.retryNow()}>retry now</Button>
+  </section>;
 }

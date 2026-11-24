@@ -8,7 +8,7 @@ import { draftStore } from "./draftStore";
 import { getSettings, SETTINGS_KEY, updateSettings } from "./settings";
 import { WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
 
-const { fireEvent, render } = await import("@testing-library/react");
+const { fireEvent, render, waitFor } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
@@ -91,7 +91,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
     const { SurfaceRouter } = await import("./surface/SurfaceRouter");
     app = render(createElement(SurfaceRouter));
     await act(async () => {});
-    const banner = app.container.querySelector(".observer-banner");
+    const banner = app.queryByRole("complementary", { name: "observer mode" });
     if (options.observerBanner === false) {
       expect(banner).toBeNull();
     } else if (authority === "observer") {
@@ -124,7 +124,10 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
   }
 }
 
-const click = (element: Element) => act(async () => { fireEvent.click(element); });
+const click = (element: Element) => act(async () => {
+  if (element.matches('button[data-slot="dropdown-menu-trigger"]')) fireEvent.keyDown(element, { key: "Enter" });
+  else fireEvent.click(element);
+});
 const select = (app: RenderResult, selector: string) => {
   const element = app.baseElement.querySelector<HTMLElement>(selector);
   expect(element, selector).not.toBeNull();
@@ -195,8 +198,38 @@ const running = { attached: true, joined: { status: { state: "running", session:
 const insert = { description: "Add a book", name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } };
 const records = { tool: insert, page: { layout: { blocks: [{ type: "form", title: "add book", tool: insert.name }, { type: "list", title: "books", collection: "books" }] } } };
 const docked: Options = { ...records, attached: true };
+const openPageChat = async (app: RenderResult) => {
+  const trigger = app.container.querySelector("[data-page-chat-bar]");
+  if (trigger?.matches('[data-page-chat-bar]') && trigger.getAttribute("aria-expanded") === "false") await click(trigger);
+};
+test("mobile page chat drains a queued delivery without reopening", async () => {
+  let release!: (value: object) => void;
+  const messages: unknown[] = [];
+  const pending = new Promise<object>((resolve) => { release = resolve; });
+  const accepted = { result: { accepted: true } };
+  const send = (params: Record<string, unknown>) => {
+    messages.push(params.text);
+    return messages.length === 1 ? pending : accepted;
+  };
+  try {
+    await withApp("controller", { ...docked, rpc: { send, steer: send } }, async (app) => {
+      await openPageChat(app);
+      const field = app.getByRole("textbox", { name: "message" });
+      await change(field, "in flight");
+      await keydown(field, "Enter");
+      expect(messages).toEqual(["in flight"]);
+      await change(field, "queued while open");
+      await keydown(field, "Enter");
+      expect(messages).toEqual(["in flight"]);
+      await click(app.getByRole("button", { name: "close page chat" }));
+      await act(async () => release(accepted));
+      await waitFor(() => expect(messages).toEqual(["in flight", "queued while open"]));
+    });
+  } finally { release(accepted); }
+});
 const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row => ({ kind: "visible", options, check: async (app, authority, writes) => {
-  if (id !== "page-chat.new") await click(select(app, '[aria-label="page chat options"]'));
+  await openPageChat(app);
+  if (id !== "page-chat.new") await click(app.getByRole("button", { name: "page chat options" }));
   const control = select(app, tag(id));
   expect(disabled(control)).toBe(authority === "observer");
   if (authority === "observer") {
@@ -221,7 +254,7 @@ test("replay stream end is not a chat transcript row", async () => {
       event("fixture_future_event");
     });
     const nextRow = await app.findByText("fixture_future_event", {}, { timeout: 10_000 });
-    const transcript = nextRow.closest(".transcript");
+    const transcript = nextRow.closest("[data-chat-transcript]");
     expect(transcript).not.toBeNull();
     expect(transcript?.textContent).not.toContain("replay_stream_ended");
   });
@@ -311,7 +344,7 @@ async function proveSwitch(app: RenderResult, writes: string[]) {
 const recoveryWrite = (id: WriteSurfaceId, request: string): Row => {
   const calls: { method: string; params: Record<string, unknown> }[] = [];
   return { kind: "visible", options: accountFixture(calls), check: async (app, authority, writes, requests) => {
-    const card = select(app, ".transcript .chat-auth-error");
+    const card = select(app, "[data-chat-transcript] [data-chat-auth-error]");
     expect(card.querySelector('a[href="/accounts"]')).not.toBeNull();
     const control = select(app, tag(id));
     expect(disabled(control)).toBe(authority === "observer");
@@ -724,9 +757,9 @@ const rows: Record<WriteSurfaceId, Row> = {
   } },
   "record.update": { kind: "visible", options: { tool: modify, page: { layout: { blocks: [{ type: "form", title: "edit book", tool: modify.name }, { type: "list", title: "books", collection: "books" }] } }, http: (path) => path.includes("/records/books") ? Response.json([existingBook]) : undefined }, check: async (app, authority, writes) => {
     await click(app.getByText("Old book", { exact: true }));
-    const form = select(app, '.record-form form');
-    const submit = select(app, '.record-form button[type="submit"]');
-    if (authority === "controller") await change(select(app, '.record-form input[name="title"]'), "Updated fixture title");
+    const form = select(app, '[data-record-form] form');
+    const submit = select(app, '[data-record-form] button[type="submit"]');
+    if (authority === "controller") await change(select(app, '[data-record-form] input[name="title"]'), "Updated fixture title");
     expect(disabled(submit)).toBe(authority === "observer");
     await act(async () => { fireEvent.submit(form); });
     if (authority === "controller") didWrite(writes, "POST /api/pages/page/tools/edit_book/invoke");
@@ -781,11 +814,11 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(title.getAttribute("role")).toBe(authority === "controller" ? "button" : null);
     await click(title);
     if (authority === "controller") {
-      const editor = select(app, ".chat-title-edit");
+      const editor = app.getByRole("textbox", { name: "chat title" });
       await change(editor, "renamed fixture");
       await keydown(editor, "Enter");
       didWrite(writes, 'PATCH /api/chats/session {"title":"renamed fixture"');
-    } else expect(Boolean(app.container.querySelector(".chat-title-edit"))).toBe(false);
+    } else expect(Boolean(app.queryByRole("textbox", { name: "chat title" }))).toBe(false);
   } },
   "sidebar.rename": { kind: "visible", absent: true, options: { attached: true }, check: async (app, authority, writes) => {
     const control = app.container.querySelector<HTMLElement>(tag("sidebar.rename"));
@@ -802,20 +835,20 @@ const rows: Record<WriteSurfaceId, Row> = {
     if (authority === "controller") didWrite(writes, "new_session");
   } },
   "history.restore": { kind: "visible", options: { page: { create_mode: true }, http: (path) => path.endsWith("/versions") ? Response.json({ layout: [1, 2].map((version) => ({ version, created_at: "2026-01-01", block_types: [], active: version === 2 })), tools: [] }) : undefined }, check: async (app, authority, writes) => {
-    await click(select(app, '.chat-actions > button:not([data-write-surface]):not(.header-overflow)'));
+    await click(app.getByRole("button", { name: "History", exact: true }));
     const restore = select(app, tag("history.restore"));
     expect(disabled(restore)).toBe(authority === "observer");
     await click(restore);
     if (authority === "controller") {
-      await click(select(app, '.history-confirm ' + tag("history.restore")));
+      await click(app.getByRole("button", { name: "confirm", exact: true }));
       didWrite(writes, "POST /api/pages/page/layout/restore");
     }
   } },
   "record.add": { kind: "local-only", options: records, check: async (app, authority, writes) => {
     const control = app.getByText("Add a book", { selector: "button", exact: true });
-    const field = select(app, '.record-form input[name="title"]');
+    const field = select(app, '[data-record-form] input[name="title"]');
     expect(disabled(field)).toBe(authority === "observer");
-    if (authority === "observer") expect(select(app, ".record-form .form-note").textContent).toContain("read-only");
+    if (authority === "observer") expect(select(app, "[data-record-form-note]").textContent).toContain("read-only");
     await click(control);
     expect(document.activeElement === field).toBe(authority === "controller");
     expect(writes).toEqual([]);
@@ -873,9 +906,9 @@ const rows: Record<WriteSurfaceId, Row> = {
     didWrite(writes, "home_settings_update");
   } },
   "record.insert": { kind: "visible", options: records, check: async (app, authority, writes) => {
-    const form = select(app, '.record-form form');
-    const submit = select(app, '.record-form button[type="submit"]');
-    if (authority === "controller") await change(select(app, '.record-form input[name="title"]'), "Fixture title");
+    const form = select(app, '[data-record-form] form');
+    const submit = select(app, '[data-record-form] button[type="submit"]');
+    if (authority === "controller") await change(select(app, '[data-record-form] input[name="title"]'), "Fixture title");
     expect(disabled(submit)).toBe(authority === "observer");
     await act(async () => { fireEvent.submit(form); });
     if (authority === "controller") didWrite(writes, "POST /api/pages/page/tools/add_book/invoke");
@@ -883,7 +916,7 @@ const rows: Record<WriteSurfaceId, Row> = {
   "page.chat": { kind: "visible", absent: true, options: { page: { layout: { blocks: [{ type: "list", title: "Books", collection: "books" }] } }, attached: true }, check: async (app, authority, writes) => {
     const ask = app.queryByText("Ask the chat", { selector: "button", exact: true });
     expect(Boolean(ask)).toBe(authority === "controller");
-    if (!ask) { await keydown(select(app, '[data-part="composer"]'), "Enter"); return; }
+    if (!ask) { await openPageChat(app); await keydown(select(app, '[data-part="composer"]'), "Enter"); return; }
     await click(ask);
     const field = select(app, "textarea") as HTMLTextAreaElement;
     expect(field.value).toContain("add a book");
@@ -973,7 +1006,7 @@ test.each([
 for (const authority of ["controller", "observer"] as const) test(`continuation attachment and replay: ${authority}`, async () => {
   const divider = "today · continuing session session. zeta keeps the full history; new messages append to it.";
   await withApp(authority, { path: "/?chat=session#continue-chat", chat, joined: { messages: [userMessage] } }, async (app, writes, _requests, emit) => {
-    const old = await app.findByText("Fixture history title", { selector: '.transcript *' });
+    const old = await app.findByText("Fixture history title", { selector: '[data-chat-transcript] *' });
     if (authority === "observer") {
       expect(writes).toEqual([]);
       expect(app.queryByText(divider)).toBeNull();
@@ -991,7 +1024,7 @@ for (const authority of ["controller", "observer"] as const) test(`continuation 
     expect(marker.compareDocumentPosition(appended) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
   if (authority === "controller") await withApp(authority, { attached: true, joined: { messages: [userMessage] } }, async (app) => {
-    await app.findByText("Fixture history title", { selector: '.transcript *' });
+    await app.findByText("Fixture history title", { selector: '[data-chat-transcript] *' });
     expect(app.queryByText(divider)).toBeNull();
   });
 });
@@ -1125,7 +1158,8 @@ test("a library tab reconnects as observer once its editor closed, and as contro
 });
 
 const requestApprovalChange = async (app: RenderResult) => {
-  await click(select(app, '[aria-label="page chat options"]'));
+  await openPageChat(app);
+  await click(app.getByRole("button", { name: "page chat options" }));
   await click(select(app, tag("page-chat.auto-approve")));
   await click(app.getByRole("button", { name: "confirm", exact: true }));
 };
@@ -1204,10 +1238,14 @@ test("tool approval errors leave the old setting and a stale chat never writes",
       await click(select(app, tag("page-chat.auto-approve")));
       await click(app.getByRole("button", { name: "confirm", exact: true }));
       expect(app.getByText("saving…")).toBeTruthy();
-      await click(select(app, '[aria-haspopup="listbox"]'));
+      const modes = app.getByRole("button", { name: "page chat options" });
+      await keydown(select(app, '[data-page-chat-popup="modes"]'), "Escape");
+      await waitFor(() => expect(document.activeElement === modes).toBe(true));
+      await click(select(app, '[data-page-chat-head] button[aria-haspopup="listbox"]'));
       await click(app.getByRole("option", { name: /Other fixture chat/ }));
       await act(async () => { release(settings); });
       expect(writes.filter((method) => method === "set_settings")).toHaveLength(1);
+      await openPageChat(app);
       expect(select(app, "#page-chat-title").textContent).toBe("Other fixture chat");
       expect(app.queryByText("could not change tool approval; try again")).toBeNull();
     } finally { release(settings); }
