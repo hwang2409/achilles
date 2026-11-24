@@ -9,9 +9,9 @@
 [data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
-  padding: var(--g1-space-2) var(--g1-space-3);
-  border: var(--g1-border-width) solid transparent;
-  border-radius: var(--g1-radius-container);
+  padding: 10px 14px;
+  border: var(--g1-border-width) solid color-mix(in srgb, var(--g1-fg) 7%, transparent);
+  border-radius: var(--g1-radius-chat);
   background: var(--g1-bg-subtle);
   font-weight: 400;
   overflow-wrap: anywhere;
@@ -23,15 +23,23 @@
   font-family: var(--achilles-code-font, var(--g1-font-mono));
 }
 
-/* The same card skin applies in live chat and agent timelines. Leave the pinned
-   per-tool viewers, syntax colors, and disclosure sizing in charge of their bodies. */
+/* The same skin applies in live chat and agent timelines. A tool call is a plain action row (orca): no card, a muted
+   verb in the body font, the mono target, the status at the right; its open body is the only box. Approvals keep the
+   bordered card because they need attention. Leave the pinned per-tool viewers and syntax colors to their bodies. */
 :is([data-part="tool"], [data-part="approval"]) {
   border-width: var(--g1-border-width);
   border-radius: var(--g1-radius-control);
   font-family: var(--achilles-code-font, var(--g1-font-mono));
   font-size: inherit;
 }
-[data-part="tool"] { border-color: var(--g1-border); }
+[data-part="tool"] { border: 0; background: transparent; }
+[data-part="tool"] > [data-part="tool-body"] {
+  margin: 2px 0 4px 24px;
+  border: var(--g1-border-width) solid var(--g1-border);
+  border-radius: var(--g1-radius-control);
+  background: var(--g1-bg-subtle);
+  overflow: hidden;
+}
 [data-part="approval"][data-decision="approve"] { --rail: var(--g1-ok); }
 [data-part="approval"][data-decision="deny"] { --rail: var(--g1-danger); }
 [data-part="tool-header"] {
@@ -39,18 +47,33 @@
   align-items: center;
   min-height: 36px;
   column-gap: var(--g1-space-2);
-  background: var(--g1-bg-subtle);
 }
+[data-part="tool"] > [data-part="tool-header"] { min-height: 26px; padding: 2px 0; border-radius: var(--g1-radius-control); }
 summary[data-part="tool-header"] { cursor: pointer; }
-summary[data-part="tool-header"]:hover { background: var(--g1-hover); }
-[data-part="tool"][data-state="streaming"] > [data-part="tool-header"] { background: var(--g1-accent-tint); }
-[data-part="approval"] > [data-part="tool-header"] { background: color-mix(in srgb, var(--g1-warn-fill) 6%, var(--g1-bg)); }
+/* the focus ring sits outside the row, so it does not cover the disclosure mark */
+summary[data-part="tool-header"]:focus-visible { outline-offset: 2px; }
+/* a tool row has no fill at rest or on hover (orca): hover brightens its verb instead */
+[data-part="tool"] > summary[data-part="tool-header"]:hover { background: transparent; }
+[data-part="tool"] > summary[data-part="tool-header"]:hover > [data-part="tool-name"] { color: var(--g1-fg); }
+/* an approval has no disclosure mark, so its empty mark column goes and 12px puts its verb on a tool row's verb x */
+[data-part="approval"] > [data-part="tool-header"] {
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
+  padding-left: 12px;
+  background: color-mix(in srgb, var(--g1-warn-fill) 6%, var(--g1-bg));
+}
+[data-part="approval"] > [data-part="tool-header"]::before { display: none; }
 [data-part="tool-name"] { color: var(--g1-fg); }
+/* the verb is the same muted sans word in a tool row and an approval card */
+:is([data-part="tool"], [data-part="approval"]) [data-part="tool-name"] { color: var(--g1-muted); font-family: var(--achilles-ui-font, var(--g1-font-ui)); font-weight: 400; }
 [data-part="tool-summary"] { color: var(--g1-muted); }
+[data-part="tool"] [data-part="tool-summary"] { color: var(--g1-fg); }
 [data-part="tool-status"] { font-size: inherit; }
+/* a finished call is quiet: muted word, the green mark stays */
+[data-part="tool"][data-state="done"] > [data-part="tool-header"] > [data-part="tool-status"] { color: var(--g1-muted); }
 :is([data-part="tool-status"], [data-part="text-viewer-status"], [data-part="delivery-note"])::before {
   width: var(--g1-status-mark);
   height: var(--g1-status-mark);
+  border-radius: 50%;
 }
 [data-part="approval-actions"] button {
   border-radius: var(--g1-radius-control);
@@ -65,17 +88,47 @@ summary[data-part="tool-header"]:hover { background: var(--g1-hover); }
 [data-part="approval-actions"]:has(> [data-action="approve-always"]) { display: flex; }
 [data-part="approval-actions"] button:focus-visible { outline: var(--g1-focus-ring); }
 
-.main-pane [data-part="composer"] {
-  background: var(--g1-bg);
-}
+/* an error row is a card like the others: hairline border, control radius; the red "error" word carries the alarm */
+[data-part="item"][data-kind="error"] { border: var(--g1-border-width) solid var(--g1-border); border-radius: var(--g1-radius-control); }
 .main-pane [data-part="composer"][data-error] { border-color: var(--g1-danger); }
 [data-part="composer"] button, [data-part="jump-to-approval"] { border-radius: var(--g1-radius-control); }
-/* the composer looks the same empty, typed, or focused: its buttons keep one box; only send brightens once there is text to send */
+/* the composer looks the same empty, typed, or focused: its buttons keep one box (send and stop: composer.css) */
 [data-part="composer"] :is(button, button[aria-disabled="true"]) { border-color: transparent; background: transparent; text-decoration: none; transform: none; transition: none; }
 [data-part="composer"] :is([data-part="composer-reason"], [data-part="composer-message"])::before {
   width: var(--g1-status-mark);
   height: var(--g1-status-mark);
 }
+
+/* reasoning is a muted disclosure row (orca): no rail, the name in the row's muted text, hover brightens it */
+[data-part="reasoning"] { border-left: 0; }
+[data-part="reasoning-header"] { align-items: center; gap: 8px; min-height: 24px; padding: 2px 0; color: var(--g1-muted); }
+summary[data-part="reasoning-header"]:hover { background: transparent; color: var(--g1-fg); }
+[data-part="reasoning-name"] { color: inherit; font-weight: 400; }
+[data-part="reasoning-body"] { padding: 2px 0 8px 13px; }
+
+/* a sub-agent is a one-line event card (orca): state mark, muted state word, bold name, the task, then the muted
+   time at the right and a chevron. The activity line stays readable to assistive tech and in the row's tooltip. */
+[data-part="sub-agent"] {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: var(--g1-border-width) solid var(--g1-border);
+  border-radius: var(--g1-radius-container);
+  background: transparent;
+  font-family: var(--achilles-ui-font, var(--g1-font-ui));
+}
+button[data-part="sub-agent"]:hover { background: var(--g1-hover); }
+[data-part="sub-agent-head"] { flex: 1; align-items: center; gap: 8px; }
+[data-part="sub-agent-status"] { align-items: center; color: var(--g1-muted); }
+[data-part="sub-agent-status"]::before { width: var(--g1-status-mark); height: var(--g1-status-mark); border-radius: 50%; transform: none; }
+[data-part="sub-agent-name"] { color: var(--g1-fg); font-weight: 600; }
+[data-part="sub-agent-meta"] { color: var(--g1-muted); }
+/* the chevron is drawn, not a glyph, so it sits on the card's vertical center */
+[data-part="sub-agent-open"] { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 16px; color: var(--g1-muted); font-size: 0; }
+[data-part="sub-agent-open"]::after { content: ""; width: 5px; height: 5px; border: solid currentColor; border-width: 1.5px 1.5px 0 0; transform: translateX(-1px) rotate(45deg); }
+[data-part="sub-agent-line"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 .empty-chat h1 {
   font-size: var(--g1-type-title);

@@ -1,10 +1,12 @@
 .vim-composer [data-part="composer-field"] {
   display: block;
-  min-height: calc(1.55em + 2 * var(--inset));
+  min-height: calc(22px + 2 * var(--inset));
 }
+/* CodeMirror sizes itself; fulcrum's hidden sizing copy of the draft would add a blank line under it */
+.vim-composer [data-part="composer-field"]::after { display: none; }
 
 .vim-composer .cm-editor {
-  max-height: calc(10 * 1.55em + var(--inset));
+  max-height: calc(10 * 22px + var(--inset));
   background: transparent;
   color: inherit;
   font: inherit;
@@ -14,16 +16,18 @@
 .vim-composer .cm-editor.cm-focused { outline: none; }
 .vim-composer .cm-scroller { overflow: auto; font: inherit; }
 .vim-composer .cm-content {
-  min-height: calc(1.55em + 2 * var(--inset));
+  min-height: calc(22px + 2 * var(--inset));
   padding: var(--inset);
   caret-color: var(--fulcrum-accent);
   font: inherit;
-  line-height: 1.55;
+  line-height: 22px; /* the plain textarea's line height, so multi-line drafts are the same height in both modes */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .vim-composer .cm-line { padding: 0; }
+/* the placeholder takes no space, so the first keystroke cannot move the caret line or the box height */
 .vim-composer [data-part="composer-field"][data-empty="true"] .cm-content::before {
+  position: absolute;
   color: var(--fulcrum-muted);
   content: attr(data-placeholder);
   pointer-events: none;
@@ -44,7 +48,7 @@
 .vim-guidance [data-part="composer-status"] { flex: 1; min-width: 0; }
 .vim-guidance [data-part="composer-hint"] { display: block; white-space: nowrap; }
 
-[data-part="composer"] .vim-mode-chip { flex: none; min-width: 6ch; color: var(--g1-muted); }
+[data-part="composer"] .vim-mode-chip { flex: none; min-width: 6ch; height: 24px; padding-inline: 6px; border-radius: 6px; background: var(--g1-hover); color: var(--g1-muted); font-size: 12px; line-height: 24px; text-align: center; }
 .vim-composer:not([data-focused]) .cm-fat-cursor,
 .vim-composer:not([data-focused]) .cm-cursor { display: none; }
 .vim-pending {
