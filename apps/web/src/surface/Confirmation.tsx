@@ -187,7 +187,7 @@ export function Confirmation(props: ConfirmationProps) {
   return <>
     {!props.external && <Button variant="outline" ref={opener} className="min-h-11" type="button" data-write-surface={props.surface} onClick={start}>{props.action}</Button>}
     <AlertDialog open={open} onOpenChange={(next) => { if (!next) keep("cancel"); }}>
-    <AlertDialogContent data-confirmation className="max-h-[calc(100%-2rem)] grid-rows-[minmax(0,1fr)] overflow-hidden break-words rounded-none data-[state=closed]:animate-none motion-reduce:animate-none max-sm:data-[proof=name]:inset-0 max-sm:data-[proof=name]:h-full max-sm:data-[proof=name]:max-h-none max-sm:data-[proof=name]:max-w-none max-sm:data-[proof=name]:translate-none max-sm:data-[proof=name]:border-0 max-sm:data-[proof=name]:animate-none" data-proof={attempt.proof.kind}
+    <AlertDialogContent data-confirmation className="max-h-[calc(100%-2rem)] grid-rows-[minmax(0,1fr)] overflow-hidden break-words rounded-none motion-reduce:animate-none max-sm:data-[proof=name]:inset-0 max-sm:data-[proof=name]:h-full max-sm:data-[proof=name]:max-h-none max-sm:data-[proof=name]:max-w-none max-sm:data-[proof=name]:translate-none max-sm:data-[proof=name]:border-0 max-sm:data-[proof=name]:animate-none" data-proof={attempt.proof.kind}
       aria-describedby={`${id}-effect ${id}-undo`}
       onOpenAutoFocus={(event) => { event.preventDefault(); initial.current?.focus({ preventScroll: true }); }}
       onCloseAutoFocus={(event) => { event.preventDefault(); closingFocus.current?.focus(); closingFocus.current = null; }}
