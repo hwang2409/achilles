@@ -69,8 +69,7 @@
 
 /* Align the intro and empty copy with the telemetry data. */
 .tm-intro { max-width: 62ch; margin: 0; padding-block: var(--g1-space-4) var(--g1-space-7); }
-.tm-eyebrow { margin: 0 0 12px; color: var(--fulcrum-muted); font-size: 12px; }
-.tm-intro h1 { margin: 0 0 18px; font-size: var(--g1-type-page-title); font-weight: var(--g1-weight-title); letter-spacing: var(--g1-tracking-page-title); line-height: 1.25; }
+.tm-intro h1 { margin: 0 0 var(--g1-space-4); }
 .tm-lead { margin: 0 0 24px; color: var(--fulcrum-muted); }
 .tm-records { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 20px 0; margin-bottom: 24px; border-top: 1px solid var(--fulcrum-border); border-bottom: 1px solid var(--fulcrum-border); }
 .tm-records ul { margin: 0; padding: 0; list-style: none; line-height: 1.8; }

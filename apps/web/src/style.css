@@ -16,7 +16,7 @@ button, input, textarea, select { color: inherit; font: inherit; }
 button, input, textarea, select { border-radius: var(--g1-radius-control); }
 :where(button, .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }
 :where(.ui-icon-button) { display: inline-grid; place-items: center; min-width: var(--g1-icon-height); min-height: var(--g1-icon-height); padding: 0; }
-:where(.primary, .ui-button-primary) { background: var(--g1-primary); color: var(--g1-primary-text); }
+:is(.primary, .ui-button-primary) { background: var(--g1-primary); color: var(--g1-primary-text); }
 :where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):active { background: var(--g1-selected); color: var(--g1-fg); }
 :where(.ui-card, [data-part="composer"]) { border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); background: var(--g1-panel); }
 :where(.ui-empty) { padding: var(--g1-space-4) 0; }
@@ -29,7 +29,7 @@ button, input, textarea, select { border-radius: var(--g1-radius-control); }
   border: var(--g1-border-width) solid var(--g1-border);
 }
 :where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
-:where(.primary, .ui-button-primary):hover { background-color: color-mix(in srgb, var(--g1-primary) 88%, var(--g1-primary-text)); }
+:is(.primary, .ui-button-primary):hover { background-color: color-mix(in srgb, var(--g1-primary) 88%, var(--g1-primary-text)); }
 [data-part="composer"]:focus-within { border-color: var(--g1-control-border); }
 [data-part="composer"] [data-part="composer-field"] textarea:focus-visible,
 [data-part="composer"] .cm-content:focus-visible { outline: none; box-shadow: none; }

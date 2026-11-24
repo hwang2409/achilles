@@ -222,12 +222,11 @@ function TelemetryOff({ openSettings }: { openSettings?: () => void }) {
   return (
     <Frame>
       <section className="tm-intro">
-        <p className="tm-eyebrow">telemetry</p>
-        <h1>see each step your agents take</h1>
-        <p className="tm-lead">turn it on and zeta records the timing of every turn, model call and tool call, with token counts. you get an agent tree and a waterfall for each session, plus totals per model and tool.</p>
+        <header className="ui-page-header"><h1>Telemetry</h1></header>
+        <p className="tm-lead">Turn it on and Zeta records the timing of every turn, model call and tool call, with token counts. you get an agent tree and a waterfall for each session, plus totals per model and tool.</p>
         <div className="tm-records">
-          <div><h2 className="tm-ok">records</h2><ul><li>durations and status</li><li>model, provider, tokens</li><li>tool names and sizes</li><li>error types</li></ul></div>
-          <div><h2 className="tm-danger">never records</h2><ul><li>prompts or replies</li><li>reasoning</li><li>tool arguments or results</li><li>error messages, env values</li></ul></div>
+          <div><h2 className="tm-ok">Records</h2><ul><li>durations and status</li><li>model, provider, tokens</li><li>tool names and sizes</li><li>error types</li></ul></div>
+          <div><h2 className="tm-danger">Never records</h2><ul><li>prompts or replies</li><li>reasoning</li><li>tool arguments or results</li><li>error messages, env values</li></ul></div>
         </div>
         <div className={`tm-turn-on${openSettings ? " tm-turn-on-action" : ""}`}>
           <div>
@@ -235,7 +234,7 @@ function TelemetryOff({ openSettings }: { openSettings?: () => void }) {
             <p className="tm-dim">built-in receiver on 127.0.0.1:4323 · keeps 14 days raw, 90 days hourly, at most 1 GiB</p>
           </div>
           {openSettings
-            ? <button type="button" className="tm-button tm-primary" onClick={openSettings}>open settings</button>
+            ? <button type="button" className="tm-button tm-primary" onClick={openSettings}>Open settings</button>
             : <>
                 <p>add this to <code>settings.toml</code> in your zeta home, then restart running sessions:</p>
                 <pre>{SETTING}</pre>
