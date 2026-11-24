@@ -77,3 +77,4 @@
 }
 /* a time never wraps onto two lines */
 .sessions-row time { white-space: nowrap; }
+.sessions-frame code { font-family: var(--achilles-code-font, var(--g1-font-mono)); }

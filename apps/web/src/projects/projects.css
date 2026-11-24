@@ -68,3 +68,4 @@
 .projects-tab { flex: 1; }
 .projects-tab .ui-reading-panel { min-height: min(480px, 70dvh); max-height: calc(100dvh - 128px); }
 @media (max-width: 760px) { .projects-tab .ui-reading-panel { min-height: 0; max-height: none; } }
+.projects code { font-family: var(--achilles-code-font, var(--g1-font-mono)); }

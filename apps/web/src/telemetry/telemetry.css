@@ -23,7 +23,7 @@
 .telemetry-module .tm-accent { color: var(--fulcrum-accent); }
 .telemetry-module .tm-tool { color: var(--tm-tool); }
 .telemetry-module .tm-dim b { color: var(--fulcrum-fg); font-weight: 500; }
-.telemetry-module code { color: var(--fulcrum-fg); }
+.telemetry-module code { color: var(--fulcrum-fg); font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 .telemetry-module .tm-narrow-only { display: none; }
 .telemetry-module .tm-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 

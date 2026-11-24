@@ -1,4 +1,4 @@
-.command-palette, .shortcuts-sheet { padding: 0; color: var(--fulcrum-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); box-shadow: var(--g1-shadow-floating); }
+.command-palette, .shortcuts-sheet { padding: 0; color: var(--fulcrum-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid color-mix(in srgb, var(--g1-fg) 14%, transparent); border-radius: var(--g1-radius-container); box-shadow: var(--g1-shadow-floating); }
 .command-palette { width: min(680px, calc(100vw - 32px)); margin-top: 15vh; }
 .command-palette[open] { display: flex; flex-direction: column; max-height: 70vh; }
 

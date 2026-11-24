@@ -10,7 +10,8 @@
   max-width: none;
   max-height: calc(100dvh - 2rem);
   padding: 0;
-  border: 1px solid var(--g1-border);
+  /* the dialog sits flat on the same fill as the page: a 14% edge (orca's) keeps it readable */
+  border: 1px solid color-mix(in srgb, var(--g1-fg) 14%, transparent);
   border-radius: var(--g1-radius-container);
   background: var(--g1-bg);
   box-shadow: var(--g1-shadow-floating);
