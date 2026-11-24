@@ -69,7 +69,8 @@ describe("tool summaries", () => {
     ["read", { path: "/w/src/app/config.py", limit: 20 }, "src/app/config.py"],
     ["Edit", { old_string: "a", new_string: "b", file_path: "/w/src/main.py" }, "src/main.py"],
     ["write", { content: "x", path: "/elsewhere/notes.md" }, "/elsewhere/notes.md"],
-    ["bash", { command: "cd /w && wc -l /w/src/*.py /wx/a.py", timeout: 5 }, "cd . && wc -l src/*.py /wx/a.py"],
+    ["bash", { command: "cd /w && wc -l /w/src/*.py /wx/a.py", timeout: 5 }, "cd /w && wc -l /w/src/*.py /wx/a.py"],
+    ["bash", { command: "ls /data/w/x && echo '/w/a b'" }, "ls /data/w/x && echo '/w/a b'"],
     ["grep", { pattern: "TODO", path: "/w/src" }, "TODO"],
     ["websearch", { query: "orca ui" }, "orca ui"],
     ["fetch", { url: "https://example.com/a" }, "https://example.com/a"],
@@ -82,14 +83,13 @@ describe("tool summaries", () => {
     expect(toolArgumentSummary({ ...item({ limit: 2 }), tool_call: { id: "call", name: "read", arguments: { limit: 2 } } })).toBe("limit 2");
   });
 
-  test("never makes a path relative to a sibling dir, uses ~ for home, and keeps the file name when cut", () => {
+  test("never makes a path relative to a sibling dir, keeps home dirs absolute, and keeps the file name when cut", () => {
     expect(displayPath("/w/abc/x.py", "/w/a")).toBe("/w/abc/x.py");
-    expect(displayPath("/Users/me/notes/x.py", null)).toBe("~/notes/x.py");
-    expect(displayPath("/home/me", null)).toBe("~");
-    expect(displayPath("src/home/me/x.py", null)).toBe("src/home/me/x.py");
+    expect(displayPath("/w", "/w")).toBe(".");
+    expect(displayPath("/home/bob/.ssh/config", "/w")).toBe("/home/bob/.ssh/config");
     const long = displayPath("/Users/me/.zeta/scratch/achilles/orca-look/home-ux-final/cwd/src/app/config.py", null);
     expect(long.length).toBeLessThanOrEqual(56);
-    expect(long).toStartWith("~/");
+    expect(long).toStartWith("/Users/me/");
     expect(long).toEndWith("/src/app/config.py");
     expect(long).toContain("…");
     const giant = displayPath(`/${"d".repeat(300)}/${"f".repeat(300)}.py`, null);

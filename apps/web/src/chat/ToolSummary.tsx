@@ -129,8 +129,6 @@ function argsText(item: ToolItem): string {
 }
 
 const PATH_BUDGET = 56;
-// a home dir only at the start of a path, so src/home/me/x stays as is
-const HOME = /(?<![^\s'"=:(])\/(?:Users|home)\/[^/\s'"]+(?=[/\s'"]|$)/g;
 // the argument a reader needs, shown without its key: tool name pattern -> argument keys
 const PRIMARY: [RegExp, string[]][] = [
   [/^(read|edit|write|multi_?edit|view|cat|ls|list_dir|notebook_?edit)$/, ["path", "file_path", "notebook_path"]],
@@ -139,13 +137,12 @@ const PRIMARY: [RegExp, string[]][] = [
   [/^(fetch|web_?fetch)$/, ["url"]],
 ];
 
-/** Shorten a path for one row: relative to cwd when inside it, home as ~, then cut in the middle so the file name stays. */
+/** Shorten a path for one row: relative to cwd when inside it, then cut in the middle so the file name stays. */
 export function displayPath(path: string, cwd?: string | null): string {
   const base = cwd?.replace(/\/+$/, "");
   let result = text(path, 4096);
   if (base && result === base) result = ".";
   else if (base && result.startsWith(`${base}/`)) result = result.slice(base.length + 1);
-  result = result.replace(HOME, "~");
   if (result.length <= PATH_BUDGET) return result;
   const name = result.slice(result.lastIndexOf("/") + 1);
   const tail = Math.min(PATH_BUDGET - 1, Math.max(Math.ceil(PATH_BUDGET / 2), name.length + 1));
@@ -161,12 +158,8 @@ function primaryText(item: ToolItem, cwd?: string | null): string | undefined {
   if (!key) return undefined;
   const value = (args as Record<string, string>)[key];
   if (key.includes("path")) return displayPath(value, cwd);
-  if (key !== "command" && key !== "cmd") return text(value, 200);
-  const base = cwd?.replace(/\/+$/, "");
-  let command = value.slice(0, 800);
-  // only whole path segments: a cwd of /a/b must not touch /a/bc
-  if (base) command = command.split(`${base}/`).join("").replace(new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![^\\s'"\`;|&)])`, "g"), ".");
-  return text(command.replace(HOME, "~"), 200);
+  // commands show exactly what ran: no path rewriting
+  return text(value, 200);
 }
 
 /** One-line argument summary for a collapsed tool row; cwd is the session cwd, or null when unknown. */
