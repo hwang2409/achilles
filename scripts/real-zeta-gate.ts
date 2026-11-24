@@ -2201,7 +2201,7 @@ with _database() as db:
     const composerBox = composer?.getBoundingClientRect();
     return { transcriptLeft: transcriptBox?.left ?? null, titleLeft: titleBox?.left ?? null, composerLeft: composerBox?.left ?? null, composerRight: composerBox?.right ?? null };
   });
-  if (insetGeometry[data-chat-transcript]Left === null || insetGeometry.titleLeft === null || Math.abs(insetGeometry[data-chat-transcript]Left - insetGeometry.titleLeft) > 1)
+  if (insetGeometry.transcriptLeft === null || insetGeometry.titleLeft === null || Math.abs(insetGeometry.transcriptLeft - insetGeometry.titleLeft) > 1)
     throw new Error(`390px open page chat transcript content is not aligned with the sheet title: ${JSON.stringify(insetGeometry)}`);
   if (insetGeometry.composerLeft === null || insetGeometry.composerRight === null || insetGeometry.titleLeft === null || Math.abs(insetGeometry.composerLeft - insetGeometry.titleLeft) > 1 || Math.abs(insetGeometry.composerRight - (390 - insetGeometry.titleLeft)) > 1)
     throw new Error(`390px open page chat composer outer gutter is not aligned with the sheet title: ${JSON.stringify(insetGeometry)}`);
@@ -2781,7 +2781,7 @@ with _database() as db:
       dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
     };
   });
-  if (!blocklessChat.count() || blocklessLayout.chatClass.includes("page-chat-docked") || blocklessLayout[data-chat-transcript]Height <= 0 || !blocklessLayout.composerVisible || blocklessLayout.barCount !== 0 || blocklessLayout.dialogCount !== 0 || !(await blocklessComposer.isVisible()) || await blocklessComposer.isDisabled())
+  if (!blocklessChat.count() || blocklessLayout.chatClass.includes("page-chat-docked") || blocklessLayout.transcriptHeight <= 0 || !blocklessLayout.composerVisible || blocklessLayout.barCount !== 0 || blocklessLayout.dialogCount !== 0 || !(await blocklessComposer.isVisible()) || await blocklessComposer.isDisabled())
     throw new Error(`390px blockless page chat gained sheet semantics or lost its layout: ${JSON.stringify(blocklessLayout)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "blockless-chat-390x760.png"), fullPage: true });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
@@ -3566,7 +3566,7 @@ with _database() as db:
       const point = document.elementFromPoint(rect.left + Math.min(8, rect.width / 2), rect.top + Math.min(8, rect.height / 2));
       return { text: element.textContent ?? "", rect: rect.toJSON(), transcriptRect: transcriptRect?.toJSON() ?? null, hit: Boolean(point && (point === element || element.contains(point))), expected };
     }, useMarker ? observerMarker : observerLatestSource);
-    if (!mobileMarker.text.includes(expectedEvidence) || !mobileMarker[data-chat-transcript]Rect || mobileMarker.rect.top < mobileMarker[data-chat-transcript]Rect.top || mobileMarker.rect.bottom > mobileMarker[data-chat-transcript]Rect.bottom || !mobileMarker.hit)
+    if (!mobileMarker.text.includes(expectedEvidence) || !mobileMarker.transcriptRect || mobileMarker.rect.top < mobileMarker.transcriptRect.top || mobileMarker.rect.bottom > mobileMarker.transcriptRect.bottom || !mobileMarker.hit)
       throw new Error(`observer active chat evidence is not readable in open sheet: ${JSON.stringify(mobileMarker)}`);
     if (new URL(observerPage.url()).pathname !== routeUnderneath) throw new Error("observer active chat changed the route");
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-390x760.png"), fullPage: true });
