@@ -3,8 +3,7 @@
 html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript > [data-part="timeline-frame"] { width: 100%; max-width: none; height: 100%; margin: 0; }
 /* virtual rows are absolutely placed and ignore the timeline padding: the gap under the header lives on the scrollport */
-/* the bottom margin is a small gap, so a scrolled row is cut above the composer, not on its border */
-.transcript [data-part="timeline-scroll"] { scroll-behavior: auto; margin: var(--g1-space-4) 0 var(--g1-space-3); }
+.transcript [data-part="timeline-scroll"] { scroll-behavior: auto; margin-top: var(--g1-space-4); }
 .transcript [data-part="timeline"] { width: 100%; max-width: none; margin: 0; padding: 32px 0 16px; }
 .transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: min(var(--g1-content-max), calc(100% - 48px)); margin-inline: auto; }
 

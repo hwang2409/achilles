@@ -4,7 +4,7 @@
 .main-pane [data-part="composer"] {
   --inset: 8px;
   width: min(var(--g1-content-max), calc(100% - 48px));
-  margin: 0 auto 24px;
+  margin: var(--g1-space-3) auto 24px; /* the top gap cuts a scrolled transcript row above the box, not on its border */
   padding: 6px;
   container-type: inline-size;
   border: 1px solid color-mix(in srgb, var(--g1-fg) 10%, transparent);
