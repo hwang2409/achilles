@@ -301,7 +301,7 @@ try {
         socket.send(raw);
       });
     });
-    const review = authPage.getByRole("dialog", { name: "review chat account switch" });
+    const review = authPage.getByRole("alertdialog", { name: "review chat account switch" });
     const capture = async (name: string, locator: Locator, device?: CDPSession) => {
       if (!screenshotDir) return;
       await locator.evaluate(async element => {
@@ -345,10 +345,10 @@ try {
     if (await pin() !== "anthropic:failed") throw new Error("switch-then-reply chat did not start pinned to anthropic:failed");
     await capture("auth-card-1440", card);
     await card.getByRole("link", { name: "/accounts", exact: true }).click();
-    const occupied = authPage.getByText(/another tab had control/, { selector: "#account-switch-reason" });
+    const occupied = authPage.locator("#account-switch-reason").filter({ hasText: /another tab had control/ });
     if (await authPage.getByRole("button", { name: "try again", exact: true }).isVisible()) await authPage.getByRole("button", { name: "try again", exact: true }).click();
     await authPage.getByRole("button", { name: "sign in again to anthropic:failed", exact: true }).click();
-    const login = authPage.getByRole("dialog", { name: "review browser sign-in" });
+    const login = authPage.getByRole("alertdialog", { name: "review browser sign-in" });
     await login.getByRole("checkbox").check();
     const popupEvent = authPage.waitForEvent("popup", { timeout: 10_000 });
     const [popup, confirmed] = await Promise.allSettled([popupEvent, login.getByRole("button", { name: "sign in again", exact: true }).click()]);
@@ -373,10 +373,13 @@ try {
     // At 200% a 1440×900 surface has a 720×450 CSS-pixel layout viewport.
     const cdp = await authPage.context().newCDPSession(authPage);
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 720, height: 450, deviceScaleFactor: 2, mobile: false });
-    if (!await review.evaluate(dialog => [...dialog.querySelectorAll(".confirmation-name input, .confirmation-actions button")].every(node => {
-      const box = node.getBoundingClientRect();
-      return box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth;
-    }))) throw new Error("typed proof and actions are not visible at 200% zoom");
+    const clippedProof = await review.evaluate(dialog => {
+      const bounds = (node: Element) => node.getBoundingClientRect().toJSON();
+      const clipped = [...dialog.querySelectorAll("[data-confirmation-proof] input, [data-confirmation-actions] button")].map(bounds)
+        .filter(box => box.top < 0 || box.bottom > innerHeight || box.left < 0 || box.right > innerWidth);
+      return clipped.length ? { clipped, dialog: bounds(dialog), viewport: [innerWidth, innerHeight], style: getComputedStyle(dialog).maxHeight } : null;
+    });
+    if (clippedProof) throw new Error(`typed proof and actions are not visible at 200% zoom: ${JSON.stringify(clippedProof)}`);
     await capture("page-review-1440-200pct", review, cdp);
     await confirm("anthropic:working", title);
     await authPage.getByText(/switched to anthropic:working/).waitFor();
@@ -390,7 +393,7 @@ try {
       await other.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 10_000 });
       await authPage.getByRole("button", { name: "switch active chat to anthropic:failed" }).click();
       await confirm("anthropic:failed", title);
-      await review.getByText(/another tab had control/).waitFor();
+      await review.getByRole("alert").filter({ hasText: /another tab had control/ }).waitFor();
       await review.getByRole("button", { name: "keep current account" }).click();
       await occupied.waitFor();
       if (await authPage.getByRole("button", { name: "switch active chat to anthropic:failed" }).isEnabled() || switches.length !== 1)
@@ -630,7 +633,7 @@ with _database() as db:
     // Let attachment win the race on old builds so the assertion names the side effect, not missing copy.
     await waitFor(async () => Boolean(forbiddenHttp()) || await newerZeta.isVisible(), "telemetry route milestone");
     await telemetryPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    if (await telemetryPage.locator('.place-nav [aria-current="page"]').innerText() !== "Telemetry") throw new Error("telemetry child URL did not select telemetry");
+    if (await telemetryPage.locator('nav[aria-label="places"] [aria-current="page"]').innerText() !== "Telemetry") throw new Error("telemetry child URL did not select telemetry");
     if (telemetryConnections !== 1) throw new Error(`telemetry child opened ${telemetryConnections} connections`);
     const attachment = forbiddenHttp();
     if (attachment) throw new Error(`telemetry route started page attachment: ${attachment}`);
@@ -853,18 +856,16 @@ with _database() as db:
     for (const width of [390, 1280, 1440, 1920]) {
       if (width === 390) {
         await setupMobileSheet(page, mobileHeight);
-        const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
+        const drawerClose = page.getByRole("button", { name: "close navigation", exact: true });
         if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click({ force: true });
         await waitFor(async () => {
-          const sidebar = await page.locator(".sidebar").evaluate((element) => {
-            const style = getComputedStyle(element);
-            return { transform: style.transform, right: element.getBoundingClientRect().right };
-          });
+          const drawerClosed = await page.locator('[aria-controls="surface-sidebar"]').getAttribute("aria-expanded") === "false"
+            && !await page.locator("[data-shell-nav]").isVisible() && !await page.locator('[data-slot="sheet-overlay"]').isVisible();
           const sheet = await page.locator(".page-chat-surface").evaluate((element) => {
             const style = getComputedStyle(element);
             return { transform: style.transform, visibility: style.visibility };
           });
-          return sidebar.right <= 0 && sidebar.transform !== "matrix(1, 0, 0, 1, 0, 0)" && sheet.visibility === "hidden" && sheet.transform !== "matrix(1, 0, 0, 1, 0, 0)";
+          return drawerClosed && sheet.visibility === "hidden" && sheet.transform !== "matrix(1, 0, 0, 1, 0, 0)";
         }, "mobile overlays settled");
         await waitFor(async () => await target.evaluate((element) => {
           element.scrollIntoView({ block: "center", inline: "nearest" });
@@ -1915,6 +1916,12 @@ with _database() as db:
           mutationStyle.remove();
         }
       };
+      const pane = document.querySelector<HTMLElement>(".page-content")!;
+      const initialScroll = pane.scrollTop;
+      // Hit-test the empty track with its row visible, even when the matrix is taller than the viewport.
+      const finalCell = elements.at(-1)?.getBoundingClientRect();
+      const viewport = pane.getBoundingClientRect();
+      if (finalCell) pane.scrollTop += (finalCell.top + finalCell.bottom - viewport.top - viewport.bottom) / 2;
       const grid = snapshotGrid(elements);
       const checks = {
         hasContinuousTopology: hasContinuousTopology(grid),
@@ -1928,8 +1935,7 @@ with _database() as db:
         trackSizes: grid.strip ? getComputedStyle(grid.strip).gridTemplateColumns : null,
         rows: grid.rows.map((row) => row.map(({ x, y, width, height }) => ({ x, y, width, height }))),
       };
-      const pane = document.querySelector<HTMLElement>(".page-content")!;
-      const initialScroll = pane.scrollTop;
+      pane.scrollTop = initialScroll;
       const paneBox = pane.getBoundingClientRect();
       const entries = expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
       const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
@@ -1958,7 +1964,7 @@ with _database() as db:
       const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
       const textFit = Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && (renderedStyle?.overflowY === "visible" || rendered.scrollHeight <= rendered.clientHeight));
       const numericFit = !numeric || Boolean(rendered && rendered.innerText.length <= (scientific ? 7 : 5));
-      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
+      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface", '[data-slot="sheet-overlay"]'].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
       return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted: painted && { ...painted, top: painted.top + pane.scrollTop, bottom: painted.bottom + pane.scrollTop }, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
@@ -2012,7 +2018,7 @@ with _database() as db:
       const targetBox = target?.getBoundingClientRect();
       const point = targetBox ? { x: (Math.max(0, targetBox.left) + Math.min(innerWidth, targetBox.right)) / 2, y: (Math.max(0, targetBox.top) + Math.min(innerHeight, targetBox.bottom)) / 2 } : null;
       const hit = point ? document.elementFromPoint(point.x, point.y) : null;
-      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => {
+      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface", '[data-slot="sheet-overlay"]'].flatMap((selector) => {
         const element = document.querySelector<HTMLElement>(selector);
         const rect = element?.getBoundingClientRect();
         return element && rect && rect.width > 0 && rect.height > 0 ? [{ selector, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left } }] : [];
@@ -2022,7 +2028,7 @@ with _database() as db:
         viewport: { width: innerWidth, height: innerHeight },
         bar: document.querySelector<HTMLElement>(".page-chat-bar")?.getAttribute("aria-expanded"),
         surface: describe(".page-chat-surface"),
-        drawer: describe(".sidebar"),
+        drawer: describe("[data-shell-nav]"),
         target: targetBox && { top: targetBox.top, right: targetBox.right, bottom: targetBox.bottom, left: targetBox.left, width: targetBox.width, height: targetBox.height },
         targetHit: Boolean(hit && target && (hit === target || target.contains(hit))),
         overlayCoversTarget: Boolean(targetBox && overlays.some(({ rect }) => intersects(targetBox, rect))),
@@ -2032,7 +2038,7 @@ with _database() as db:
     });
     if (frame.viewport.width !== 390 || frame.viewport.height !== 844)
       throw new Error(`closed frame has wrong viewport: ${JSON.stringify(frame)}`);
-    if (frame.bar !== "false" || frame.surface?.visibility !== "hidden" || frame.surface.transform === "matrix(1, 0, 0, 1, 0, 0)" || !frame.drawer || frame.drawer.rect.right > 0 || frame.drawer.transform === "matrix(1, 0, 0, 1, 0, 0)")
+    if (frame.bar !== "false" || frame.surface?.visibility !== "hidden" || frame.surface.transform === "matrix(1, 0, 0, 1, 0, 0)" || (frame.drawer && frame.drawer.rect.right > 0))
       throw new Error(`closed frame overlays are not hidden and offscreen: ${JSON.stringify(frame)}`);
     if (!frame.target || !frame.targetHit || frame.overlayCoversTarget || frame.scroll.window !== 0 || frame.scroll.content !== 0)
       throw new Error(`closed frame target is not visible and unobscured: ${JSON.stringify(frame)}`);
@@ -3273,7 +3279,7 @@ with _database() as db:
     const composer = page.locator('.page-chat-surface textarea[aria-label="message"]');
     const cases = [
       { name: "header background", act: () => dockHead(page).click({ position: { x: 4, y: 2 } }), focus: trigger },
-      ...(page.viewportSize()!.width === 1440 ? [{ name: "sidebar background", act: () => page.locator(".brand-row strong").click(), focus: trigger }] : []),
+      ...(page.viewportSize()!.width === 1440 ? [{ name: "sidebar background", act: () => page.locator("[data-shell-nav] [data-slot=sidebar-header] strong").click(), focus: trigger }] : []),
       { name: "composer", act: () => composer.click(), focus: composer },
       { name: "Escape", act: () => page.keyboard.press("Escape"), focus: trigger },
     ];
@@ -3473,6 +3479,7 @@ with _database() as db:
   if (!await palette.getByText("toggle vim mode", { exact: true }).isVisible()) throw new Error("observer palette hid the local vim mode toggle");
   if (await palette.getByText("toggle create mode", { exact: true }).count()) throw new Error("observer palette exposed the shared create mode toggle");
   await observerPage.keyboard.press("Escape");
+  await palette.waitFor({ state: "hidden", timeout: 5_000 });
   const observerWritableControls = observerPage.locator(".record-form button:not(:disabled), [data-part='approval'] button:not(:disabled)");
   if (await observerWritableControls.count()) throw new Error("observer exposed an enabled form or approval action");
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageAtActions) throw new Error("observer action matrix changed settings storage");
@@ -3493,17 +3500,15 @@ with _database() as db:
   if (screenshotDir) {
     const observerMarker = "prove chat";
     await setupMobileSheet(observerPage, 760);
-    const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
+    const drawerClose = observerPage.getByRole("button", { name: "close navigation", exact: true });
     if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click({ force: true });
     for (const dialog of await observerPage.locator('[role="dialog"][aria-modal="true"]').all()) {
       const close = dialog.getByRole("button", { name: /close/i }).first();
       if (await close.isVisible().catch(() => false)) await close.click({ force: true });
     }
     const pageChatDialog = observerPage.getByRole("dialog", { name: "page chat" });
-    await waitFor(async () => await observerPage.locator(".sidebar").evaluate((element) => {
-      const style = getComputedStyle(element);
-      return element.getBoundingClientRect().right <= 0 && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
-    }), "observer drawer settled");
+    await waitFor(async () => !await observerPage.locator("[data-shell-nav]").isVisible()
+      && !await observerPage.locator('[data-slot="sheet-overlay"]').isVisible(), "observer drawer settled");
     const routeUnderneath = new URL(observerPage.url()).pathname;
     if (routeUnderneath !== "/reading") throw new Error(`observer page route changed before active chat capture: ${routeUnderneath}`);
     await setupMobileSheet(observerPage, 760, "button");
@@ -3584,6 +3589,7 @@ with _database() as db:
   const takeoverReason = observerPage.getByText(/^at .{1,15} another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/);
   await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
   if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
+  console.log("observer palette closed; take control was reachable and its refusal retained the live observer");
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });
   await setupMobileSheet(observerPage, 844);
   const observerMenu = observerPage.getByRole("button", { name: "open menu", exact: true });

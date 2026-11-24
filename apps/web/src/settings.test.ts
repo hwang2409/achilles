@@ -25,8 +25,8 @@ describe("parseSettings", () => {
   test("replaces old named palettes but still applies v1 font and size choices", () => {
     const palettes = ["github-light", "github-dark", "gruvbox-light", "gruvbox-dark", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "one-dark"];
     for (const theme of palettes) expect(parseSettings(JSON.stringify({ theme })).theme).toBe("auto");
-    const ui = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "--g1-font-ui"]] as const;
-    const code = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "--g1-font-mono"]] as const;
+    const ui = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "--font-sans"]] as const;
+    const code = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "--font-mono"]] as const;
     const root = document.documentElement;
     const original = root.style.cssText;
     try {

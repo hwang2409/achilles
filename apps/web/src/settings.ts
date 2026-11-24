@@ -57,15 +57,15 @@ export function parseSettings(value: string | null): Settings {
 }
 
 const uiFontValues: Record<UiFont, string> = {
-  "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
-  "ibm-plex-sans": '"IBM Plex Sans", system-ui, sans-serif',
-  inter: '"Inter", system-ui, sans-serif',
-  system: "var(--g1-font-ui)",
+  "jetbrains-mono": '"JetBrains Mono Variable", var(--font-mono)',
+  "ibm-plex-sans": '"IBM Plex Sans Variable", system-ui, sans-serif',
+  inter: '"Inter Variable", system-ui, sans-serif',
+  system: "var(--font-sans)",
 };
 const codeFontValues: Record<CodeFont, string> = {
-  "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
-  "ibm-plex-mono": '"IBM Plex Mono", var(--g1-font-mono)',
-  "system-mono": "var(--g1-font-mono)",
+  "jetbrains-mono": '"JetBrains Mono Variable", var(--font-mono)',
+  "ibm-plex-mono": '"IBM Plex Mono", var(--font-mono)',
+  "system-mono": "var(--font-mono)",
 };
 
 function queryTheme(): ThemeChoice | null {
@@ -86,8 +86,11 @@ export function applySettings(settings: Settings): void {
     root.dataset.fulcrumTheme = theme === "g1-dark" ? "github-dark" : "github-light";
   }
   if (settings.uiFont === "jetbrains-mono" || settings.codeFont === "jetbrains-mono") {
-    void import("./fonts-jetbrains.css");
+    void import("@fontsource-variable/jetbrains-mono");
   }
+  if (settings.uiFont === "ibm-plex-sans") void import("@fontsource-variable/ibm-plex-sans");
+  if (settings.uiFont === "inter") void import("@fontsource-variable/inter");
+  if (settings.codeFont === "ibm-plex-mono") void import("@fontsource/ibm-plex-mono/400.css");
   root.dataset.codeFont = settings.codeFont;
   root.dataset.density = settings.density;
   root.style.setProperty("--achilles-ui-font", uiFontValues[settings.uiFont]);

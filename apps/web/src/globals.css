@@ -1,0 +1,259 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
+  --font-mono: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: 1px;
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+}
+
+/* Graphite Sharp. Fulcrum still supplies syntax and ANSI colors. */
+:root {
+  color-scheme: light;
+  --background: #FFFFFF;
+  --card: #F7F7F7;
+  --secondary: var(--card);
+  --sidebar-accent: color-mix(in srgb, var(--foreground) 9%, var(--background));
+  --control-hover: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --sidebar-border: var(--border);
+  --border: #E6E6E6;
+  --input: color-mix(in srgb, var(--foreground) 53%, var(--background)); /* 3:1 on the surface as well as the canvas */
+  --foreground: #202020;
+  --secondary-foreground: var(--foreground);
+  --strong-muted-foreground: var(--muted-foreground);
+  --muted-foreground: #626262;
+  --link: #385C86;
+  --panel: var(--background);
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
+  --success: var(--muted-foreground);
+  --warning-fill: #845C29;
+  --warning-foreground: #FFFFFF;
+  --warning: #795224;
+  --destructive-mark: #A64C4C;
+  --destructive: #9D4242;
+  --selection: var(--foreground);
+  --destructive-foreground: #FFFFFF;
+  --ring: var(--strong-muted-foreground);
+  --accent: var(--control-hover);
+  --accent-foreground: var(--foreground);
+  --focus-glow: color-mix(in srgb, var(--foreground) 14%, transparent);
+  --radius: 2px;
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --muted: var(--secondary);
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-ring: var(--ring);
+}
+
+[data-achilles-theme="g1-dark"] {
+  color-scheme: dark;
+  --background: #111111;
+  --card: #191919;
+  --secondary: var(--card);
+  --sidebar-accent: color-mix(in srgb, var(--foreground) 9%, var(--background));
+  --control-hover: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --sidebar-border: var(--border);
+  --border: #303030;
+  --input: color-mix(in srgb, var(--foreground) 53%, var(--background));
+  --foreground: #F0F0F0;
+  --secondary-foreground: var(--foreground);
+  --strong-muted-foreground: var(--muted-foreground);
+  --muted-foreground: #A8A8A8;
+  --link: #9FB9D6;
+  --panel: var(--secondary);
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
+  --success: var(--muted-foreground);
+  --warning-fill: #C7A773;
+  --warning-foreground: #0B0B0D;
+  --warning: var(--warning-fill);
+  --destructive-mark: #D99292;
+  --destructive: var(--destructive-mark);
+  --selection: var(--foreground);
+  --destructive-foreground: #111111;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-achilles-theme]) {
+    color-scheme: dark;
+    --background: #111111;
+    --card: #191919;
+    --secondary: var(--card);
+    --sidebar-accent: color-mix(in srgb, var(--foreground) 9%, var(--background));
+    --control-hover: color-mix(in srgb, var(--foreground) 5%, var(--background));
+    --sidebar-border: var(--border);
+    --border: #303030;
+    --input: color-mix(in srgb, var(--foreground) 53%, var(--background));
+    --foreground: #F0F0F0;
+    --secondary-foreground: var(--foreground);
+    --strong-muted-foreground: var(--muted-foreground);
+    --muted-foreground: #A8A8A8;
+    --link: #9FB9D6;
+    --panel: var(--secondary);
+    --primary: var(--foreground);
+    --primary-foreground: var(--background);
+    --success: var(--muted-foreground);
+    --warning-fill: #C7A773;
+    --warning-foreground: #0B0B0D;
+    --warning: var(--warning-fill);
+    --destructive-mark: #D99292;
+    --destructive: var(--destructive-mark);
+    --selection: var(--foreground);
+    --destructive-foreground: #111111;
+  }
+}
+
+/* Compatibility for remaining route CSS; removed by the last screen PR. */
+:root {
+  --g1-bg: var(--background);
+  --g1-bg-subtle: var(--card);
+  --g1-surface: var(--secondary);
+  --g1-selected: var(--sidebar-accent);
+  --g1-hover: var(--control-hover);
+  --g1-rule: var(--sidebar-border);
+  --g1-border: var(--border);
+  --g1-control-border: var(--input);
+  --g1-fg: var(--foreground);
+  --g1-fg-2: var(--secondary-foreground);
+  --g1-fg-3: var(--strong-muted-foreground);
+  --g1-muted: var(--muted-foreground);
+  --g1-accent: var(--ring);
+  --g1-accent-tint: var(--accent);
+  --g1-accent-ink: var(--accent-foreground);
+  --g1-primary: var(--primary);
+  --g1-primary-text: var(--primary-foreground);
+  --g1-ok: var(--success);
+  --g1-warn-fill: var(--warning-fill);
+  --g1-warn-text-on-fill: var(--warning-foreground);
+  --g1-warn: var(--warning);
+  --g1-danger-mark: var(--destructive-mark);
+  --g1-danger: var(--destructive);
+  --g1-selection: var(--selection);
+  --g1-focus-glow: var(--focus-glow);
+  --g1-panel: var(--panel);
+  --g1-link: var(--link);
+  --g1-font-ui: var(--font-sans);
+  --g1-font-mono: var(--font-mono);
+  --g1-type-kbd: 11px;
+  --g1-type-meta: 13px;
+  --g1-type-small: 13px;
+  --g1-type-ui: 14px;
+  --g1-type-chat: 15px;
+  --g1-leading-chat: 1.6;
+  --g1-type-reply-h2: 20px;
+  --g1-tracking-reply-h2: -.02em;
+  --g1-type-page-title: 26px;
+  --g1-tracking-page-title: -.03em;
+  --g1-weight-title: 600;
+  --g1-radius-container: 8px;
+  --g1-radius-control: 6px;
+  --g1-control-height: 40px;
+  --g1-icon-height: 32px;
+  --g1-touch-height: 44px;
+  --g1-type-section: 18px;
+  --g1-radius-chip: 4px;
+  --g1-status-mark: 6px;
+  --g1-border-width: 1px;
+  --g1-selection-width: 2px;
+  --g1-shadow-rest: none;
+  --g1-shadow-overlay: none;
+  --g1-focus-ring: 2px solid var(--g1-accent);
+  --g1-focus-halo: 0 0 0 3px var(--g1-focus-glow);
+  --g1-space-1: 4px;
+  --g1-space-2: 8px;
+  --g1-space-3: 12px;
+  --g1-space-4: 16px;
+  --g1-space-5: 20px;
+  --g1-space-6: 24px;
+  --g1-space-7: 28px;
+  --g1-space-8: 32px;
+  --g1-space-10: 40px;
+  --g1-sidebar-padding: var(--g1-space-2);
+  --g1-sidebar-inset: calc(var(--g1-sidebar-padding) + var(--g1-space-2));
+  --g1-nav-row-height: var(--g1-space-7);
+  --g1-page-gutter: var(--g1-space-6);
+  --g1-page-padding: var(--g1-space-6) var(--g1-page-gutter);
+  --g1-list-row-height: 52px;
+  --g1-content-max: 944px;
+}
+
+/* Match the specificity of Fulcrum’s system rule. */
+:root:not([data-fulcrum-theme]), :root[data-fulcrum-theme] {
+  --fulcrum-bg: var(--background);
+  --fulcrum-fg: var(--foreground);
+  --fulcrum-muted: var(--muted-foreground);
+  --fulcrum-surface: var(--secondary);
+  --fulcrum-border: var(--border);
+  --fulcrum-accent: var(--ring);
+  --fulcrum-ok: var(--success);
+  --fulcrum-warn: var(--warning);
+  --fulcrum-danger: var(--destructive);
+  --fulcrum-panel: var(--background);
+  --fulcrum-font: var(--achilles-ui-font, var(--font-sans));
+  --fulcrum-cursor: var(--ring);
+  --fulcrum-live: var(--ring);
+  --fulcrum-gap: 12px;
+}
+
+@media (max-width: 760px), (max-height: 500px) {
+  :root { --g1-page-gutter: 16px; }
+}
+
+@layer base {
+  * { @apply border-border; }
+  html {
+    background: var(--background);
+    font-family: var(--achilles-ui-font, var(--font-sans));
+    font-size: var(--achilles-ui-size, 15px);
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html, body, #root { height: 100%; overflow: hidden; }
+  body { @apply bg-background text-foreground; }
+  kbd, code, pre { font-family: var(--achilles-code-font, var(--font-mono)); }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  /* Native dialogs left on routes use the user-agent centering behavior. */
+  dialog:modal { margin: auto; }
+}

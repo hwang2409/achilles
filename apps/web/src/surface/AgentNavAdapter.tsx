@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { createContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { buildLabel, buildTone, type BuildRow } from "../create/buildActivity";
 import { Highlight, type PaletteEntry } from "../CommandPalette";
@@ -276,17 +278,17 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
     reloadPages: () => void pageListOwner.current!.reload(null),
     morePages: loadOlder,
     clearSearch: () => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); },
-    searchControl: (close: () => void) => loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey(close)} placeholder="Search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>,
+    searchControl: (close: () => void) => loading ? <Skeleton className="h-9 border" aria-label="loading search" /> : <label className="chat-search flex min-h-9 items-center gap-2 rounded-md border border-input px-2 text-sm focus-within:border-ring [&>input]:min-w-0 [&>input]:flex-1 [&>input]:outline-none [&>input::placeholder]:text-muted-foreground [&>kbd]:text-muted-foreground [&>span]:text-lg [&>span]:text-muted-foreground"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey(close)} placeholder="Search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>,
     counts: {
       pages: { total: pageList.items && !pageList.error ? `${pageRows.length}${pageList.next ? "+" : ""}` : undefined },
       chats: { total: !search && chatList.items && !chatList.error ? `${chats.length}${chatList.next ? "+" : ""}` : undefined, waiting: waitingTotal },
     },
     recent: (close: () => void, builds: readonly BuildRow[], onScreen: (id: string, shown: boolean) => void) => {
       const projectedBuild = (chat: Chat) => chat.purpose === "page_build" ? builds.find((row) => row.chat.session_id === chat.session_id) : undefined;
-      return <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
-        <div className="list-head"><span>recent chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
-        {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
+      return <section ref={chatListElement} className="chat-list min-h-20 flex-auto scroll-pt-14 overflow-y-auto [scrollbar-width:thin]" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
+        <div className="list-head sticky top-0 z-[2] flex min-h-7 items-center justify-between border-t bg-sidebar px-4 text-[13px] font-semibold text-muted-foreground [&>b]:font-normal [&>b]:tabular-nums [&>span]:first-letter:uppercase"><span>recent chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
+        {chatList.error ? <div className="page-list-error flex items-center justify-between gap-2 px-4 py-2 text-xs text-muted-foreground"><span>could not load chats</span><Button variant="link" onClick={() => void chatListOwner.current!.reload(search)}>retry</Button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group [&>h2]:sticky [&>h2]:top-7 [&>h2]:z-[1] [&>h2]:h-7 [&>h2]:bg-sidebar [&>h2]:px-4 [&>h2]:leading-7 [&>h2]:first-letter:uppercase"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group [&>h2]:sticky [&>h2]:top-7 [&>h2]:z-[1] [&>h2]:h-7 [&>h2]:bg-sidebar [&>h2]:px-4 [&>h2]:leading-7 [&>h2]:first-letter:uppercase" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        {chatList.next && <Button variant="outline" className="load-older mx-4 my-3 h-10 w-[calc(100%-2rem)]" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</Button>}
       </section>;
     },
     catalog: {
@@ -307,13 +309,13 @@ function ChatRow({ chat, build, onScreen, current, active, index, query, onSelec
   // A page build's state comes only from the build owner; with no row there is no claim.
   const state = chat.purpose === "page_build" ? buildTone(build) : chat.last_state;
   const label = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
-  const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
-  const meta = <span><span className="chat-row-meta" title={label ? `${label} · ${chat.page_title}` : chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></span>;
+  const rowClass = `chat-row group/chat-row state-${state ?? "idle"} relative grid min-h-7 content-center px-4 hover:bg-sidebar-accent focus-visible:-outline-offset-2 [&>strong]:truncate [&>strong]:text-[13px] [&>strong]:leading-[18px] [&>strong]:font-normal [&>span]:flex [&>span]:min-w-0 [&>span]:gap-1 [&>span]:text-[13px] [&>span]:leading-4 [&>span]:text-muted-foreground ${current ? "current bg-sidebar-accent" : ""} ${active ? "active-result outline outline-ring -outline-offset-1" : ""} ${state === "running" ? "shadow-[inset_2px_0_var(--ring)]" : state === "approval" ? "shadow-[inset_2px_0_var(--warning-fill)]" : state === "failed" ? "shadow-[inset_2px_0_var(--destructive-mark)]" : ""}`;
+  const meta = <span><span className="chat-row-meta min-w-0 truncate" title={label ? `${label} · ${chat.page_title}` : chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <time className="ml-auto shrink-0 whitespace-nowrap tabular-nums" dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div ref={seen} id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>
-      <strong aria-hidden="true">{titleOf(chat)}</strong>
-      <input className="chat-row-edit" aria-label={`rename ${titleOf(chat)}`} {...rename.bind()} />
+      <strong className="invisible col-start-1 row-start-1" aria-hidden="true">{titleOf(chat)}</strong>
+      <input className="chat-row-edit col-start-1 row-start-1 w-full min-w-0 self-stretch border border-ring bg-background px-1 text-[13px]" aria-label={`rename ${titleOf(chat)}`} {...rename.bind()} />
       {meta}
     </div>;
   }
@@ -328,10 +330,10 @@ function ChatRow({ chat, build, onScreen, current, active, index, query, onSelec
   return <a ref={seen} tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={onSelect && ((event) => { event.preventDefault(); onSelect(chat); })} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts={onRename ? "F2" : undefined} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     {meta}
-    {onRename && <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" data-write-surface={WRITE_SURFACE.sidebarRename} title="rename (F2)" onClick={startRename}>✎</button>}
+    {onRename && <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename absolute top-px right-px size-10 bg-sidebar opacity-0 group-hover/chat-row:opacity-100 group-focus-within/chat-row:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-35" data-write-surface={WRITE_SURFACE.sidebarRename} title="rename (F2)" onClick={startRename}>✎</button>}
   </a>;
 }
 
 function SidebarSkeleton({ count = 4 }: { count?: number }) {
-  return <div className="sidebar-skeleton" aria-label="loading chats">{Array.from({ length: count }, (_, index) => <i key={index} />)}</div>;
+  return <div className="sidebar-skeleton grid gap-4 px-4 py-3" aria-label="loading chats">{Array.from({ length: count }, (_, index) => <Skeleton key={index} className="h-2.5 w-[88%] even:w-[62%]" />)}</div>;
 }

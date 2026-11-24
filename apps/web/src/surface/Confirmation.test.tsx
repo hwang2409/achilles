@@ -4,7 +4,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { useState } from "react";
 import { Confirmation, reviewText as text, type ConfirmationProps } from "./Confirmation";
 // bun links CommonJS react-dom before this file's imports run, so it loads only after the DOM above exists.
-const { act, cleanup, fireEvent, render, within } = await import("@testing-library/react");
+const { act, cleanup, fireEvent, render, waitFor, within } = await import("@testing-library/react");
 
 afterEach(() => { cleanup(); document.body.replaceChildren(); });
 
@@ -25,10 +25,10 @@ function review(execute: Extract<ConfirmationProps, { level: 2 }>["execute"], op
     checkResult={async () => ({ status: "unknown" })} {...options} />);
   const opener = ui.getByRole("button", { name: "cancel run" });
   fireEvent.click(opener);
-  const modal = ui.getByRole("dialog", { name: "cancel paper?" });
+  const modal = ui.getByRole("alertdialog", { name: "cancel paper?" });
   return { opener, modal, dialog: within(modal), activity: within(activity) };
 }
-const cancel = (dialog: HTMLElement) => fireEvent(dialog, new Event("cancel", { cancelable: true }));
+const cancel = (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: "Escape" });
 async function settle(operation: string, action: () => void) {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -86,7 +86,7 @@ test("inline known failure keeps the old value and announces a safe failure", as
   expect(ui.container.querySelector("time")).toBeNull();
 });
 
-test("name proof is exact, including case and whitespace; Escape before submit returns focus", () => {
+test("name proof is exact, including case and whitespace; Escape before submit returns focus", async () => {
   const execute = mock(async () => ({ status: "unknown" as const }));
   const { opener, modal, dialog } = review(execute);
   const name = dialog.getByRole("textbox", { name: "type paper to confirm" });
@@ -102,9 +102,9 @@ test("name proof is exact, including case and whitespace; Escape before submit r
     fireEvent.submit(submit.closest("form")!);
   }
   expect(execute).not.toHaveBeenCalled();
-  cancel(modal);
+  await settle("close review", () => cancel(modal));
   expect(modal.isConnected).toBe(false);
-  expect(document.activeElement).toBe(opener);
+  await waitFor(() => expect(document.activeElement === opener).toBe(true));
 });
 
 test("review invokes execute before confirm dispatch returns and maps a synchronous throw to unknown", async () => {
@@ -146,7 +146,7 @@ test("pending and unknown lock dismissal and duplicate submit; only a read confi
   expect(checkResult).toHaveBeenCalledTimes(1);
   expect(execute).toHaveBeenCalledTimes(1);
   expect(modal.isConnected).toBe(false);
-  expect(document.activeElement).toBe(opener);
+  await waitFor(() => expect(document.activeElement === opener).toBe(true));
   expect(activity.getByText(/paper cancelled at/).querySelector("time")).toBeTruthy();
   fireEvent.click(activity.getByRole("button", { name: "dismiss receipt" }));
   expect(activity.queryByText(/paper cancelled/)).toBeNull();
@@ -211,10 +211,10 @@ test.each(focusCases)("level $level focus: $path", async ({ level, path }: (type
     fireEvent.click(button);
   }
   if (path.endsWith("Escape")) {
-    if (modal) cancel(modal.modal); // Native dialog Escape dispatches cancel.
+    if (modal) cancel(modal.modal);
     else fireEvent.keyDown(ui!.getByRole("group"), { key: "Escape" });
   }
   const target = path === "refusal" ? within(modal?.modal ?? ui!.container).getByRole("alert")
     : path === "unknown" ? within(surface).getByText(/^result unknown\./) : opener;
-  expect(document.activeElement === target).toBe(true);
+  await waitFor(() => expect(document.activeElement === target).toBe(true));
 });

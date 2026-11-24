@@ -37,10 +37,10 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
       await displaySettings.click();
       const dialog = settingsPage.getByRole("dialog", { name: "settings" });
       await gateWait.playwright(dialog, "waitFor", { state: "visible", timeout: 10_000 });
-      await dialog.getByRole("group", { name: "UI font" }).getByRole("button", { name: "IBM Plex Sans" }).click();
-      await dialog.getByRole("group", { name: "code font" }).getByRole("button", { name: "IBM Plex Mono" }).click();
-      await dialog.getByRole("group", { name: "font size" }).getByRole("button", { name: "16" }).click();
-      await dialog.getByRole("option", { name: "Dark", exact: true }).click();
+      await dialog.getByRole("radiogroup", { name: "UI font" }).getByRole("radio", { name: "IBM Plex Sans" }).click();
+      await dialog.getByRole("radiogroup", { name: "code font" }).getByRole("radio", { name: "IBM Plex Mono" }).click();
+      await dialog.getByRole("radiogroup", { name: "font size" }).getByRole("radio", { name: "16" }).click();
+      await dialog.getByRole("radiogroup", { name: "theme" }).getByRole("radio", { name: "Dark", exact: true }).click();
       await dialog.getByRole("button", { name: "esc" }).click();
       await gateWait.playwright(dialog, "waitFor", { state: "hidden", timeout: 10_000 });
       await gateWait.playwright(settingsPage, "waitForFunction", () => document.activeElement?.textContent === "Display settings");
@@ -86,7 +86,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await stockField.fill("");
   await stockField.focus();
   await page.keyboard.press(appShortcut("b"));
-  if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: command+B did not collapse the sidebar with stock composer focus");
+  if (await page.locator("[data-shell]").getAttribute("data-sidebar-collapsed") !== "true") throw new Error("modifier row: command+B did not collapse the sidebar with stock composer focus");
   await page.keyboard.press(appShortcut("b"));
   await page.keyboard.press(appShortcut("Shift+o"));
   await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== originalSession, "command+shift+O from stock composer");
@@ -157,7 +157,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await gateWait.playwright(settingsDialog, "waitFor", { state: "hidden", timeout: 10_000 });
   if (await composer.getAttribute("data-mode") !== "insert") throw new Error("closing settings with escape changed vim mode");
   await page.keyboard.press(appShortcut("b"));
-  if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: the platform app modifier+B did not collapse the sidebar with vim composer focus");
+  if (await page.locator("[data-shell]").getAttribute("data-sidebar-collapsed") !== "true") throw new Error("modifier row: the platform app modifier+B did not collapse the sidebar with vim composer focus");
   await page.keyboard.press(appShortcut("b"));
   const vimSession = await sessionId();
   await page.keyboard.press(appShortcut("Shift+o"));

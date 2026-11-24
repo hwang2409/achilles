@@ -27,12 +27,12 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     const confirmOn = async () => {
       await tab.setViewportSize({ width: 720, height: 450 });
       await turnOn.click();
-      const dialog = tab.getByRole("dialog", { name: "turn on telemetry" });
+      const dialog = tab.getByRole("alertdialog", { name: "turn on telemetry" });
       const proof = dialog.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" });
       // The effective 200% viewport must show the acknowledgement without first scrolling it into view.
       await proof.evaluate((node) => {
         const label = node.closest("label")!.getBoundingClientRect();
-        const footer = node.closest("dialog")!.querySelector("footer")!.getBoundingClientRect();
+        const footer = node.closest("[data-confirmation]")!.querySelector("footer")!.getBoundingClientRect();
         if (label.top < 0 || label.bottom > footer.top) {
           throw new Error(`expected the telemetry acknowledgement to fit above the footer before interaction: label [${label.top}, ${label.bottom}], footer ${footer.top}`);
         }
@@ -51,7 +51,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     // Resize after the result arrives: focus alone does not keep a scroll target in view after reflow.
     await tab.setViewportSize({ width: 390, height: 844 });
     await refusal.evaluate((node) => {
-      const footer = node.closest("dialog")!.querySelector("footer")!;
+      const footer = node.closest("[data-confirmation]")!.querySelector("footer")!;
       const alert = node.getBoundingClientRect();
       const footerTop = footer.getBoundingClientRect().top;
       if (document.activeElement !== node || alert.top < 0 || alert.bottom > footerTop || node.scrollHeight > node.clientHeight) {
@@ -61,7 +61,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-390x844.png") });
     await tab.setViewportSize({ width: 1440, height: 900 });
     await dialog.getByRole("button", { name: "keep it off", exact: true }).click();
-    if (!await turnOn.isVisible()) throw new Error("a refused telemetry change did not keep the row off");
+    await turnOn.waitFor({ state: "visible", timeout: 5_000 }).catch(() => { throw new Error("a refused telemetry change did not keep the row off"); });
     const sha = createHash("sha256").update(seeded).digest("hex");
     console.log(`settings telemetry: zeta refused turning it on; the row showed zeta's reason; settings.toml sha256 ${sha} unchanged`);
     // off on a file that has the built-in line, written outside zeta. zeta checks that telemetry can start before

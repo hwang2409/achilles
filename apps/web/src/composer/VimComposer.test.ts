@@ -92,14 +92,14 @@ test("app ctrl+b toggles the sidebar from vim normal mode", async () => {
       await Promise.resolve();
     });
     const content = container.querySelector(".cm-content") as HTMLElement;
-    const sidebar = container.querySelector(".app-shell") as HTMLElement;
-    expect(sidebar.classList.contains("sidebar-collapsed")).toBe(false);
+    const sidebar = container.querySelector("[data-shell]") as HTMLElement;
+    expect(sidebar.dataset.sidebarCollapsed === "true").toBe(false);
     await act(async () => {
       content.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       content.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
-    expect(sidebar.classList.contains("sidebar-collapsed")).toBe(true);
+    expect(sidebar.dataset.sidebarCollapsed === "true").toBe(true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -124,13 +124,13 @@ test("mac ctrl+b stays with vim instead of collapsing the sidebar", async () => 
       await Promise.resolve();
     });
     const content = container.querySelector(".cm-content") as HTMLElement;
-    const shell = container.querySelector(".app-shell") as HTMLElement;
+    const shell = container.querySelector("[data-shell]") as HTMLElement;
     await act(async () => {
       content.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       content.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
-    expect(shell.classList.contains("sidebar-collapsed")).toBe(false);
+    expect(shell.dataset.sidebarCollapsed === "true").toBe(false);
   } finally {
     globalThis.fetch = originalFetch;
     Object.defineProperty(navigator, "platform", { configurable: true, value: originalPlatform });

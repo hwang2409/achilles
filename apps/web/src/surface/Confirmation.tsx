@@ -1,7 +1,9 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { wrapTab } from "../keyboard";
-import "./confirmation.css";
+import { AlertDialog, AlertDialogContent, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 
 declare const safeText: unique symbol;
 export type ReviewText = string & { readonly [safeText]: true };
@@ -72,9 +74,9 @@ export function Confirmation(props: ConfirmationProps) {
   const [failure, setFailure] = useState<{ reason: Failure; message?: ReviewText; final?: true } | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
   const initial = useRef<HTMLElement | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
+  const closingFocus = useRef<HTMLElement | null>(null);
   const nextFocus = useRef<{ outcome: Outcome; cause: Cause } | null>(null);
   const open = phase !== "idle";
   const locked = open && phase !== "review";
@@ -83,13 +85,8 @@ export function Confirmation(props: ConfirmationProps) {
     : proof === "checked");
 
   useLayoutEffect(() => {
-    if (!open) return;
-    const node = dialog.current;
-    node?.showModal();
-    // a review keeps its body at the top, so the warning shows before the proof field
-    initial.current?.focus({ preventScroll: attempt.level === 2 });
-    return () => { node?.close(); };
-  }, [open]);
+    if (open && attempt.level === 1) initial.current?.focus();
+  }, [open, attempt.level]);
 
   useLayoutEffect(() => {
     const request = nextFocus.current;
@@ -98,7 +95,11 @@ export function Confirmation(props: ConfirmationProps) {
     const external = attempt.level === 2 ? attempt.external : undefined;
     const mode = attempt.level === 1 ? "inline" : external && !external.opener ? "external-dialog" : "dialog";
     const target = focusDestination(mode, request.outcome, request.cause);
-    if (target === "opener") (external?.opener?.() ?? opener.current)?.focus();
+    if (target === "opener") {
+      const element = external?.opener?.() ?? opener.current;
+      element?.focus();
+      if (attempt.level === 2) closingFocus.current = element ?? null;
+    }
     if (target === "result") {
       status.current?.focus({ preventScroll: true });
       status.current?.scrollIntoView({ block: "nearest" });
@@ -144,34 +145,34 @@ export function Confirmation(props: ConfirmationProps) {
     }
   };
 
-  const feedback = <p ref={status} tabIndex={-1} className="confirmation-status" data-phase={phase} role={failure ? "alert" : "status"}>
+  const feedback = <p ref={status} tabIndex={-1} className="empty:absolute not-empty:mt-2 not-empty:border not-empty:bg-muted not-empty:px-3 not-empty:py-2 data-[phase=unknown]:text-warning [&[role=alert]]:text-destructive" data-phase={phase} role={failure ? "alert" : "status"}>
       {phase === "pending" ? (attempt.level === 1 ? "saving…" : "finishing…")
         : phase === "checking" ? "checking result…"
         : phase === "unknown" ? "result unknown. check what happened before trying again. the request will not be sent twice."
         : failure ? failure.message ?? failureCopy[failure.reason] : null}
     </p>;
-  const checkButton = phase === "unknown" && <button type="button" onClick={() => void run(true)}>check now</button>;
+  const checkButton = phase === "unknown" && <Button variant="outline" type="button" onClick={() => void run(true)}>check now</Button>;
   const proofHint = attempt.level === 2 && !locked && !proved ? `${id}-proof-hint` : undefined;
-  const confirmButton = <button ref={node => { if (attempt.level === 1) initial.current = node; }} type={attempt.level === 1 ? "button" : "submit"} onClick={attempt.level === 1 ? () => void run(false) : undefined}
-    className="confirmation-primary" aria-describedby={proofHint} disabled={locked || !proved || failure?.final}>{attempt.action}</button>;
-  const notice = <div className="confirmation-activity">
+  const confirmButton = <Button variant={attempt.level === 2 && attempt.proof.kind === "name" ? "destructive" : "default"} data-confirmation-action ref={node => { if (attempt.level === 1) initial.current = node; }} type={attempt.level === 1 ? "button" : "submit"} onClick={attempt.level === 1 ? () => void run(false) : undefined}
+    aria-describedby={proofHint} disabled={locked || !proved || failure?.final}>{attempt.action}</Button>;
+  const notice = <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
     <div role="status">{receipt && <p>{receipt.text} at <time dateTime={receipt.at.toISOString()}>
       {receipt.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></p>}</div>
-    {receipt && props.level === 2 && <button type="button" onClick={() => { nextFocus.current = { outcome: "success", cause: "keep" }; setReceipt(null); }}>dismiss receipt</button>}
+    {receipt && props.level === 2 && <Button variant="outline" type="button" onClick={() => { nextFocus.current = { outcome: "success", cause: "keep" }; setReceipt(null); }}>dismiss receipt</Button>}
   </div>;
 
-  if (props.level === 1 && attempt.level === 1) return <section className="confirmation-inline" aria-labelledby={`${id}-label`}>
-    <div className="confirmation-row">
+  if (props.level === 1 && attempt.level === 1) return <section className="grid min-w-0 gap-2 break-words" aria-labelledby={`${id}-label`}>
+    <div className="flex flex-wrap items-center gap-2 border px-3 py-1">
       <span id={`${id}-label`}>{props.label}</span>
-      <span className="confirmation-current">{props.value}</span>
-      <button ref={opener} type="button" data-write-surface={props.surface} disabled={open || props.disabled} onClick={start}>{props.action}</button>
+      <span className="ml-auto text-muted-foreground">{props.value}</span>
+      <Button variant="outline" ref={opener} type="button" data-write-surface={props.surface} disabled={open || props.disabled} onClick={start}>{props.action}</Button>
     </div>
-    {open && <div role="group" className="confirmation-bar" aria-labelledby={`${id}-effect`}
+    {open && <div role="group" className="flex flex-wrap items-center justify-between gap-3 border-l-2 border-warning bg-warning/5 px-3 py-2" aria-labelledby={`${id}-effect`}
       onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keep("Escape"); } }}>
       <p id={`${id}-effect`}>{attempt.effect}</p>
-      {!locked && <div className="confirmation-actions">
+      {!locked && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
         {confirmButton}
-        <button type="button" onClick={() => keep("keep")}>{attempt.keep}</button>
+        <Button variant="outline" type="button" onClick={() => keep("keep")}>{attempt.keep}</Button>
       </div>}
       {feedback}
       {checkButton}
@@ -184,25 +185,22 @@ export function Confirmation(props: ConfirmationProps) {
   const step = phase === "pending" ? "confirming…" : phase === "checking" ? "checking…"
     : phase === "unknown" ? "result unknown" : failure ? "not changed" : "review";
   return <>
-    {!props.external && <button ref={opener} className="confirmation-trigger" type="button" data-write-surface={props.surface} onClick={start}>{props.action}</button>}
-    {open && createPortal(<dialog ref={dialog} className="confirmation-dialog" data-proof={attempt.proof.kind}
-      aria-labelledby={`${id}-title`} aria-describedby={`${id}-effect ${id}-undo`}
-      onCancel={event => { event.preventDefault(); event.stopPropagation(); keep("cancel"); }}
-      onKeyDown={event => {
-        if (event.key === "Escape") event.stopPropagation();
-        if (event.key !== "Tab") return;
-        if (phase === "pending" || phase === "checking") event.preventDefault();
-        else wrapTab(event, event.currentTarget);
-      }}>
-      <form onSubmit={event => { event.preventDefault(); event.stopPropagation(); void run(false); }}>
-        <header>
-          <h2 id={`${id}-title`}>{attempt.title}</h2>
-          <div className="confirmation-heading-actions">
+    {!props.external && <Button variant="outline" ref={opener} className="min-h-11" type="button" data-write-surface={props.surface} onClick={start}>{props.action}</Button>}
+    <AlertDialog open={open} onOpenChange={(next) => { if (!next) keep("cancel"); }}>
+    <AlertDialogContent data-confirmation className="max-h-[calc(100%-2rem)] grid-rows-[minmax(0,1fr)] overflow-hidden break-words rounded-none motion-reduce:animate-none max-sm:data-[proof=name]:inset-0 max-sm:data-[proof=name]:h-full max-sm:data-[proof=name]:max-h-none max-sm:data-[proof=name]:max-w-none max-sm:data-[proof=name]:translate-none max-sm:data-[proof=name]:border-0 max-sm:data-[proof=name]:animate-none" data-proof={attempt.proof.kind}
+      aria-describedby={`${id}-effect ${id}-undo`}
+      onOpenAutoFocus={(event) => { event.preventDefault(); initial.current?.focus({ preventScroll: true }); }}
+      onCloseAutoFocus={(event) => { event.preventDefault(); closingFocus.current?.focus(); closingFocus.current = null; }}
+      onEscapeKeyDown={(event) => { if (locked) event.preventDefault(); }}>
+      <form className="flex min-h-0 flex-col" onSubmit={event => { event.preventDefault(); event.stopPropagation(); void run(false); }}>
+        <header className="flex shrink-0 items-center justify-between gap-2 border-b pb-2">
+          <AlertDialogTitle>{attempt.title}</AlertDialogTitle>
+          <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
             <span>{step}</span>
-            <button type="button" className="confirmation-close" aria-label="close confirmation" disabled={locked} onClick={() => keep("cancel")}>×</button>
+            <Button variant="outline" type="button" className="min-h-11 min-w-11" aria-label="close confirmation" disabled={locked} onClick={() => keep("cancel")}>×</Button>
           </div>
         </header>
-        <div className="confirmation-body">
+        <div className="my-3 min-h-0 overflow-auto [&_div]:grid [&_div]:grid-cols-[7rem_minmax(0,1fr)] [&_div]:gap-2 [&_div]:border-b [&_div]:py-2 [&_dt]:text-sm [&_dt]:text-muted-foreground">
           <dl>
             <div><dt>what</dt><dd id={`${id}-effect`}>{attempt.effect}</dd></div>
             <div><dt>where</dt><dd>{attempt.scope}</dd></div>
@@ -212,25 +210,26 @@ export function Confirmation(props: ConfirmationProps) {
             <div><dt>undo</dt><dd id={`${id}-undo`}>{attempt.undo}</dd></div>
           </dl>
         </div>
-        <div className="confirmation-proof">
-          {attempt.proof.kind === "name" ? <label className="confirmation-name">
+        <div data-confirmation-proof className="mb-4 grid shrink-0 gap-2 text-sm">
+          {attempt.proof.kind === "name" ? <label className="grid gap-2">
             <span>type <strong>{attempt.proof.name}</strong> to confirm</span>
-            <input ref={node => { initial.current = node; }} type="text" value={proof} onChange={event => setProof(event.currentTarget.value)}
+            <Input ref={node => { initial.current = node; }} type="text" value={proof} onChange={event => setProof(event.currentTarget.value)}
               autoComplete="off" autoCapitalize="none" spellCheck={false} disabled={locked} />
-          </label> : <label className="confirmation-scope">
-            <input ref={node => { initial.current = node; }} type="checkbox" checked={proof === "checked"}
-              onChange={event => setProof(event.currentTarget.checked ? "checked" : "")} disabled={locked} />
+          </label> : <label className="flex min-h-11 cursor-pointer items-center gap-2 border px-3">
+            <Checkbox ref={node => { initial.current = node; }} checked={proof === "checked"}
+              onCheckedChange={(checked) => setProof(checked === true ? "checked" : "")} disabled={locked} />
             {attempt.proof.label ?? "i reviewed the scope"}
           </label>}
           {proofHint && <p id={proofHint}>{attempt.proof.kind === "scope" ? "check the box to continue." : "type the name exactly to continue."}</p>}
         </div>
         {feedback}
-        <footer className="confirmation-actions">
-          {locked ? checkButton : <button type="button" onClick={() => keep("keep")}>{attempt.keep}</button>}
+        <footer data-confirmation-actions className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {locked ? checkButton : <Button variant="outline" type="button" onClick={() => keep("keep")}>{attempt.keep}</Button>}
           {confirmButton}
         </footer>
       </form>
-    </dialog>, document.body)}
+    </AlertDialogContent>
+    </AlertDialog>
     {props.activity && createPortal(notice, props.activity)}
   </>;
 }

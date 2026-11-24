@@ -66,7 +66,7 @@ async function until(operation: string, check: () => boolean | Promise<boolean>)
   throw new Error(`timed out: ${operation}`);
 }
 const trigger = (tab: Page) => tab.locator(`[data-write-surface="${WRITE_SURFACE.mcpTest}"]`);
-const dialog = (tab: Page) => tab.getByRole("dialog", { name: "review connection test" });
+const dialog = (tab: Page) => tab.getByRole("alertdialog", { name: "review connection test" });
 async function review(tab: Page, expected: string) {
   await trigger(tab).click(opts);
   await dialog(tab).getByText(expected, { exact: false }).waitFor(opts);
@@ -121,7 +121,7 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
     await Bun.sleep(300);
     await dialog(tab).locator("form").or(tab.locator("[data-test-result]")).first().waitFor(opts);
     await tab.waitForFunction(async () => {
-      const layout = () => JSON.stringify(document.querySelector("dialog[open], .mcp-test")?.getBoundingClientRect());
+      const layout = () => JSON.stringify(document.querySelector("[data-confirmation], .mcp-test")?.getBoundingClientRect());
       const before = layout();
       await new Promise(requestAnimationFrame);
       return before === layout();
