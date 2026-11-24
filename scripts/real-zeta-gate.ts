@@ -3345,7 +3345,8 @@ with _database() as db:
   const selected = page.getByRole("option", { selected: true });
   await waitFor(() => selected.evaluate(node => node === document.activeElement), "selected chat takes focus");
   await page.keyboard.press("ArrowDown");
-  const keyboardTitle = await page.getByRole("listbox").locator('[role="option"]:focus [data-page-chat-choice-title]').innerText();
+  const nextChoice = page.getByRole("listbox").locator('[role="option"][aria-selected="false"]:focus [data-page-chat-choice-title]');
+  const keyboardTitle = await nextChoice.innerText({ timeout: 5000 });
   await page.keyboard.press("Enter");
   await gateWait.playwright(page.locator("[data-page-chat-bar][aria-expanded=false]"), "waitFor");
   await setupMobileSheet(page, 844, "button");
