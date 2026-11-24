@@ -74,8 +74,8 @@ export function McpActions({ owner, row, revision, online, heading }: {
         {...operation(owner, enable)} onCommitted={() => {}} />}
       <div className="mcp-review-actions">
         {row.scope === "project" && row.config.transport === "stdio" && <button type="button" disabled={!available} data-write-surface={WRITE_SURFACE.mcpTrusted}
-          onClick={(event) => start(event.currentTarget, "trusted")}>{row.trusted ? labels.untrust : labels.trust}</button>}
-        <button type="button" disabled={!available} data-write-surface={WRITE_SURFACE.mcpRemove} onClick={(event) => start(event.currentTarget, "remove")}>{labels.remove}</button>
+          className="ui-button" onClick={(event) => start(event.currentTarget, "trusted")}>{row.trusted ? labels.untrust : labels.trust}</button>}
+        <button type="button" disabled={!available} data-write-surface={WRITE_SURFACE.mcpRemove} className="ui-button mcp-remove" onClick={(event) => start(event.currentTarget, "remove")}>{labels.remove}</button>
       </div>
     </section>}
     <div ref={setActivity} />

@@ -59,13 +59,13 @@ export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, d
 }) {
   return <section className="mcp-detail" aria-label="connection detail">
     {!offline && detailOpen && <a className="mcp-back" href={surfaceHref(LIST)} onClick={(event) => go(event, LIST)}>‹ back to connections</a>}
-    {row ? <ConnectionFields row={row} shadows={shadows(row)} heading={heading} />
+    {row ? <ConnectionFields row={row} shadows={shadows(row)} heading={heading} actions={children} />
       : detailOpen ? <>
         <h2 ref={heading} tabIndex={-1}>connection detail</h2>
         {detailList && "failure" in detailList ? failure(detailList.failure, project)
           : <ModuleState kind="empty" title="connection not found" detail="choose a connection from the list" />}
       </> : null}
-    {children}
+    {!row && children}
   </section>;
 }
 
@@ -74,30 +74,34 @@ function Status({ row }: { row: McpRow }) {
   return <span className="mcp-status" data-status={status}>{labels[status]}</span>;
 }
 
-function ConnectionFields({ row, shadows, heading }: { row: McpRow; shadows: string | null; heading: Ref<HTMLHeadingElement> }) {
+function ConnectionFields({ row, shadows, heading, actions }: { row: McpRow; shadows: string | null; heading: Ref<HTMLHeadingElement>; actions: ReactNode }) {
   const config = row.config;
   return <>
-    <h2 ref={heading} tabIndex={-1}>{row.name}</h2>
-    <p className="mcp-detail-meta"><Status row={row} /><span>{row.scope} scope · {row.enabled ? "enabled" : "disabled"} in config{shadows && ` · ${shadows}`}</span></p>
-    <div className="mcp-rule"><h3>config</h3><span>secrets are never shown here</span></div>
+    <header className="mcp-detail-head">
+      <div><h2 ref={heading} tabIndex={-1}>{row.name}</h2>
+        <p className="mcp-detail-meta"><Status row={row} /><span>{row.scope === "user" ? "User" : "Project"} scope{shadows ? ` (${shadows})` : ""}</span></p></div>
+      {actions}
+    </header>
+    <div className="mcp-rule"><h3>Configuration</h3><span>Secrets are hidden</span></div>
     <dl>
       <dt>transport</dt><dd>{transportOf(row)}</dd>
       {config.transport === "stdio" && <>
-        <dt>command</dt><dd>{config.commandProvided ? "local command provided · redacted" : "not provided"}</dd>
+        <dt>command</dt><dd>{config.commandProvided ? "local command provided (redacted)" : "not provided"}</dd>
         <dt>arguments</dt><dd>{config.args}</dd>
       </>}
       {config.transport === "streamable-http" && <>
-        <dt>URL</dt><dd>{config.urlProvided ? "remote URL provided · redacted" : "not provided"}</dd>
-        <dt>headers</dt><dd>{config.headers} {config.headers === 1 ? "header" : "headers"} provided{config.headers > 0 && " · redacted"}</dd>
+        <dt>URL</dt><dd>{config.urlProvided ? "remote URL provided (redacted)" : "not provided"}</dd>
+        <dt>headers</dt><dd>{config.headers} {config.headers === 1 ? "header" : "headers"} provided{config.headers > 0 && " (redacted)"}</dd>
       </>}
-      <dt>environment</dt><dd>{config.env} environment {config.env === 1 ? "value" : "values"} provided{config.env > 0 && " · redacted"}</dd>
+      <dt>environment</dt><dd>{config.env} environment {config.env === 1 ? "value" : "values"} provided{config.env > 0 && " (redacted)"}</dd>
       <dt>trust</dt><dd>{row.trusted ? "trusted" : "not trusted"}</dd>
       {config.oauth && <>
-        <dt>auth</dt><dd>oauth configured · sign-in state not checked</dd>
-        <dt>client secret</dt><dd>{config.oauth.secretProvided ? "provided · redacted" : "not provided"}</dd>
+        <dt>auth</dt><dd>OAuth configured (sign-in not checked)</dd>
+        <dt>client secret</dt><dd>{config.oauth.secretProvided ? "provided (redacted)" : "not provided"}</dd>
       </>}
     </dl>
-    <div className="mcp-rule"><h3>tools · {row.toolCount}</h3><span>reported by zeta · no live check</span></div>
+    <div className="mcp-rule"><h3>Tools <small>{row.toolCount}</small></h3><span>Reported by Zeta, not checked live</span></div>
+    {row.toolCount === 0 && <ModuleState kind="empty" title="No tools reported" detail="Zeta has not reported any tools for this connection." />}
   </>;
 }
 

@@ -10,8 +10,6 @@
   position: sticky;
   top: 0;
   align-self: start;
-  padding: var(--g1-space-4);
-  background: var(--g1-bg-subtle);
 }
 .sp-subnav a { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; color: var(--g1-fg-2); text-decoration: none; }
 .sp-subnav a:hover { background: var(--g1-hover); }
@@ -20,7 +18,7 @@
 .sp-content { display: flex; flex-direction: column; gap: 32px; min-width: 0; padding: var(--g1-page-padding); border-inline-start: 1px solid var(--g1-rule); }
 .sp-content section { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 16px; }
 .sp-content section > button { align-self: flex-start; min-height: 44px; margin-top: 4px; padding-inline: 12px; }
-.sp h2 { margin: 0; font-size: var(--g1-type-page-title); letter-spacing: var(--g1-tracking-page-title); font-weight: var(--g1-weight-title); line-height: 1.2; }
+.sp h2 { margin: 0; font-size: var(--g1-type-section); font-weight: var(--g1-weight-title); line-height: 1.2; }
 .sp h3, .sp-defaults dt { margin: 0; font-size: var(--g1-type-ui); font-weight: 600; }
 .sp p { margin: 0; }
 .sp-dim { color: var(--g1-muted); }
@@ -71,3 +69,5 @@
 }
 .sp-switch:has(.sp-note) { padding: 8px 12px; border: 1px dashed var(--g1-border); background: var(--g1-bg-subtle); }
 .sp-switch > [role="alert"] { color: var(--g1-danger); }
+
+.sp :is(.confirmation-trigger, .confirmation-row button) { min-height: var(--g1-touch-height); padding-inline: var(--g1-space-2); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
