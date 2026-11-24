@@ -1,5 +1,5 @@
 .sp { overflow-wrap: anywhere; }
-.sp-content { display: flex; flex-direction: column; gap: var(--g1-space-10); max-width: var(--g1-content-max); min-width: 0; padding: var(--g1-space-8) var(--g1-space-7); }
+.sp-content { display: flex; flex-direction: column; gap: var(--g1-space-10); max-width: var(--g1-content-max); min-width: 0; padding: var(--g1-space-8) var(--g1-page-gutter); }
 .sp-content section { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 16px; }
 .sp-content section > button { align-self: flex-start; min-height: 44px; margin-top: 4px; padding-inline: 12px; }
 .sp h2 { margin: 0; font-size: var(--g1-type-title); font-weight: var(--g1-weight-title); line-height: 1.2; }

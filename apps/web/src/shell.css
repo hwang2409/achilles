@@ -26,7 +26,6 @@
 .new-chat:where(:not(:disabled, [aria-disabled="true"]):hover) { background: var(--g1-hover); }
 .sidebar .new-chat > span { display: none; }
 .sidebar-collapsed .sidebar .new-chat > span { display: flex; }
-.sidebar .new-chat:focus-visible { outline-offset: 2px; }
 .chat-search { border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); }
 .chat-search > span { color: var(--fulcrum-muted); font-size: 20px; }
 .chat-search input { padding: 0; width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
@@ -52,7 +51,7 @@
 /* the editor sits over the hidden title in one grid cell, so the row keeps its height and its page/time line */
 .chat-row.editing { display: grid; }
 .chat-row.editing > strong { grid-area: 1 / 1; visibility: hidden; }
-.chat-row-edit { grid-area: 1 / 1; align-self: stretch; box-sizing: border-box; width: 100%; min-width: 0; margin: 0; padding: 0 var(--g1-space-1); border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: inherit; color: inherit; }
+.chat-row-edit { grid-area: 1 / 1; align-self: stretch; box-sizing: border-box; width: 100%; min-width: 0; margin: 0; padding: 0; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: inherit; color: inherit; }
 .load-older { width: calc(100% - 32px); height: 40px; margin: 12px 16px; }
 .sidebar-skeleton { padding: 8px 16px; }
 .search-skeleton { min-height: 36px; }
@@ -80,8 +79,10 @@
 
 .chat-heading strong[role="button"] { cursor: text; border-radius: 2px; line-height: 40px; }
 .chat-heading strong[role="button"]:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
-.chat-title-edit { flex: 1 1 160px; min-width: 160px; min-height: 40px; padding: 2px 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: inherit; color: inherit; }
+.chat-title-edit { flex: 1 1 160px; min-width: 160px; min-height: 40px; padding: 2px 0; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: inherit; font-weight: 600; color: inherit; }
 /* iOS Safari zooms the page when it focuses an input under 16px */
+/* editing keeps the title where it was: no side padding, the same weight, and the accent border as the only ring */
+:is(.chat-row-edit, .chat-title-edit):focus-visible { outline: none; }
 @media (pointer: coarse) { .chat-row-edit, .chat-title-edit { font-size: var(--g1-type-title); } }
 .chat-actions button:focus-visible { border-color: var(--fulcrum-accent); }
 .header-overflow, .header-menu, .fold-indicator { display: none; }
@@ -146,7 +147,9 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
    see minor-7 and A-2/A-4 in firstrun-c028cdd.md and firstrun-e797f07.md. */
 .empty-chat { position: absolute; z-index: 1; top: 0; right: 0; bottom: 0; left: 0; overflow-y: auto; padding: min(20vh, 180px) max(24px, calc((100% - var(--g1-content-max)) / 2)) 32px; }
 .empty-chat h1 { display: -webkit-box; overflow: hidden; margin: 0 0 14px; max-width: 34ch; font-size: var(--g1-type-title); line-height: 32px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.page-chat-docked .empty-chat { padding-top: var(--g1-space-4); }
+/* the docked panel has one 16px text edge: its head, the empty-chat heading, and the starter text (the buttons hang their padding outside it) */
+.page-chat-docked .empty-chat { padding-top: var(--g1-space-4); padding-inline: var(--g1-space-4); }
+.page-chat-docked .chat-starters { margin-inline: calc(-1 * var(--g1-space-2)); }
 .page-chat-docked .empty-chat h1 { font-size: var(--g1-type-title); line-height: 1.35; }
 .chat-starters { margin-top: 24px; }
 .chat-starters button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--g1-space-2); width: 100%; padding: var(--g1-space-2); text-align: start; }
@@ -158,9 +161,13 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
   container-type: inline-size;
   border: 1px solid var(--g1-border);
 }
+/* the top inset lives on the field, not in the textarea, so a scrolled draft clips 12px below the border, not on it */
 .main-pane [data-part="composer-field"] { min-height: 64px; }
+.main-pane [data-part="composer-field"]:has(> textarea) { padding-top: 12px; }
+/* the hidden copy that sizes the field pads like the textarea, so the box keeps its height */
+.main-pane [data-part="composer-field"]:has(> textarea)::after { padding: 0 14px 12px; }
 .main-pane [data-part="composer-field"] textarea {
-  display: block; width: 100%; min-height: 64px; resize: none; padding: 12px 14px;
+  display: block; width: 100%; min-height: 52px; resize: none; padding: 0 14px 12px;
   border: 0; outline: 0; background: transparent; line-height: 22px;
 }
 .main-pane [data-part="composer-field"] textarea::placeholder,

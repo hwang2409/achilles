@@ -39,7 +39,7 @@
 .tm-primary:not(:disabled) { border-color: var(--g1-primary); background: var(--g1-primary); color: var(--g1-primary-text); }
 .tm-link { min-height: 36px; padding: 0 4px; border: 0; background: none; color: var(--fulcrum-accent); cursor: pointer; font: inherit; }
 /* achilles' EnumListbox, fitted to the boards: range is a bare bordered button; a filter shows its label inside the frame */
-.telemetry-module .enum-listbox-button { width: auto; min-height: 36px; gap: 10px; padding: 0 12px; background: none; }
+.telemetry-module .enum-listbox-button { width: auto; min-height: var(--g1-control-height); gap: 10px; padding: 0 32px 0 12px; background-color: transparent; }
 .telemetry-module .enum-listbox-menu { right: auto; width: max-content; min-width: 100%; max-width: min(44ch, 90vw); }
 .tm-range .enum-listbox-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tm-range .enum-listbox-menu { left: auto; right: 0; }
@@ -123,7 +123,7 @@
 .tm-select { border: 1px solid var(--fulcrum-border); }
 .tm-select .enum-listbox { display: flex; align-items: center; }
 .tm-select .enum-listbox-label { margin: 0; padding-left: 12px; font-size: inherit; line-height: inherit; }
-.tm-select .enum-listbox-button { min-height: 44px; max-width: 28ch; padding-left: 8px; border: 0; }
+.tm-select .enum-listbox-button { min-height: var(--g1-control-height); max-width: 28ch; padding-left: 8px; border: 0; }
 .tm-select .enum-listbox-menu { left: -1px; }
 .tm-select-on { border-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .tm-check { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }

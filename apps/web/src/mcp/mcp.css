@@ -5,7 +5,7 @@
 .mcp-list-head { min-height: 56px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--g1-space-2); padding: var(--g1-space-2) var(--g1-page-gutter); }
 .mcp-rows { list-style: none; padding: 0; margin: 0; }
 .mcp-rows li { border-bottom: 1px solid var(--g1-rule); }
-.mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(40%); align-items: center; gap: 8px 14px; min-height: var(--g1-list-row-height); padding: 8px 16px;  }
+.mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(40%); align-items: center; gap: 8px 14px; min-height: var(--g1-list-row-height); padding: 8px var(--g1-page-gutter); }
 a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-rows [data-current="true"] .mcp-row { background: var(--g1-selected); }
 .mcp-row-title { display: grid; gap: 2px; }
@@ -28,10 +28,10 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-detail dt { padding-inline-end: 12px; color: var(--fulcrum-muted); }
 .mcp-back { display: none; }
 .mcp-place :is(a, button):focus-visible { outline-offset: -2px; }
-.mcp-offline { margin: 0; padding: 12px 16px; color: var(--fulcrum-warn); border-bottom: 1px solid var(--fulcrum-border); }
+.mcp-offline { margin: 0; padding: 12px var(--g1-page-gutter); color: var(--fulcrum-warn); border-bottom: 1px solid var(--fulcrum-border); }
 .mcp-grid[data-retained="true"] :is(.mcp-row strong, .mcp-detail h2, .mcp-detail dd) { color: var(--fulcrum-muted); }
 
-.mcp-failure-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }
+.mcp-failure-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 var(--g1-page-gutter) 16px; }
 .mcp-failure-actions button { min-height: var(--g1-control-height); padding-inline: 12px; }
 @media (max-width: 960px) {
   .mcp-context { padding-inline: 16px; }
@@ -44,7 +44,7 @@ a.mcp-row:hover { background: var(--g1-hover); }
 }
 .mcp-review-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-block-start: 8px; }
 
-.mcp-add { padding: var(--g1-space-2) var(--g1-space-4); border-bottom: var(--g1-border-width) solid var(--g1-rule); }
+.mcp-add { padding: var(--g1-space-2) var(--g1-page-gutter); border-bottom: var(--g1-border-width) solid var(--g1-rule); }
 .mcp-add-form { display: grid; gap: var(--g1-space-4); max-width: 44rem; padding-block: var(--g1-space-2); }
 .mcp-add-form h2 { margin: 0; font-size: var(--g1-type-title); font-weight: var(--g1-weight-title); text-wrap: balance; }
 .mcp-add-form p { margin: 0; color: var(--g1-muted); text-wrap: pretty; overflow-wrap: anywhere; }
@@ -80,7 +80,7 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-auth p { margin: 0; text-wrap: pretty; }
 .mcp-auth-buttons, .mcp-auth-global { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .mcp-auth button, .mcp-auth-global button { min-height: var(--g1-control-height); padding-inline: 12px; }
-.mcp-auth-global { padding: 8px 16px; border-bottom: 1px solid var(--g1-rule); }
+.mcp-auth-global { padding: 8px var(--g1-page-gutter); border-bottom: 1px solid var(--g1-rule); }
 .mcp-auth [data-auth-state]:is([data-auth-state="failed"], [data-auth-state="unknown"]) { color: var(--g1-warn); }
 
 /* desktop controls share the 40px control height; touch keeps 44px targets */

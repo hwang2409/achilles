@@ -50,6 +50,8 @@
 .module-body > :not(.module-state), .agents-split, .sessions-split { width: 100%; }
 .module-body { flex: 1; min-height: 0; overflow: auto; }
 .module-state { max-width: 56rem; padding-inline: var(--g1-page-gutter); }
+/* a place that already pads its content does not pad its empty state again */
+:is(.accounts-place, .projects) .module-state { padding-inline: 0; }
 .module-state h2 { font-size: var(--g1-type-title); margin: 0; }
 .module-state p { max-width: 55ch; margin: 8px 0 0; color: var(--g1-muted); overflow-wrap: anywhere; }
 .module-state button { min-height: 44px; margin-top: 16px; padding: 0 12px; }

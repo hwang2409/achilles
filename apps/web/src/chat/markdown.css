@@ -25,6 +25,8 @@
   border: 1px solid var(--fulcrum-border);
   background: var(--fulcrum-surface);
 }
+/* like fulcrum's own wide blocks, a top-level fence spans the cursor gutter, so its border ends with the cards and the composer */
+[data-part="message"] > [data-part="code-fence"] { margin-inline-end: calc(-1 * var(--cursor-gutter)); }
 [data-part="message"] [data-part="code-fence-head"] {
   display: flex;
   align-items: center;

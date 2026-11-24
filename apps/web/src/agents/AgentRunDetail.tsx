@@ -11,7 +11,7 @@ import type { ChildSendOwner } from "./childSend";
 import type { AgentRun } from "./reads";
 
 export const short = (id: string) => id.length > 12 ? `${id.slice(0, 7)}…${id.slice(-5)}` : id;
-export const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase();
+export const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
 export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
 const sessionHref = (id: string) => surfaceHref(`/sessions/${encodeURIComponent(id)}`);
 export function StateTag({ row }: { row: AgentRun }) {
