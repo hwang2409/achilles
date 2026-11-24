@@ -11,8 +11,9 @@
   max-height: calc(100dvh - 2rem);
   padding: 0;
   border: 1px solid var(--g1-border);
+  border-radius: var(--g1-radius-container);
   background: var(--g1-bg);
- 
+  box-shadow: var(--g1-shadow-floating);
 }
 .confirmation-dialog[data-proof="name"] { --confirmation-action: var(--g1-danger);
   --confirmation-action-text: var(--g1-bg); }
@@ -116,6 +117,7 @@
     max-height: none;
     margin: 0;
     border: 0;
+    border-radius: 0;
   }
   .confirmation-dialog[data-proof="name"] > form { height: 100%; }
   .confirmation-dialog[data-proof="name"] .confirmation-body { flex-grow: 1; }

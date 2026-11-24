@@ -2,7 +2,7 @@
 .mcp-grid { flex: 1; display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); }
 .mcp-grid[data-has-selection="false"] { grid-template-columns: minmax(0, 1fr); }
 .mcp-grid[data-has-selection="true"] .mcp-list { border-inline-end: 1px solid var(--g1-border); }
-.mcp-list-head { min-height: 56px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--g1-space-2); padding: var(--g1-space-2) var(--g1-page-gutter); }
+.mcp-list-head { min-height: 44px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--g1-space-2); padding: var(--g1-space-2) var(--g1-page-gutter); }
 .mcp-rows { list-style: none; padding: 0; margin: 0; }
 .mcp-rows li { border-bottom: 1px solid var(--g1-rule); }
 .mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(40%); align-items: center; gap: 8px 14px; min-height: var(--g1-list-row-height); padding: 8px var(--g1-page-gutter); }
@@ -83,7 +83,7 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-auth-global { padding: 8px var(--g1-page-gutter); border-bottom: 1px solid var(--g1-rule); }
 .mcp-auth [data-auth-state]:is([data-auth-state="failed"], [data-auth-state="unknown"]) { color: var(--g1-warn); }
 
-/* desktop controls share the 40px control height; touch keeps 44px targets */
+/* desktop controls share the one control height; touch keeps 44px targets */
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
   .mcp-failure-actions button, .mcp-add-field :is(input, select), .mcp-add button, .mcp-actions .confirmation-row button, .mcp-test button, .mcp-auth button, .mcp-auth-global button { min-height: 44px; }
 }

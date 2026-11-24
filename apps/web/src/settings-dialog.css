@@ -1,4 +1,4 @@
-.settings-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--g1-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
+.settings-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--g1-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); box-shadow: var(--g1-shadow-floating); overflow: hidden; }
 .settings-panel { overflow: auto; max-height: calc(100dvh - 34px); }
 .settings-titlebar, .settings-session > footer { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 20px; border-bottom: 1px solid var(--g1-rule); }
 .settings-titlebar > div { display: flex; align-items: center; gap: 12px; }
@@ -11,10 +11,10 @@
 .settings-session .settings-row { border-top: 1px solid var(--g1-rule); border-bottom: 1px solid var(--g1-rule); }
 #settings-lock-note { margin: 12px 20px 0; color: var(--g1-muted); }
 .settings-toggle:disabled { opacity: .55; }
-.settings-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--g1-rule); }
+.settings-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 18px; min-height: 44px; padding: 9px 0; border-bottom: 1px solid var(--g1-rule); }
 .settings-row:last-child { border-bottom: 0; }
 .settings-row-label h3 { margin: 0 0 2px; font-size: inherit; }
-.settings-row-label p { margin: 0; color: var(--g1-muted); }
+.settings-row-label p { margin: 0; color: var(--g1-muted); font-size: 13px; }
 .theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .theme-options button { display: flex; align-items: center; justify-content: space-between; min-width: 0; min-height: var(--g1-control-height); gap: 8px; padding: 7px 8px; color: var(--g1-fg); font: inherit; text-align: left; background: transparent; border: 1px solid var(--g1-control-border); }
 /* one selected look for every choice in this dialog: the shared selected fill and bold text */
