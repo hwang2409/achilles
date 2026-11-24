@@ -94,6 +94,8 @@
   overflow-wrap: normal;
   word-break: normal;
 }
+/* fulcrum lifts the max-width of a top-level table, so this stops the fit-content box at the column and its gutter */
+:is([data-part="message"], [data-part="message"]:has(> [data-wide])) > [data-part="md-table"] { max-width: calc(100% + var(--cursor-gutter)); }
 /* the rounded box draws the outer edge, so the cells draw only the inner rules */
 [data-part="message"] [data-part="md-table"] tr > :first-child { border-left-width: 0; }
 [data-part="message"] [data-part="md-table"] thead > tr > * { border-top-width: 0; }
