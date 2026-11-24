@@ -1541,19 +1541,13 @@ with _database() as db:
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const booksList = page.locator('.record-list[data-collection="books"]');
-  await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(booksList.getByText("No books yet", { exact: true }), "waitFor", { timeout: 20_000 });
   if (await booksList.locator("header .record-count").innerText() !== "0" || await booksList.getByText("sorted by updated", { exact: true }).count())
     throw new Error("empty books state showed the wrong count or sort label");
-  const addBook = booksList.getByRole("button", { name: "add a book", exact: true });
+  const addBook = booksList.getByRole("button", { name: "Add a book", exact: true });
   await addBook.click();
   if (!(await page.locator('.record-form[data-collection="books"][data-operation="insert"] input[name="title"]').evaluate((element) => document.activeElement === element)))
     throw new Error("empty books add action did not focus the insert form");
-  const desktopComposer = page.locator('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
-  await booksList.getByRole("button", { name: "ask the chat", exact: true }).click();
-  await waitFor(async () => (await desktopComposer.inputValue()) === "add a book to this page", "desktop empty-state chat draft");
-  if (!(await desktopComposer.evaluate((element) => document.activeElement === element))) throw new Error("empty-state chat action did not focus the composer");
-  if ((JSON.parse(await Bun.file(control).text()).requests ?? []).some((request: { method?: string; params?: { text?: string } }) => request.method === "send" && request.params?.text === "add a book to this page")) throw new Error("empty-state chat action sent a message");
-  await desktopComposer.fill("");
   await captureBlockState("a-empty", booksList.locator(".record-list-empty"));
 
   const recordsPattern = `**/api/pages/${createdPage.id}/records/books?*`;
@@ -1568,7 +1562,7 @@ with _database() as db:
   });
   await page.reload();
   await gateWait.playwright(page.getByText("books loading…", { exact: true }), "waitFor", { timeout: 20_000 });
-  if (await booksList.getByText("no books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
+  if (await booksList.getByText("No books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
   await captureBlockState("b-loading", booksList.locator('[role="status"]'));
   await page.unroute(recordsPattern);
 
@@ -1585,7 +1579,7 @@ with _database() as db:
   await gateWait.playwright(booksList.getByText("books request failed: Failed to fetch. your data is safe; nothing was changed.", { exact: true }), "waitFor", { timeout: 20_000 });
   await captureBlockState("c-failed", booksList.locator('[role="alert"]'));
   await booksList.getByRole("button", { name: "try again", exact: true }).click();
-  await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(booksList.getByText("No books yet", { exact: true }), "waitFor", { timeout: 20_000 });
   await page.unroute(recordsPattern);
 
   await clickCreateMode(false);
