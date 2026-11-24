@@ -22,7 +22,7 @@ export type Settings = {
 export const defaultSettings: Settings = {
   v: 1,
   theme: AUTO_THEME,
-  uiFont: "geist",
+  uiFont: "system",
   codeFont: "system-mono",
   size: 14,
   density: "comfortable",
@@ -57,16 +57,16 @@ export function parseSettings(value: string | null): Settings {
 }
 
 const uiFontValues: Record<UiFont, string> = {
-  geist: "var(--g1-font-ui)",
-  "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
+  geist: '"Geist", var(--font-sans)',
+  "jetbrains-mono": '"JetBrains Mono", var(--font-mono)',
   "ibm-plex-sans": '"IBM Plex Sans", system-ui, sans-serif',
   inter: '"Inter", system-ui, sans-serif',
-  system: "system-ui, sans-serif",
+  system: "var(--font-sans)",
 };
 const codeFontValues: Record<CodeFont, string> = {
-  "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
-  "ibm-plex-mono": '"IBM Plex Mono", var(--g1-font-mono)',
-  "system-mono": "var(--g1-font-mono)",
+  "jetbrains-mono": '"JetBrains Mono", var(--font-mono)',
+  "ibm-plex-mono": '"IBM Plex Mono", var(--font-mono)',
+  "system-mono": "var(--font-mono)",
 };
 
 function queryTheme(): ThemeChoice | null {

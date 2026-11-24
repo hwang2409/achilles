@@ -1,0 +1,235 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
+  --font-mono: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: 1px;
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+}
+
+/* Graphite Sharp. Fulcrum still supplies syntax and ANSI colors. */
+:root {
+  color-scheme: light;
+  --background: #FFFFFF;
+  --card: #FAFAFA;
+  --secondary: #F1F1F3;
+  --sidebar-accent: #ECECEE;
+  --control-hover: #F6F6F7;
+  --sidebar-border: #E4E4E7;
+  --border: #D4D4D8;
+  --input: #82828A; /* 3:1 on the surface as well as the canvas */
+  --foreground: #111113;
+  --secondary-foreground: #27272A;
+  --strong-muted-foreground: #3F3F46;
+  --muted-foreground: #5E5E66;
+  --ring: #1F45D6;
+  --accent: #EEF2FD;
+  --accent-foreground: #1A3AB8;
+  --primary: #111113;
+  --primary-foreground: #FFFFFF;
+  --success: #15803D;
+  --warning-fill: #B45309;
+  --warning-foreground: #FFFFFF;
+  --warning: #9A3F07;
+  --destructive-mark: #C81E1E;
+  --destructive: #B91C1C;
+  --selection: #111113;
+  --focus-glow: rgb(31 69 214 / .18);
+  --destructive-foreground: #FFFFFF;
+  --radius: 2px;
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --muted: var(--secondary);
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-ring: var(--ring);
+}
+
+[data-achilles-theme="g1-dark"] {
+  color-scheme: dark;
+  --background: #0B0B0D;
+  --card: #111113;
+  --secondary: #18181B;
+  --sidebar-accent: #1F1F23;
+  --control-hover: var(--sidebar-accent);
+  --sidebar-border: #1F1F23;
+  --border: #2E2E33;
+  --input: #6B6B73;
+  --foreground: #F4F4F5;
+  --secondary-foreground: #D4D4D8;
+  --strong-muted-foreground: #D4D4D8;
+  --muted-foreground: #A1A1AA;
+  --ring: #8B9DFF;
+  --accent: #172040;
+  --accent-foreground: var(--ring);
+  --primary: #F4F4F5;
+  --primary-foreground: #0B0B0D;
+  --success: #4ADE80;
+  --warning-fill: #FBBF24;
+  --warning-foreground: #0B0B0D;
+  --warning: var(--warning-fill);
+  --destructive-mark: #F87171;
+  --destructive: var(--destructive-mark);
+  --selection: #FAFAFA;
+  --focus-glow: color-mix(in srgb, var(--ring) 24%, transparent);
+  --destructive-foreground: #0B0B0D;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-achilles-theme]) {
+    color-scheme: dark;
+    --background: #0B0B0D;
+    --card: #111113;
+    --secondary: #18181B;
+    --sidebar-accent: #1F1F23;
+    --control-hover: var(--sidebar-accent);
+    --sidebar-border: #1F1F23;
+    --border: #2E2E33;
+    --input: #6B6B73;
+    --foreground: #F4F4F5;
+    --secondary-foreground: #D4D4D8;
+    --strong-muted-foreground: #D4D4D8;
+    --muted-foreground: #A1A1AA;
+    --ring: #8B9DFF;
+    --accent: #172040;
+    --accent-foreground: var(--ring);
+    --primary: #F4F4F5;
+    --primary-foreground: #0B0B0D;
+    --success: #4ADE80;
+    --warning-fill: #FBBF24;
+    --warning-foreground: #0B0B0D;
+    --warning: var(--warning-fill);
+    --destructive-mark: #F87171;
+    --destructive: var(--destructive-mark);
+    --selection: #FAFAFA;
+    --focus-glow: color-mix(in srgb, var(--ring) 24%, transparent);
+    --destructive-foreground: #0B0B0D;
+  }
+}
+
+/* Compatibility for remaining route CSS; removed by the last screen PR. */
+:root {
+  --g1-bg: var(--background);
+  --g1-bg-subtle: var(--card);
+  --g1-surface: var(--secondary);
+  --g1-selected: var(--sidebar-accent);
+  --g1-hover: var(--control-hover);
+  --g1-rule: var(--sidebar-border);
+  --g1-border: var(--border);
+  --g1-control-border: var(--input);
+  --g1-fg: var(--foreground);
+  --g1-fg-2: var(--secondary-foreground);
+  --g1-fg-3: var(--strong-muted-foreground);
+  --g1-muted: var(--muted-foreground);
+  --g1-accent: var(--ring);
+  --g1-accent-tint: var(--accent);
+  --g1-accent-ink: var(--accent-foreground);
+  --g1-primary: var(--primary);
+  --g1-primary-text: var(--primary-foreground);
+  --g1-ok: var(--success);
+  --g1-warn-fill: var(--warning-fill);
+  --g1-warn-text-on-fill: var(--warning-foreground);
+  --g1-warn: var(--warning);
+  --g1-danger-mark: var(--destructive-mark);
+  --g1-danger: var(--destructive);
+  --g1-selection: var(--selection);
+  --g1-focus-glow: var(--focus-glow);
+  --g1-font-ui: var(--font-sans);
+  --g1-font-mono: var(--font-mono);
+  --g1-type-kbd: 11px;
+  --g1-type-meta: 12px;
+  --g1-type-small: 13px;
+  --g1-type-ui: 14px;
+  --g1-type-chat: 15px;
+  --g1-leading-chat: 24px;
+  --g1-type-reply-h2: 20px;
+  --g1-tracking-reply-h2: -.02em;
+  --g1-type-page-title: 26px;
+  --g1-tracking-page-title: -.03em;
+  --g1-weight-title: 700;
+  --g1-radius-container: 0;
+  --g1-radius-control: var(--radius);
+  --g1-radius-chip: 1px;
+  --g1-status-mark: 6px;
+  --g1-border-width: 1px;
+  --g1-selection-width: 2px;
+  --g1-shadow-rest: none;
+  --g1-shadow-overlay: 0 8px 24px -8px rgb(17 17 19 / .18);
+  --g1-focus-ring: 2px solid var(--g1-accent);
+  --g1-focus-halo: 0 0 0 3px var(--g1-focus-glow);
+  --g1-space-1: 4px;
+  --g1-space-2: 8px;
+  --g1-space-3: 12px;
+  --g1-space-4: 16px;
+  --g1-space-5: 20px;
+  --g1-space-6: 24px;
+  --g1-space-7: 28px;
+  --g1-space-8: 32px;
+  --g1-space-10: 40px;
+  --g1-sidebar-padding: var(--g1-space-3);
+  --g1-nav-row-height: var(--g1-space-8);
+  --g1-page-padding: var(--g1-space-7) var(--g1-space-10);
+  --g1-transcript-width: 720px;
+}
+
+/* Match the specificity of Fulcrum’s system rule. */
+:root:not([data-fulcrum-theme]), :root[data-fulcrum-theme] {
+  --fulcrum-bg: var(--background);
+  --fulcrum-fg: var(--foreground);
+  --fulcrum-muted: var(--muted-foreground);
+  --fulcrum-surface: var(--secondary);
+  --fulcrum-border: var(--border);
+  --fulcrum-accent: var(--ring);
+  --fulcrum-ok: var(--success);
+  --fulcrum-warn: var(--warning);
+  --fulcrum-danger: var(--destructive);
+  --fulcrum-panel: var(--background);
+  --fulcrum-font: var(--achilles-ui-font, var(--font-sans));
+  --fulcrum-cursor: var(--ring);
+  --fulcrum-live: var(--ring);
+  --fulcrum-gap: 12px;
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+}
