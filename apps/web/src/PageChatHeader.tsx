@@ -67,10 +67,10 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}><Button role="button" variant="outline" size="sm" type="button" onClick={finishConfirmation}>keep current</Button></DropdownMenuItem>
   </div>;
   return <>
-    <div data-page-chat-head="" className="relative z-10 min-w-0 shrink-0 border-b px-3 py-1" data-approval-mode={approval.checked ? "allow" : "ask"} data-create-mode={create.checked ? "on" : "off"} data-popup={popup ?? undefined}>
+    <div data-page-chat-head="" className="relative z-10 min-w-0 shrink-0 border-b px-4 py-1" data-approval-mode={approval.checked ? "allow" : "ask"} data-create-mode={create.checked ? "on" : "off"} data-popup={popup ?? undefined}>
       <div data-page-chat-title-row="" className="flex min-w-0 items-center gap-1">
         <DropdownMenu modal={false} open={popup === "chats"} onOpenChange={(open) => changePopup("chats", open)}>
-          <DropdownMenuTrigger asChild><Button variant="ghost" className="h-11 min-w-0 flex-1 justify-start px-1" aria-label={`${title}, ${count}`} aria-haspopup="listbox">
+          <DropdownMenuTrigger asChild><Button variant="ghost" className="h-11 min-w-0 flex-1 justify-start px-0 has-[>svg]:px-0" aria-label={`${title}, ${count}`} aria-haspopup="listbox">
             <strong id="page-chat-title" className="truncate" title={title}>{title}</strong><ChevronDown aria-hidden="true" />
           </Button></DropdownMenuTrigger>
           <DropdownMenuContent className={menuStyle} data-page-chat-popup="chats" role="listbox" aria-labelledby="page-chat-count" aria-busy={catalog.loading} align="start"
@@ -100,7 +100,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
         </DropdownMenu>
         {close && <Button variant="ghost" size="icon-lg" className="size-11" type="button" ref={closeRef} aria-label="close page chat" onClick={close}><X aria-hidden="true" /></Button>}
       </div>
-      <div className="truncate px-1 text-xs text-muted-foreground" role="status" data-chat-status={state} hidden={state === "idle"}>{stateLabel}</div>
+      <div className="truncate text-xs text-muted-foreground" role="status" data-chat-status={state} hidden={state === "idle"}>{stateLabel}</div>
     </div>
     {newReason && <div className="px-4 py-1 text-xs text-muted-foreground" id="page-chat-new-reason">{newReason}</div>}
   </>;

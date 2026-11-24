@@ -522,7 +522,7 @@
 [data-chat-transcript] [data-part="timeline"] { width: 100%; max-width: none; margin: 0; padding: 32px 0 16px; }
 [data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: min(944px, calc(100% - 48px)); margin-inline: auto; }
 [data-chat-transcript] [data-part="jump-to-latest-lane"] { display: none !important; }
-[data-chat-transcript]:has(> [data-part="timeline-frame"]):not(:has(> [data-jump-owned="true"])) { padding-block-end: 48px; }
+[data-chat-transcript]:has(> [data-part="timeline-frame"]):not(:has(> [data-jump-lane])) { padding-block-end: 48px; }
 [data-page-chat-docked] [data-part="timeline-scroll"] { margin-top: 8px; }
 [data-page-chat-docked] [data-part="timeline"] { padding: 12px 0 16px; }
 [data-page-chat-docked] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: calc(100% - 32px); }
@@ -538,7 +538,12 @@
 @media (max-width: 760px), (max-height: 500px) {
   [data-chat-transcript] [data-part="timeline"] { padding: 14px 12px 8px; }
   [data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: 100%; }
-  [data-page-chat-docked] [data-part="timeline"] { padding-inline: 16px; }
   [data-chat-composer] { width: calc(100% - 24px); margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
   [data-chat-composer] :is([data-part="composer-submit"], [data-part="composer-stop"]) { min-width: 44px; min-height: 44px; }
+}
+
+@media (width < 1280px) {
+  [data-page-chat-docked] [data-chat-transcript] { padding-inline: 16px; }
+  [data-page-chat-docked] [data-chat-transcript] [data-part="timeline"] { padding-inline: 0; }
+  [data-page-chat-docked] [data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: 100%; }
 }
