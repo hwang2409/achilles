@@ -735,7 +735,7 @@ with _database() as db:
       const visible = async () => {
         const all = await controls.all();
         const candidates = [];
-        for (const control of all) if (await control.isVisible() && await control.isEnabled()) candidates.push(control);
+        for (const control of all) if (await control.isVisible() && await control.evaluate((node: HTMLElement) => node.tabIndex >= 0 && !node.matches(":disabled") && !node.closest("[inert]"))) candidates.push(control);
         return candidates;
       };
       const candidates = await visible();
