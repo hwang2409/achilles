@@ -6,20 +6,17 @@ export async function waitForIdleTurn(
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
 ) {
   const composer = page.locator('[data-part="composer"]');
-  const runState = page.locator(".run-state");
   await waitFor(
     async () =>
       (await composer.getAttribute("data-state")) === "idle" &&
       (await composer.locator('[data-part="composer-submit"]').innerText()) === "send" &&
-      (await composer.locator('[data-part="composer-stop"]').count()) === 0 &&
-      (await runState.innerText()) === "idle",
+      (await composer.locator('[data-part="composer-stop"]').count()) === 0,
     "idle transcript turn",
   ).catch(async (error) => {
     throw new Error(`${error}\ntranscript turn state: ${JSON.stringify({
       composer: await composer.getAttribute("data-state"),
       submit: await composer.locator('[data-part="composer-submit"]').innerText().catch(() => null),
       stop: await composer.locator('[data-part="composer-stop"]').count(),
-      transcript: await runState.innerText().catch(() => null),
     })}`);
   });
 }

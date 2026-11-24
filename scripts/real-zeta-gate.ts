@@ -1294,7 +1294,7 @@ with _database() as db:
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
-  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  await waitForIdleTurn(page, waitFor);
   if (pageIndexRequests.length - pageRequestsBeforeCreate !== 1)
     throw new Error(`create_page made ${pageIndexRequests.length - pageRequestsBeforeCreate} /api/pages refetches, expected 1`);
   await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
@@ -1386,7 +1386,7 @@ with _database() as db:
       return Boolean(status && frames.some((frame) => frame.id === status.id && frame.result));
     }, "released selected-chat attach finished replay");
     await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
-    await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+    await waitForIdleTurn(page, waitFor);
     await gateWait.playwright(page, "waitForFunction", () => new Promise<boolean>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))), undefined, { timeout: 20_000 });
     if (!await dockTitle.isVisible()) throw new Error(`stale attach reverted the visible dock title: ${await dockHead(page).locator("strong").innerText()}`);
     console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row");
@@ -1472,7 +1472,7 @@ with _database() as db:
   const chatTwo = await homeSessionId();
   if (!chatTwo) throw new Error("second home chat session id missing");
   const transcriptBeforeDiscovery = await page.locator('[data-part="message"]').count();
-  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  await waitForIdleTurn(page, waitFor);
   const discoveryPrompt = "list achilles resources, then inspect /reading";
   await field.fill(discoveryPrompt);
   await field.press("Enter");
@@ -1485,7 +1485,7 @@ with _database() as db:
   await waitFor(async () => (await inspectApproval.count()) > 0, "inspect_page approval after scripted turn");
   await inspectApproval.getByRole("button", { name: "approve", exact: true }).click();
   await gateWait.playwright(page.getByText("new chat tools complete", { exact: true }), "waitFor", { timeout: 20_000 });
-  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  await waitForIdleTurn(page, waitFor);
   const newChatTranscript = await page.locator('[data-part="message"]').nth(transcriptBeforeDiscovery).innerText();
   if (newChatTranscript.includes("MCP server achilles is unavailable") || (await page.locator("body").innerText()).includes("MCP server achilles is unavailable"))
     throw new Error("new chat transcript reported achilles as unavailable after resources discovery");
