@@ -64,6 +64,7 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
   .page-view.docked { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: minmax(0, 1fr); }
 }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-ui-font, var(--g1-font-ui)); font-size: var(--achilles-ui-size, 14px); }
+:root[data-code-font]:not([data-code-font="system-mono"]) .main-pane [data-part="composer"] :is(textarea, .cm-editor) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 [data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: 12px; line-height: 20px; }
 [data-part="composer-queued"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 2px 8px; border-left: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
 [data-part="composer-queued-label"] { flex: none; color: var(--fulcrum-accent); }
