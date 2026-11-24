@@ -1,3 +1,4 @@
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -75,6 +76,12 @@ function Spark({ points }: { points: ModelSeriesPoint[] | undefined }) {
 }
 
 const latencyTitle = "estimated from zeta’s hourly latency histograms";
+function Latency({ value, firstToken }: { value: number | null; firstToken?: boolean }) {
+  return <TooltipProvider><Tooltip>
+    <TooltipTrigger asChild><span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-4">{formatLatency(value)}</span></TooltipTrigger>
+    <TooltipContent>{firstToken && "time to first token · "}{latencyTitle}</TooltipContent>
+  </Tooltip></TooltipProvider>;
+}
 function Models({ data, bucket, label }: { data: Extract<AggregateLoaded, { tab: "models" }>; bucket: Bucket; label: string }) {
   const { page: { items }, trends, total, totals } = data;
   const [selected, setSelected] = useState<string | null>(null);
@@ -96,10 +103,10 @@ function Models({ data, bucket, label }: { data: Extract<AggregateLoaded, { tab:
           <Cell><Spark points={trends.get(id)} /></Cell>
           <Cell label="calls">{formatCount(row.calls)}</Cell>
           <Cell label="errors"><span className={row.errors ? "text-destructive" : "text-muted-foreground"}>{formatCount(row.errors)}</span><span className="text-muted-foreground"> · {formatPercent(errorShare({ model: row }), 1) ?? "—"}</span></Cell>
-          <Cell label="p50"><span title={latencyTitle}>{formatLatency(row.p50_ns)}</span></Cell>
-          <Cell label="p95"><span title={latencyTitle}>{formatLatency(row.p95_ns)}</span></Cell>
-          <Cell label="TTFT p50"><span title={`time to first token · ${latencyTitle}`}>{formatLatency(row.ttft_p50_ns)}</span></Cell>
-          <Cell label="TTFT p95"><span title={`time to first token · ${latencyTitle}`}>{formatLatency(row.ttft_p95_ns)}</span></Cell>
+          <Cell label="p50"><Latency value={row.p50_ns} /></Cell>
+          <Cell label="p95"><Latency value={row.p95_ns} /></Cell>
+          <Cell label="TTFT p50"><Latency value={row.ttft_p50_ns} firstToken /></Cell>
+          <Cell label="TTFT p95"><Latency value={row.ttft_p95_ns} firstToken /></Cell>
           <Cell label="in">{formatTokens(row.input_tokens)}</Cell>
           <Cell label="out">{formatTokens(row.output_tokens)}</Cell>
           <Cell label="tokens">{formatTokens(row.total_tokens)}</Cell>
@@ -141,8 +148,8 @@ function ToolTable({ data }: { data: Extract<AggregateLoaded, { tab: "tools" }> 
         <Cell label="calls" className="font-medium">{formatCount(row.calls)}</Cell>
         <Cell label="failed" className={row.errors ? "text-destructive" : "text-muted-foreground"}>{formatCount(row.errors)}</Cell>
         <Cell className="text-muted-foreground"><Meter part={share ?? 0} scale={highest} /><span data-failure-rate>{formatPercent(share, 1) ?? "—"}</span></Cell>
-        <Cell label="p50"><span title={latencyTitle}>{formatLatency(row.p50_ns)}</span></Cell>
-        <Cell label="p95"><span title={latencyTitle}>{formatLatency(row.p95_ns)}</span></Cell>
+        <Cell label="p50"><Latency value={row.p50_ns} /></Cell>
+        <Cell label="p95"><Latency value={row.p95_ns} /></Cell>
         <Cell label="args" className="tabular-nums">{formatBytes(row.argument_bytes)}</Cell>
         <Cell label="out" className="tabular-nums">{formatBytes(row.result_bytes)}</Cell>
         <Cell label="last" className="text-muted-foreground"><time title={formatFullTime(row.last_ns)}>{formatHour(row.last_ns)}</time></Cell>
