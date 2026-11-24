@@ -44,7 +44,12 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     });
     return () => cancelAnimationFrame(frame);
   }, [popup]);
+  const switcher = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLButtonElement>(null);
+  // A click on a non-focusable surface dismisses the popup without choosing a new focus target.
+  const restoreMenuFocus = (trigger: HTMLButtonElement | null) => {
+    if (document.activeElement === document.body) trigger?.focus({ preventScroll: true });
+  };
   const modeItems = useRef<(HTMLDivElement | null)[]>([]);
   const confirm = useRef<HTMLButtonElement>(null);
   const focusMode = useRef<HTMLElement | null>(null);
@@ -70,11 +75,11 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     <div data-page-chat-head="" className="relative z-10 min-w-0 shrink-0 border-b px-4 py-1" data-approval-mode={approval.checked ? "allow" : "ask"} data-create-mode={create.checked ? "on" : "off"} data-popup={popup ?? undefined}>
       <div data-page-chat-title-row="" className="flex min-w-0 items-center gap-1">
         <DropdownMenu modal={false} open={popup === "chats"} onOpenChange={(open) => changePopup("chats", open)}>
-          <DropdownMenuTrigger asChild><Button variant="ghost" className="h-11 min-w-0 flex-1 justify-start px-0 has-[>svg]:px-0" aria-label={`${title}, ${count}`} aria-haspopup="listbox">
+          <DropdownMenuTrigger asChild><Button variant="ghost" className="h-11 min-w-0 flex-1 justify-start px-0 has-[>svg]:px-0" ref={switcher} aria-label={`${title}, ${count}`} aria-haspopup="listbox">
             <strong id="page-chat-title" className="truncate" title={title}>{title}</strong><ChevronDown aria-hidden="true" />
           </Button></DropdownMenuTrigger>
           <DropdownMenuContent className={menuStyle} data-page-chat-popup="chats" role="listbox" aria-labelledby="page-chat-count" aria-busy={catalog.loading} align="start"
-            ref={choices}>
+            ref={choices} onCloseAutoFocus={() => restoreMenuFocus(switcher.current)}>
             <DropdownMenuLabel id="page-chat-count">{count} on this page</DropdownMenuLabel>
             {chats.map((chat) => <ChatChoice key={chat.session_id} chat={chat} current={chat.session_id === sessionId} onSelect={onSelect} />)}
             {catalog.error ? <><DropdownMenuLabel role="status">could not load chats</DropdownMenuLabel><DropdownMenuItem onSelect={(event) => { event.preventDefault(); catalog.reload(); }}>retry</DropdownMenuItem></>
@@ -86,7 +91,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
         <Button variant="ghost" size="icon-lg" className="size-11" type="button" aria-label="new page chat" data-write-surface={WRITE_SURFACE.pageChatNew} title={newReason ?? "new page chat"} aria-describedby={newReason ? "page-chat-new-reason" : !newChat ? "tab-authority-description" : undefined} disabled={!newChat} onClick={newChat}><Plus aria-hidden="true" /></Button>
         <DropdownMenu modal={false} open={popup === "modes"} onOpenChange={(open) => changePopup("modes", open)}>
           <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-lg" className="size-11" ref={menu} aria-label="page chat options"><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger>
-          <DropdownMenuContent className={menuStyle} data-page-chat-popup="modes" align="end" aria-label="page chat options" onEscapeKeyDown={(event) => { if (confirmation !== null) { event.preventDefault(); finishConfirmation(); } }}>
+          <DropdownMenuContent className={menuStyle} data-page-chat-popup="modes" align="end" aria-label="page chat options" onCloseAutoFocus={() => restoreMenuFocus(menu.current)} onEscapeKeyDown={(event) => { if (confirmation !== null) { event.preventDefault(); finishConfirmation(); } }}>
             {modes.map((mode, index) => <div key={mode.id} role="none">
               <DropdownMenuCheckboxItem ref={(node) => { modeItems.current[index] = node; }} className="min-h-11" checked={mode.checked} data-write-surface={mode.id}
                 disabled={Boolean(reason(mode) || !mode.action)} title={reason(mode)} aria-describedby={reason(mode) ? `${mode.id}-reason` : undefined}

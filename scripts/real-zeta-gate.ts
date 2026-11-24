@@ -3268,7 +3268,7 @@ with _database() as db:
       await act();
       const context = `${page.viewportSize()!.width}px ${await trigger.getAttribute("aria-haspopup")}: ${name}`;
       if (await trigger.getAttribute("aria-expanded") !== "false") throw new Error(`${context} did not close the popup`);
-      if (!await focus.evaluate((node) => node === document.activeElement)) throw new Error(`${context} left focus on the wrong element`);
+      await waitFor(() => focus.evaluate((node) => node === document.activeElement), `${context} focus return`);
     }
   };
   const popupPointers = async () => {
