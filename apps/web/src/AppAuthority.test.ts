@@ -1,7 +1,7 @@
 import "./test-dom";
 import { expect, spyOn, test } from "bun:test";
 import { act, createElement } from "react";
-import type { RenderResult } from "@testing-library/react";
+import { screen, type RenderResult } from "@testing-library/react";
 
 import { isMac } from "./keyboard";
 import { draftStore } from "./draftStore";
@@ -635,8 +635,8 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
     await app.findByRole("heading", { name: /fixture task/ });
     if (spawning) {
       await click(app.getByRole("button", { name: "+ spawn agent" }));
-      await app.findByRole("option", { name: "fixture-profile" });
-      await change(app.getByRole("combobox", { name: "profile" }), "fixture-profile");
+      await keydown(app.getByRole("combobox", { name: "profile" }), "Enter");
+      await click(await screen.findByRole("option", { name: "fixture-profile" }));
       await change(app.getByRole("textbox", { name: "task" }), "reviewed task");
       await act(async () => { fireEvent.submit((select(app, tag(id)) as HTMLButtonElement).form!); });
     } else await click(select(app, tag(id)));
