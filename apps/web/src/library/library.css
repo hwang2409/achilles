@@ -83,7 +83,8 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 @media (pointer: coarse) {
   .library :is(.library-text button, .library-more button, .library-skipped summary) { min-height: 44px; }
 }
-.library-snapshot .library-new { border: 1px solid var(--g1-border); white-space: nowrap; }
+/* the header action is borderless, like refresh beside it and the page header actions */
+.library-snapshot .library-new { border-color: transparent; white-space: nowrap; }
 .library-control { flex-basis: 100%; margin: 0; font-size: inherit; color: var(--fulcrum-warn); text-align: right; }
 .library-saved { padding: 10px 24px; border-bottom: 1px solid var(--g1-rule); font-size: inherit; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; }
 .library-saved p { margin: 0; grid-column: 1; overflow-wrap: anywhere; }

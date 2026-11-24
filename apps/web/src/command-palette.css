@@ -9,7 +9,7 @@
 .palette-input input:focus-visible { box-shadow: none; }
 .palette-input:has(input:focus-visible) { border-bottom-color: var(--g1-accent); }
 .palette-input input::placeholder { color: var(--g1-muted); }
-.palette-input kbd, .command-palette footer { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; }
+.palette-input kbd, .command-palette footer { color: var(--fulcrum-muted); font-size: inherit; }
 
 .palette-results { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
 .palette-results > div + div { border-top: 1px solid var(--fulcrum-border); }
