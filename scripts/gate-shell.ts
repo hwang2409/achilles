@@ -124,7 +124,7 @@ export async function gateShell(
     if (!await sidebar.evaluate((element) => element.contains(document.activeElement))) throw new Error("focus escaped the zoomed drawer");
     await capture("v5-drawer-390x844-200percent-reduced-motion.png");
     await page.keyboard.press("Escape");
-    if (!await menu.evaluate((button) => button === document.activeElement)) throw new Error("zoomed drawer did not return focus");
+    await waitFor(() => menu.evaluate(button => button === document.activeElement), "zoomed drawer returned focus to open menu");
   } finally {
     await page.evaluate(() => { document.documentElement.style.zoom = ""; });
     await page.emulateMedia({ reducedMotion: "no-preference" });

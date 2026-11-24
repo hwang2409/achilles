@@ -71,6 +71,11 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await waitFor(async () => !(await isFocused(field)), "esc in NORMAL leaves the composer");
 
   const settingsKey = () => page.keyboard.press("ControlOrMeta+Comma");
+  const prepareSettings = async () => {
+    await settingsKey();
+    await settings.waitFor({ timeout: 5_000 });
+    await waitFor(() => settings.evaluate(dialog => dialog.contains(document.activeElement)), "settings ready for layered shortcut");
+  };
   const paletteKey = () => page.keyboard.press("ControlOrMeta+k");
   const paletteButton = page.getByRole("button", { name: "command palette", exact: true });
   const paletteCommand = (name: string) => async () => { await paletteKey(); await runCommand(name, name); };
@@ -82,22 +87,41 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
     { name: "palette button", act: () => paletteButton.click(), top: palette, focus: paletteInput },
     { name: "palette settings command", act: paletteCommand("display settings"), top: settings },
     { name: "settings shortcut over palette", prepare: paletteKey, act: settingsKey, top: settings },
-    { name: "palette while settings closes", prepare: settingsKey, act: async () => { await page.keyboard.press("Escape"); await paletteKey(); }, top: palette, focus: paletteInput },
-    { name: "palette over settings", prepare: settingsKey, act: paletteKey, top: palette, focus: paletteInput, underlying: settings },
+    { name: "palette while settings closes", prepare: prepareSettings, act: async () => { await page.keyboard.press("Escape"); await paletteKey(); }, top: palette, focus: paletteInput },
+    { name: "reopen closing settings", prepare: prepareSettings, act: async () => {
+      // Dispatch both events in the same browser turn, before close autofocus can run.
+      await settings.evaluate(dialog => {
+        const control = dialog.querySelector("button")!;
+        control.focus();
+        control.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        control.dispatchEvent(new KeyboardEvent("keydown", { key: ",", bubbles: true, metaKey: navigator.platform.includes("Mac"), ctrlKey: !navigator.platform.includes("Mac") }));
+      });
+    }, top: settings },
+    { name: "return to settings below shortcuts and palette", prepare: async () => {
+      await prepareSettings();
+      await paletteCommand("keyboard shortcuts")();
+      await closeButton.waitFor();
+    }, act: async () => {
+      await paletteCommand("display settings")();
+      await palette.waitFor({ state: "hidden", timeout: 5_000 });
+      await sheet.waitFor({ state: "hidden", timeout: 5_000 });
+    }, top: settings },
+    { name: "palette over settings", prepare: prepareSettings, act: paletteKey, top: palette, focus: paletteInput, underlying: settings },
     { name: "palette shortcuts command", act: paletteCommand("keyboard shortcuts"), top: sheet, focus: closeButton },
-    { name: "palette shortcuts over settings", prepare: settingsKey, act: paletteCommand("keyboard shortcuts"), top: sheet, focus: closeButton, underlying: settings },
+    { name: "palette shortcuts over settings", prepare: prepareSettings, act: paletteCommand("keyboard shortcuts"), top: sheet, focus: closeButton, underlying: settings },
   ];
   for (const { name, prepare, act, top, focus, underlying } of cases) {
     await page.locator("main[data-main-pane]").focus();
     await prepare?.();
     await act();
     await top.waitFor({ state: "visible", timeout: 5_000 });
+    if (await top.getAttribute("data-state") !== "open") throw new Error(`${name}: top overlay is closing`);
     await waitFor(() => focus ? isFocused(focus) : top.evaluate(dialog => dialog.contains(document.activeElement)), `${name} moved focus into the top overlay`);
     if (name === "question mark") await capture("shortcuts-sheet-1440x900.png");
     await page.keyboard.press("Escape");
     await top.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => { throw new Error(`${name}: Escape left the top overlay open`); });
     if (underlying) {
-      if (!await underlying.isVisible()) throw new Error(`${name}: Escape closed the underlying settings`);
+      await waitFor(() => underlying.isVisible(), `${name}: underlying settings stayed open after Escape`);
       await page.keyboard.press("Escape");
       await underlying.waitFor({ state: "hidden", timeout: 5_000 });
     }
@@ -122,6 +146,7 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.keyboard.press("ControlOrMeta+k");
+  await gateWait.playwright(palette, "waitFor", { state: "visible", timeout: 10_000 });
   const otherPage = await palette.getByRole("group", { name: "pages" }).getByRole("option").evaluateAll((options) => options.find((option) => option.querySelector("small")?.textContent !== "/")?.querySelector("span")?.textContent);
   if (!otherPage) throw new Error("no second page in the palette");
   await runCommand(otherPage, otherPage);

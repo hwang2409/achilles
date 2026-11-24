@@ -172,7 +172,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu");
   await menu.click();
   const sidebar = page.locator("[data-shell-nav]");
-  // hold the drawer at the first frame of its slide-in, so Tab is pressed while the drawer is still off screen.
+  // hold the drawer at the first frame of its fade-in, so Tab is pressed before the drawer is visible.
   const drawerMotion = page.getByRole("dialog", { name: "navigation menu" });
   await drawerMotion.evaluate((element) => Promise.all(element.getAnimations().map(async (animation) => { animation.pause(); await animation.ready; animation.currentTime = 0; })));
   await gateWait.playwright(page, "waitForFunction", () => document.querySelector("[data-shell-nav]")?.contains(document.activeElement)).catch(() => { throw new Error("opening the drawer did not move focus into it"); });
@@ -203,6 +203,8 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   if (!await drawerSettings.evaluate((dialog) => dialog.contains(document.activeElement)) || await drawerSettingsAfterTabHandle.evaluate((node) => node === document.activeElement)) throw new Error(`native settings reverse Tab did not advance inside the open drawer: before=${JSON.stringify(drawerSettingsBeforeTab)} afterTab=${JSON.stringify(drawerSettingsAfterTab)} active=${JSON.stringify(drawerSettingsAfterShiftTab)}`);
   await page.keyboard.press("Escape");
   await gateWait.playwright(drawerSettings, "waitFor", { state: "hidden" });
+  // Radix releases the inner focus scope in its close-autofocus callback after unmount.
+  await gateWait.playwright(page, "waitForFunction", () => document.querySelector("[data-shell-nav]")?.contains(document.activeElement), undefined, { timeout: 5_000 });
   await last.focus();
   await page.keyboard.press("Tab");
   if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer focus trap did not resume after native settings closed");

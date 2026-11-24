@@ -182,8 +182,8 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     </main>
     {/* outside main and the drawer, so it is never inert or aria-hidden */}
     <span ref={liveRegion} className="sr-only" role="status">{spoken}</span>
-    {overlays.layers.map(({ kind, closing }) => {
-      const lifecycle = { open: !closing, onClose: () => overlays.dismiss(kind), restoreFocus: () => overlays.closed(kind) };
+    {overlays.layers.map(({ id: kind, phase }) => {
+      const lifecycle = { open: phase === "open", onClose: () => overlays.dismiss(kind), restoreFocus: () => overlays.closed(kind) };
       if (kind === "settings") return <SettingsDialog key={kind} {...lifecycle} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />;
       if (kind === "shortcuts") return <ShortcutsSheet key={kind} {...lifecycle} />;
       return <CommandPalette key={kind} {...lifecycle} commands={commands} pages={pageEntries} searchChats={nav.searchChats(dismissDrawer)} />;
