@@ -583,11 +583,11 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, createM
     {docked ? history : <div className="flex shrink-0 items-center gap-2" data-chat-actions="">
       <Badge variant="outline" role="status" className="max-[440px]:sr-only" hidden={state === "idle"} data-chat-status={state}>{stateLabel}</Badge>
       {foldMarkers}
-      <div className="hidden items-center gap-2 @min-[760px]:flex"><Badge variant="outline">{approvalLabel}</Badge>{createButton}{history}</div>
+      <div className="hidden items-center gap-2 @min-[760px]:flex"><Badge variant="outline" aria-label={approvalLabel.toLowerCase()}>{approvalLabel}</Badge>{createButton}{history}</div>
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild><Button ref={overflowButton} variant="ghost" size="icon-lg" className="size-11 @min-[760px]:hidden" aria-label="chat options"><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger>
         <DropdownMenuContent align="end" aria-label="chat options">
-          <DropdownMenuLabel>{approvalLabel}</DropdownMenuLabel>
+          <DropdownMenuLabel aria-label={approvalLabel.toLowerCase()}>{approvalLabel}</DropdownMenuLabel>
           <DropdownMenuItem data-write-surface={WRITE_SURFACE.headerCreate} aria-label={modeName} disabled={!createMode.available || createMode.pending} onSelect={() => void createMode.toggle()}>{modeLabel}</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onHistory(overflowButton.current)}>History</DropdownMenuItem>
         </DropdownMenuContent>
