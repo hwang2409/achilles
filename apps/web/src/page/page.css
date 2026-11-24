@@ -86,7 +86,7 @@
 }
 @media (width < 360px) { .metric-strip { --metric-track-floor: 128px; --metric-repeat: auto-fit; } }
 .record-count { margin-inline-start: var(--g1-space-1); font-weight: 400; }
-.page-head h1::first-letter, .page-lead::first-letter, .record-list h2::first-letter, .page-crumb::first-letter { text-transform: uppercase; }
+.page-head h1::first-letter, .record-list h2::first-letter, .page-crumb::first-letter { text-transform: uppercase; }
 .record-reveal button { padding: 0; border: 0; color: var(--fulcrum-accent); background: none; font: inherit; cursor: pointer; }
 .record-reveal button:focus-visible { outline: var(--g1-focus-ring); outline-offset: 3px; }
 .record-detail dd .record-mark { margin-right: 8px; }
