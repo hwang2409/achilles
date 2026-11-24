@@ -59,13 +59,14 @@ export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, d
 }) {
   return <section className="mcp-detail" aria-label="connection detail">
     {!offline && detailOpen && <a className="mcp-back" href={surfaceHref(LIST)} onClick={(event) => go(event, LIST)}>‹ back to connections</a>}
-    {row ? <ConnectionFields row={row} shadows={shadows(row)} heading={heading} actions={children} />
-      : detailOpen ? <>
-        <h2 ref={heading} tabIndex={-1}>connection detail</h2>
-        {detailList && "failure" in detailList ? failure(detailList.failure, project)
-          : <ModuleState kind="empty" title="connection not found" detail="choose a connection from the list" />}
-      </> : null}
-    {!row && children}
+    <header className="mcp-detail-head">
+      {row ? <div><h2 ref={heading} tabIndex={-1}>{row.name}</h2>
+        <p className="mcp-detail-meta"><Status row={row} /><span>{row.scope === "user" ? "User" : "Project"} scope{shadows(row) ? ` (${shadows(row)})` : ""}</span></p></div>
+        : detailOpen ? <h2 ref={heading} tabIndex={-1}>connection detail</h2> : null}
+      {children}
+    </header>
+    {row ? <ConnectionFields row={row} /> : detailOpen && (detailList && "failure" in detailList ? failure(detailList.failure, project)
+      : <ModuleState kind="empty" title="connection not found" detail="choose a connection from the list" />)}
   </section>;
 }
 
@@ -74,14 +75,9 @@ function Status({ row }: { row: McpRow }) {
   return <span className="mcp-status" data-status={status}>{labels[status]}</span>;
 }
 
-function ConnectionFields({ row, shadows, heading, actions }: { row: McpRow; shadows: string | null; heading: Ref<HTMLHeadingElement>; actions: ReactNode }) {
+function ConnectionFields({ row }: { row: McpRow }) {
   const config = row.config;
   return <>
-    <header className="mcp-detail-head">
-      <div><h2 ref={heading} tabIndex={-1}>{row.name}</h2>
-        <p className="mcp-detail-meta"><Status row={row} /><span>{row.scope === "user" ? "User" : "Project"} scope{shadows ? ` (${shadows})` : ""}</span></p></div>
-      {actions}
-    </header>
     <div className="mcp-rule"><h3>Configuration</h3><span>Secrets are hidden</span></div>
     <dl>
       <dt>transport</dt><dd>{transportOf(row)}</dd>
