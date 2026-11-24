@@ -1,4 +1,6 @@
-import { Fragment, useMemo, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Fragment, useMemo, type ReactNode, type RefObject } from "react";
 import { parseMarkdown, type Block, type Inline } from "@fulcrum/markdown";
 
 // Resource text is untrusted: render readable markup without fetching embedded URLs.
@@ -39,14 +41,20 @@ function blocks(nodes: Block[]): ReactNode {
 
 export function ReadingMarkdown({ source }: { source: string }) {
   const body = useMemo(() => blocks(parseMarkdown(source)), [source]);
-  return <div className="ui-reading-markdown">{body}</div>;
+  return <div data-reading-markdown className="max-w-[72ch] space-y-3 wrap-anywhere [&_blockquote]:border-s-2 [&_blockquote]:ps-3 [&_ol]:list-decimal [&_ol]:ps-6 [&_ul]:list-disc [&_ul]:ps-6 [&_pre]:overflow-auto [&_pre]:bg-muted [&_pre]:p-3 [&_th]:border-b [&_td]:border-b [&_th]:p-2 [&_td]:p-2 [&_th]:text-start [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold">{body}</div>;
 }
 
-export function ReadingPanel({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return <aside className="ui-reading-panel" aria-label={title} onKeyDown={(event) => {
-    if (event.key === "Escape") { event.stopPropagation(); onClose(); }
-  }}>
-    <header><div><h2>{title}</h2><small>Untrusted text. Not sent to a model.</small></div><button type="button" className="ui-button" onClick={onClose}>Close</button></header>
-    <div className="ui-reading-body">{children}</div>
-  </aside>;
+export function ReadingPanel({ title, opener, onClose, children }: { title: string; opener: RefObject<HTMLButtonElement | null>; onClose: () => void; children: ReactNode }) {
+  return <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <SheetContent showCloseButton={false} className="w-full gap-0 sm:max-w-xl" onCloseAutoFocus={(event) => {
+      event.preventDefault();
+      opener.current?.focus();
+    }}>
+      <SheetHeader className="flex-row items-start justify-between gap-3 border-b">
+        <div className="grid min-w-0 gap-1 wrap-anywhere"><SheetTitle>{title}</SheetTitle><SheetDescription>Untrusted text. Not sent to a model.</SheetDescription></div>
+        <SheetClose asChild><Button variant="outline" type="button">Close</Button></SheetClose>
+      </SheetHeader>
+      <div className="grid min-h-0 flex-1 content-start gap-4 overflow-auto p-4 md:p-6">{children}</div>
+    </SheetContent>
+  </Sheet>;
 }

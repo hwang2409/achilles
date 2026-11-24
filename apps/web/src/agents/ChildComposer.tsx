@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { WRITE_SURFACE } from "../writeSurfaces";
@@ -27,14 +29,14 @@ export function ChildComposer({ client, row, owner, reportedAt, refreshing, refr
   if (!inspect || attachment?.client !== inspect || attachment.root !== sessionId) return null;
   const label = `send to ${agentType}`;
   const blocked = (outcome?.refreshAfter ?? -Infinity) >= reportedAt;
-  return <div className="agents-composer" aria-label={`message ${agentType}`} role="group">
-    <textarea aria-label={`message ${agentType}`} placeholder={`message ${agentType}`} value={text} rows={2} readOnly={pending}
+  return <div className="mx-4 my-2 grid gap-2 border bg-card p-2" aria-label={`message ${agentType}`} role="group">
+    <Textarea aria-label={`message ${agentType}`} placeholder={`message ${agentType}`} value={text} rows={2} readOnly={pending}
       onChange={(event) => owner.edit(id, event.target.value)} />
-    <div className="agents-composer-actions">
+    <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
       <span role="status">{pending ? "sending…" : outcome?.message ?? "zeta queues the message for the child’s next safe point."}</span>
-      {blocked && <button type="button" disabled={refreshing} onClick={refresh}>refresh run</button>}
-      <button type="button" data-write-surface={WRITE_SURFACE.agentsSend} disabled={!text.trim() || pending || blocked}
-        onClick={() => void owner.send({ sessionId, runId }, reportedAt)}>{label}</button>
+      {blocked && <Button variant="outline" type="button" disabled={refreshing} onClick={refresh}>refresh run</Button>}
+      <Button variant="outline" type="button" data-write-surface={WRITE_SURFACE.agentsSend} disabled={!text.trim() || pending || blocked}
+        onClick={() => void owner.send({ sessionId, runId }, reportedAt)}>{label}</Button>
     </div>
   </div>;
 }

@@ -1,3 +1,5 @@
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Confirmation, reviewText } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { loginIdentity, type createAccountLogin, type LoginTarget } from "./accountLogin";
@@ -14,7 +16,7 @@ export function AccountLoginStatus({ attempt, login, available, canSignIn, signI
   signIn: (target: LoginTarget, opener: HTMLButtonElement) => void;
 }) {
   const receipt = "at" in attempt ? attempt : null;
-  return <section className="account-login" data-state={attempt.state} aria-label="browser sign-in">
+  return <Alert role="region" className="my-2 max-w-2xl gap-3 border-s-2 border-s-ring p-4 wrap-anywhere data-[state=failed]:border-s-destructive data-[state=blocked]:border-s-destructive data-[state=unknown]:border-s-destructive [&_h3]:font-semibold [&_p]:my-2" data-state={attempt.state} aria-label="browser sign-in">
   <div role="status">
     <h3>{loginIdentity(attempt.target)}</h3>
     <p>{attempt.state === "starting" ? "starting browser sign-in…"
@@ -44,7 +46,7 @@ export function AccountLoginStatus({ attempt, login, available, canSignIn, signI
     effect={reviewText("cancel this pending browser sign-in? a credential commit already in progress may still finish.")}
     execute={async () => { await login.cancel(); return cancelledReview; }} checkResult={async () => cancelledReview} onCommitted={() => {}} />}
   {canSignIn && receipt && ["failed", "blocked", "idle", "contention"].includes(receipt.state)
-    && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
-      onClick={event => signIn(receipt.target, event.currentTarget)}>try again</button>}
-</section>;
+    && <Button variant="outline" className="min-h-11 w-fit max-w-full whitespace-normal" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
+      onClick={event => signIn(receipt.target, event.currentTarget)}>try again</Button>}
+</Alert>;
 }

@@ -1,4 +1,5 @@
-import { createPortal } from "react-dom";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { ReadingMarkdown, ReadingPanel } from "../surface/ReadingPanel";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
@@ -7,7 +8,6 @@ import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
 import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
 import { LibraryEdit, LibraryEditor, uneditable, whereText, type CreateDraft, type EditDraft } from "./LibraryEditor";
 import { type LibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, savedNotice } from "./libraryWrites";
-import "./library.css";
 
 const tabs = surfaceRoutes.filter(({ id }) => id === "skills" || id === "agent-profiles");
 const narrow = "(max-width: 760px), (max-height: 500px)";
@@ -238,19 +238,19 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     action={catalog.problem.retry ? { label: "retry", run: refresh } : undefined} />;
   else if (catalog.state === "invalid") content = <ModuleState kind="failed" title="could not read the catalog" detail="refresh to try the active session snapshot again." />;
   else if (catalog.state === "empty") content = reads.catalog
-    ? <div className="library-empty">
+    ? <div className="[&_details]:mx-4">
       <ModuleState kind="empty" title={`no ${title} found`} detail="zeta reported no entries in the effective scope." />
       {catalog.skipped && <SkippedFiles skipped={catalog.skipped} />}
     </div>
     : <ModuleState kind="empty" title={`no ${title} in this snapshot`} detail="the active session did not report any entries for this catalog." />;
-  else if (catalog.state === "no-session") content = <div className="library-unavailable">
+  else if (catalog.state === "no-session") content = <div className="[&>a]:mx-4 [&>a]:underline">
     <ModuleState kind="unsupported" title="no active session" detail="this zeta only reports library catalogs for an active session." />
     <a href={surfaceHref(chatsRoute.path)}>open a chat</a>
   </div>;
-  else content = <div className="library-layout ui-reading-host" data-detail={Boolean(selected)}>
+  else content = <div className="group grid min-h-0 flex-1 min-[761px]:[@media(min-height:501px)]:grid-cols-[minmax(245px,37%)_minmax(0,1fr)]" data-detail={Boolean(selected)}>
     <LibraryList view={catalog} kind={kind} title={title} live={reads.catalog} selected={selected} query={query} onQuery={setQuery}
       more={more} onLoadMore={() => void loadMore()} onPick={pick} search={search} focusNew={focusNew} />
-    <section className="library-detail" aria-label="catalog detail" onKeyDown={(event) => {
+    <section className="min-w-0 overflow-auto p-4 wrap-anywhere max-[760px]:group-data-[detail=false]:hidden [@media(max-height:500px)]:group-data-[detail=false]:hidden md:p-8 [&_h2]:text-xl [&_h2]:font-semibold" aria-label="catalog detail" onKeyDown={(event) => {
       // Escape returns to the list: the selected row on desktop, the list view on narrow layouts.
       if (event.key !== "Escape" || event.defaultPrevented || !selected) return;
       event.preventDefault();
@@ -258,13 +258,13 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
       else (lastRow.current?.isConnected ? lastRow.current : search.current)?.focus();
     }}>
       {selected ? <>
-        <button type="button" className="library-back" onClick={backToList}>‹ back to {title}</button>
+        <Button variant="outline" type="button" className="mb-4 min-h-10 min-[761px]:[@media(min-height:501px)]:hidden" onClick={backToList}>‹ back to {title}</Button>
         <h2 ref={detailHeading} tabIndex={-1}>{selected.name}</h2>
-        <p className="library-description">{selected.description}</p>
-        <dl className="library-fields">
+        <p className="mt-2 mb-4 text-pretty text-muted-foreground">{selected.description}</p>
+        <dl className="divide-y border-y [&>div]:grid [&>div]:grid-cols-[minmax(6rem,1fr)_minmax(0,2fr)] [&>div]:gap-2 [&>div]:py-2 [&_dt]:text-muted-foreground">
           <Field label="source">{selected.source}{!selected.editable && " · read-only"}</Field>
           <Metadata row={selected} />
-          {selected.diagnostics?.items.length ? <Field label="warnings"><ul className="library-diagnostics">
+          {selected.diagnostics?.items.length ? <Field label="warnings"><ul className="space-y-1 text-sm text-muted-foreground">
             {selected.diagnostics.items.map((message, i) => <li key={i}>{message}</li>)}
             {selected.diagnostics.more > 0 && <li>{selected.diagnostics.more} more</li>}
           </ul></Field> : null}
@@ -276,36 +276,36 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
             setSelection(null);
             refresh();
           }} />
-        : <aside className="library-notice">
+        : <aside className="mt-4 grid gap-2 border border-dashed p-4 text-sm text-muted-foreground">
           <strong>metadata only</strong>
           <p>reading {noun} text requires a newer zeta.</p>
           {!selected.diagnostics && <p>diagnostics unavailable on this zeta.</p>}
         </aside>}
-      </> : <p className="library-description">select {kind === "skills" ? "a skill" : "an agent profile"} to see its metadata.</p>}
+      </> : <p className="mt-2 mb-4 text-pretty text-muted-foreground">select {kind === "skills" ? "a skill" : "an agent profile"} to see its metadata.</p>}
     </section>
   </div>;
   return <ModuleFrame title={`library / ${title}`}>
-    <div className="library">
-      <div className="library-bar">
-        <nav className="ui-tabs" aria-label="library catalogs">
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
+        <nav className="flex flex-wrap gap-1 [&_a]:inline-flex [&_a]:min-h-10 [&_a]:items-center [&_a]:px-3 [&_a]:text-muted-foreground [&_a]:hover:bg-accent [&_a[aria-current]]:bg-accent [&_a[aria-current]]:text-accent-foreground" aria-label="library catalogs">
           {tabs.map((tab) => <a key={tab.id} href={surfaceHref(tab.path)} aria-current={tab.id === kind ? "page" : undefined}>{tab.label}</a>)}
         </nav>
-        <div className="library-snapshot">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span data-live={reads.catalog || undefined}>{reads.catalog ? "Effective scope" : "Session snapshot may be stale"}</span>
-          <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
-          {write && !creating && !editing && <button type="button" className="library-new ui-button" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
+          <Button variant="outline" type="button" aria-disabled={!catalog} onClick={refresh}>refresh</Button>
+          {write && !creating && !editing && <Button variant="outline" type="button" className="min-h-10" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
             ref={newButton}
-            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
+            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</Button>}
         </div>
-        {!creating && !editing && (controlFeedback || (write && !write.allowed)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
+        {!creating && !editing && (controlFeedback || (write && !write.allowed)) && <p id="library-control-feedback" role="status" className="text-sm text-muted-foreground">{controlFeedback ?? REFUSED_NOTICE}</p>}
       </div>
-      {saved && <div role="status" className="library-saved">
+      {saved && <div role="status" className="my-4 flex flex-wrap items-center gap-2 border-s-2 border-s-ring ps-3 text-sm">
         <p>{savedNotice(saved.name, saved.where)}</p>
-        {saved.redacted && <p className="library-flag">{REDACTED_NOTICE}</p>}
-        <button type="button" aria-label={`dismiss the notice for ${saved.name}`} onClick={() => {
+        {saved.redacted && <p className="text-sm text-muted-foreground">{REDACTED_NOTICE}</p>}
+        <Button variant="outline" type="button" aria-label={`dismiss the notice for ${saved.name}`} onClick={() => {
           setSaved(null);
           (newButton.current ?? detailHeading.current ?? search.current)?.focus();
-        }}>dismiss</button>
+        }}>dismiss</Button>
       </div>}
       {creating && write && createDraft ? <LibraryEditor client={client} kind={kind} writer={write.writer} rows={rows}
         draft={createDraft} onDraft={(draft) => write.drafts.set(draftKey, draft)} catalogMethod={reads.catalog ? methods.catalog : null}
@@ -359,34 +359,34 @@ function LibraryList({ view, kind, title, live, selected, query, onQuery, more, 
   const term = query.trim().toLowerCase();
   const matches = rows.filter((row) => [row.name, row.description, ...("keywords" in row ? row.keywords : [])]
     .some((text) => text.toLowerCase().includes(term)));
-  return <section ref={list} className="library-list" aria-label={`${title} catalog`}>
-    <div className="library-filter">
-      <input ref={search} type="search" aria-label={`filter ${title}`} placeholder={kind === "skills" ? "filter by name or keyword" : "filter by name or description"}
+  return <section ref={list} className="min-w-0 overflow-auto [scrollbar-width:thin] max-[760px]:group-data-[detail=true]:hidden [@media(max-height:500px)]:group-data-[detail=true]:hidden md:border-e" aria-label={`${title} catalog`}>
+    <div className="flex items-center gap-3 border-b p-4 [&_span]:shrink-0 [&_span]:text-xs [&_span]:tabular-nums [&_span]:text-muted-foreground">
+      <Input ref={search} type="search" aria-label={`filter ${title}`} placeholder={kind === "skills" ? "filter by name or keyword" : "filter by name or description"}
         value={query} onChange={(event) => onQuery(event.target.value)} />
       <span role="status">{term ? `${matches.length} of ${rows.length}` : matches.length} {partial ? "loaded" : term ? "" : "found"}</span>
     </div>
     {live && !rows.some(({ source }) => source === "project") &&
-      <p className="library-hint">No project {kind === "skills" ? "skills" : "profiles"} found. Zeta looks in .zeta/{kind === "skills" ? "skills" : "agents"} in the open chat's project</p>}
-    {matches.length === 0 && <p className="library-no-matches">{partial ? "no matches in the loaded rows. load more to search the rest." : "no matches. try a different search."}</p>}
+      <p className="px-4 py-2 text-sm text-muted-foreground">No project {kind === "skills" ? "skills" : "profiles"} found. Zeta looks in .zeta/{kind === "skills" ? "skills" : "agents"} in the open chat's project</p>}
+    {matches.length === 0 && <p className="px-4 py-3 text-sm text-muted-foreground">{partial ? "no matches in the loaded rows. load more to search the rest." : "no matches. try a different search."}</p>}
     {sourceTiers.map((source) => {
       const group = matches.filter((row) => row.source === source);
-      return group.length > 0 && <section className="library-group" key={source} aria-labelledby={`library-${source}`}>
+      return group.length > 0 && <section className="[&_h2]:flex [&_h2]:justify-between [&_h2]:px-4 [&_h2]:pt-3 [&_h2]:pb-1 [&_h2]:text-sm [&_h2]:text-muted-foreground" key={source} aria-labelledby={`library-${source}`}>
         <h2 id={`library-${source}`}>{source[0].toUpperCase() + source.slice(1)} <small>{group.length}{partial && " loaded"}{problemCount(group)}</small></h2>
         <ul>
           {group.map((row) => <li key={row.name}>
             {/* detail 0: activated by Enter or Space, not a pointer. */}
-            <button type="button" data-row={row.name} aria-current={row === selected || undefined} onClick={(event) => onPick(row, event.currentTarget, event.detail === 0)}>
+            <Button variant="ghost" className="grid h-auto min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-0.5 rounded-none border-b px-4 py-2 text-start whitespace-normal wrap-anywhere aria-[current=true]:bg-accent [&>span]:col-span-2 [&>span]:line-clamp-2 [&>span]:text-xs [&>small]:text-xs [&>small]:text-muted-foreground" type="button" data-row={row.name} aria-current={row === selected || undefined} onClick={(event) => onPick(row, event.currentTarget, event.detail === 0)}>
               <strong>{row.name}</strong>
               {!row.editable && <small>read-only</small>}
               <span>{row.description}</span>
-              {row.diagnostics?.items.length ? <span className="library-warning">warning · {row.diagnostics.items[0]}</span> : null}
-            </button>
+              {row.diagnostics?.items.length ? <span className="text-destructive">warning · {row.diagnostics.items[0]}</span> : null}
+            </Button>
           </li>)}
         </ul>
       </section>;
     })}
-    {view.nextOffset !== null && <div className="library-more">
-      <button type="button" aria-disabled={more === "loading"} onClick={onLoadMore}>{more === "loading" ? "loading more…" : "load more"}</button>
+    {view.nextOffset !== null && <div className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm [&_span]:text-destructive">
+      <Button variant="outline" type="button" aria-disabled={more === "loading"} onClick={onLoadMore}>{more === "loading" ? "loading more…" : "load more"}</Button>
       {typeof more === "object" && <span role="alert">could not load more: {more.message}</span>}
     </div>}
     {view.skipped && <SkippedFiles skipped={view.skipped} />}
@@ -395,7 +395,7 @@ function LibraryList({ view, kind, title, live, selected, query, onQuery, more, 
 
 function SkippedFiles({ skipped }: { skipped: Skipped }) {
   const total = skipped.items.length + skipped.more;
-  return skipped.items.length > 0 && <details className="library-skipped">
+  return skipped.items.length > 0 && <details data-library-skipped className="grid gap-2 border-t p-4 text-sm text-muted-foreground [&>summary]:cursor-pointer [&>ul]:mt-2 [&>ul]:list-disc [&>ul]:ps-5">
     <summary>{total} {total === 1 ? "file" : "files"} skipped or shadowed</summary>
     <ul>
       {skipped.items.map(({ source, file, reason }, i) => <li key={i}><span>{source} · {file}</span> {reason}</li>)}
@@ -414,7 +414,7 @@ function LibraryText({ client, method, row, noun, edit, onGone }: { client: Zeta
   const [announcement, setAnnouncement] = useState("");
   const pending = useRef<AbortController | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const close = () => { pending.current?.abort(); setReveal(null); requestAnimationFrame(() => opener.current?.focus()); };
+  const close = () => { pending.current?.abort(); setReveal(null); };
   const region = useRef<HTMLDivElement>(null);
   useEffect(() => () => pending.current?.abort(), []);
   useEffect(() => {
@@ -444,25 +444,24 @@ function LibraryText({ client, method, row, noun, edit, onGone }: { client: Zeta
   }
 
   const gone = reveal?.state === "failed" && reveal.problem.gone;
-  const host = opener.current?.closest(".library-layout");
-  return <section className="library-text" aria-label={`${noun} text`}>
-    <p role="status" className="library-visually-hidden">{announcement}</p>
-    <button ref={opener} className="ui-button" type="button" aria-expanded={!!reveal} onClick={() => void show()}>{`show ${noun} text`}</button>
-    {reveal && host && createPortal(<ReadingPanel title={`${row.name} ${noun} text`} onClose={close}>
+  return <section className="mt-4" aria-label={`${noun} text`}>
+    <p role="status" data-library-text-announcement className="sr-only">{announcement}</p>
+    <Button variant="outline" ref={opener}  type="button" aria-expanded={!!reveal} onClick={() => void show()}>{`show ${noun} text`}</Button>
+    {reveal && <ReadingPanel title={`${row.name} ${noun} text`} opener={opener} onClose={close}>
       {reveal.state === "loading" && <p role="status">Reading {noun} text…</p>}
-      {reveal.state === "failed" && <div ref={region} tabIndex={-1} className="library-text-region">
-        <p role="alert" className="library-error">could not show the text: {reveal.problem.message}</p>
-        {reveal.problem.retry && <button type="button" className="ui-button" onClick={() => void show()}>retry</button>}
-        {gone && <button type="button" className="ui-button" onClick={onGone}>refresh list</button>}
+      {reveal.state === "failed" && <div ref={region} tabIndex={-1} className="grid gap-2 focus-visible:outline-ring">
+        <p role="alert" className="text-destructive">could not show the text: {reveal.problem.message}</p>
+        {reveal.problem.retry && <Button variant="outline" type="button" onClick={() => void show()}>retry</Button>}
+        {gone && <Button variant="outline" type="button" onClick={onGone}>refresh list</Button>}
       </div>}
-      {reveal.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={`${row.name} ${noun} text`} className="library-text-region">
-        {reveal.body.redacted && <p className="library-flag">this file has text that looks like a secret; it is shown masked here and is still in the file</p>}
-        {reveal.body.truncated && <p className="library-flag">truncated at 128 KiB</p>}
+      {reveal.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={`${row.name} ${noun} text`} className="grid gap-2 focus-visible:outline-ring">
+        {reveal.body.redacted && <p className="text-sm text-muted-foreground">this file has text that looks like a secret; it is shown masked here and is still in the file</p>}
+        {reveal.body.truncated && <p className="text-sm text-muted-foreground">truncated at 128 KiB</p>}
         <ReadingMarkdown source={reveal.body.text} />
-        {reveal.body.truncated && <p className="library-flag">text truncated at 128 KiB</p>}
+        {reveal.body.truncated && <p className="text-sm text-muted-foreground">text truncated at 128 KiB</p>}
         {edit && <EditEntry edit={edit} row={row} body={reveal.body} />}
       </div>}
-    </ReadingPanel>, host)}
+    </ReadingPanel>}
   </section>;
 }
 
@@ -471,11 +470,11 @@ function EditEntry({ edit, row, body }: { edit: EditControl; row: CatalogRow; bo
   // the read view already says the text looks like a secret and is shown masked: say only what to do.
   const why = !row.editable ? "built-in items are read-only."
     : body.redacted ? "edit it in your own editor; saving here would replace the secret with the mask." : uneditable(body);
-  if (why || !body.editable) return <p className="library-edit-why">{why}</p>;
+  if (why || !body.editable) return <p data-library-edit-why className="text-sm text-muted-foreground">{why}</p>;
   const opened = body.editable;
-  return <div className="library-text-actions">
-    <button type="button" data-write-surface="library.edit" aria-disabled={edit.taking || !edit.allowed}
-      aria-describedby={edit.feedback || !edit.allowed ? "library-control-feedback" : undefined} onClick={() => edit.start(opened)}>{edit.taking ? "taking control…" : "edit"}</button>
+  return <div className="flex flex-wrap items-center gap-2">
+    <Button variant="outline" type="button" data-write-surface="library.edit" aria-disabled={edit.taking || !edit.allowed}
+      aria-describedby={edit.feedback || !edit.allowed ? "library-control-feedback" : undefined} onClick={() => edit.start(opened)}>{edit.taking ? "taking control…" : "edit"}</Button>
   </div>;
 }
 
@@ -489,7 +488,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function Metadata({ row }: { row: CatalogRow }) {
-  if ("keywords" in row) return <Field label="keywords">{row.keywords.length ? <ul className="library-keywords">
+  if ("keywords" in row) return <Field label="keywords">{row.keywords.length ? <ul className="flex flex-wrap gap-1 [&_li]:rounded-xs [&_li]:border [&_li]:px-1">
     {row.keywords.map((word, i) => <li key={i}>{word}</li>)}
   </ul> : "none"}</Field>;
   return <>

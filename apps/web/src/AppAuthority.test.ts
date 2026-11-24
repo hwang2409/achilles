@@ -1,7 +1,7 @@
 import "./test-dom";
 import { expect, spyOn, test } from "bun:test";
 import { act, createElement } from "react";
-import type { RenderResult } from "@testing-library/react";
+import { screen, type RenderResult } from "@testing-library/react";
 
 import { isMac } from "./keyboard";
 import { draftStore } from "./draftStore";
@@ -636,8 +636,8 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
     await app.findByRole("heading", { name: /fixture task/ });
     if (spawning) {
       await click(app.getByRole("button", { name: "+ spawn agent" }));
-      await app.findByRole("option", { name: "fixture-profile" });
-      await change(app.getByRole("combobox", { name: "profile" }), "fixture-profile");
+      await keydown(app.getByRole("combobox", { name: "profile" }), "Enter");
+      await click(await screen.findByRole("option", { name: "fixture-profile" }));
       await change(app.getByRole("textbox", { name: "task" }), "reviewed task");
       await act(async () => { fireEvent.submit((select(app, tag(id)) as HTMLButtonElement).form!); });
     } else await click(select(app, tag(id)));
@@ -825,10 +825,10 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(select(app, tag("library.create")));
     if (authority === "observer") {
       expect(app.getByText(/another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/)).toBeTruthy();
-      expect(app.container.querySelector(".library-editor")).toBeNull();
+      expect(Boolean(app.container.querySelector("[data-library-editor]"))).toBe(false);
       return;
     }
-    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
+    await change(select(app, '[data-library-editor] input[aria-describedby$="-rules"]'), "fixture-skill");
     await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
     await click(app.getByText("save skill", { selector: "button", exact: true }));
     expect(await app.findByText(/^saved fixture-skill to home · skills\/fixture-skill\.md\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
@@ -841,10 +841,10 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
     if (authority === "observer") {
       expect(app.getByText(/another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/)).toBeTruthy();
-      expect(app.container.querySelector(".library-editor")).toBeNull();
+      expect(Boolean(app.container.querySelector("[data-library-editor]"))).toBe(false);
       return;
     }
-    await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
+    await change(select(app, "[data-library-editor] textarea"), `${fixtureFile}more\n`);
     await click(app.getByText("save skill", { selector: "button", exact: true }));
     expect(await app.findByText(/^saved fixture-skill to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
@@ -1021,11 +1021,11 @@ test.each([
     expect(Boolean(app.container.querySelector(tag("library.create")))).toBe(observer);
     if (observer) await click(select(app, tag("library.create")));
     // after take control the form opens; without the write method it is read-only, says why, and has no save.
-    expect(Boolean(app.container.querySelector(".library-editor"))).toBe(observer);
+    expect(Boolean(app.container.querySelector("[data-library-editor]"))).toBe(observer);
     if (observer) {
       expect(Boolean(app.queryByText(/^save/, { selector: "button" }))).toBe(controller);
       expect(Boolean(app.queryByText("this zeta does not allow saving here. your text is kept; nothing was sent."))).toBe(!controller);
-      expect((select(app, ".library-editor textarea") as HTMLTextAreaElement).readOnly).toBe(!controller);
+      expect((select(app, "[data-library-editor] textarea") as HTMLTextAreaElement).readOnly).toBe(!controller);
     }
     expect(writes).toEqual([]);
   });
@@ -1054,14 +1054,14 @@ test("a typed create draft comes back after the socket drops and reconnects", as
   await withApp("controller", { ...library(true), sockets: sockets as EventTarget[] }, async (app, writes) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
-    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-draft");
-    await change(select(app, ".library-editor textarea"), "---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
+    await change(select(app, '[data-library-editor] input[aria-describedby$="-rules"]'), "fixture-draft");
+    await change(select(app, "[data-library-editor] textarea"), "---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
     await act(async () => { sockets.at(-1)!.close(); });
-    expect(app.container.querySelector(".library-editor")).toBeNull(); // the module unmounts while zeta is away
+    expect(Boolean(app.container.querySelector("[data-library-editor]"))).toBe(false); // the module unmounts while zeta is away
     await app.findByText("no skills found", {}, { timeout: 3_000 }).catch(() => undefined);
     const text = await app.findByDisplayValue(/unsaved text/, {}, { timeout: 3_000 });
     expect((text as HTMLTextAreaElement).value).toBe("---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
-    expect((select(app, '.library-editor input[aria-describedby$="-rules"]') as HTMLInputElement).value).toBe("fixture-draft");
+    expect((select(app, '[data-library-editor] input[aria-describedby$="-rules"]') as HTMLInputElement).value).toBe("fixture-draft");
     expect(writes.filter((write) => write.endsWith("_write"))).toEqual([]);
   });
 });
@@ -1078,7 +1078,7 @@ test.each([
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
     expect((await chatTabHello()).error?.code).toBe(-32001); // the library tab holds the slot while its editor is open
-    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
+    await change(select(app, '[data-library-editor] input[aria-describedby$="-rules"]'), "fixture-skill");
     await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
     await click(app.getByText("save skill", { selector: "button", exact: true }));
     await app.findByText(/^saved fixture-skill to home · skills\/fixture-skill\.md\. running sessions/);
@@ -1088,10 +1088,10 @@ test.each([
     await click(app.getByText("show skill text", { selector: "button", exact: true }));
     await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
     expect((await chatTabHello()).error?.code).toBe(-32001);
-    await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
+    await change(select(app, "[data-library-editor] textarea"), `${fixtureFile}more\n`);
     await click(app.getByText("save skill", { selector: "button", exact: true }));
     await app.findByText(/^saved fixture-skill/);
-    await click(app.getByText("close", { selector: ".library-editor button", exact: true }));
+    await click(app.getByText("close", { selector: "[data-library-editor] button", exact: true }));
   }],
 ] as const)("a library tab gives control back after %s, so a chat tab can then take control", async (_name, options, write) => {
   const roles: string[] = [];
@@ -1110,7 +1110,7 @@ test("a library tab reconnects as observer once its editor closed, and as contro
   await withApp("controller", { ...library(true), slot: true, roles, sockets: sockets as EventTarget[] }, async (app) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
-    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-draft");
+    await change(select(app, '[data-library-editor] input[aria-describedby$="-rules"]'), "fixture-draft");
     await act(async () => { sockets.at(-1)!.close(); });
     expect(await app.findByDisplayValue("fixture-draft", {}, { timeout: 3_000 })).toBeTruthy();
     expect(roles.at(-1)).toBe("controller");

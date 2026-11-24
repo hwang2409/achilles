@@ -1,3 +1,6 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Confirmation, reviewText, type Result, type ReviewText } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
@@ -51,20 +54,20 @@ const clearPrivate = (form: HTMLFormElement) => {
   for (const input of form.querySelectorAll<HTMLInputElement>('input[type="password"]')) input.value = "";
 };
 function PrivateField({ name, label }: { name: string; label: string }) {
-  return <label className="mcp-add-field">{label}<input name={name} type="password" autoComplete="off" spellCheck={false} /></label>;
+  return <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">{label}<Input name={name} type="password" autoComplete="off" spellCheck={false} /></label>;
 }
 function Fields({ field, paired = false }: { field: "argument" | "environment" | "header"; paired?: boolean }) {
   const [count, setCount] = useState(0);
   const legends = { argument: "arguments", environment: "environment", header: "headers" };
-  return <fieldset className="mcp-add-entries">
+  return <fieldset className="grid min-w-0 gap-3 border bg-card p-3 [&_legend]:px-1 [&_legend]:text-sm">
     <legend>{legends[field]}</legend>
-    {Array.from({ length: count }, (_, index) => <div className="mcp-add-entry" key={index}>
+    {Array.from({ length: count }, (_, index) => <div className="grid gap-3 sm:grid-cols-2" key={index}>
       {paired && <PrivateField name={`${field}-key`} label={`${field} ${index + 1} key`} />}
       <PrivateField name={field} label={`${field} ${index + 1}${paired ? " value" : ""}`} />
     </div>)}
-    <div className="mcp-add-buttons">
-      <button type="button" disabled={count >= LIMIT} onClick={() => setCount(count + 1)}>add {field}</button>
-      {count > 0 && <button type="button" onClick={() => setCount(count - 1)}>remove last {field}</button>}
+    <div className="flex flex-wrap gap-2">
+      <Button variant="outline" type="button" disabled={count >= LIMIT} onClick={() => setCount(count + 1)}>add {field}</Button>
+      {count > 0 && <Button variant="outline" type="button" onClick={() => setCount(count - 1)}>remove last {field}</Button>}
     </div>
   </fieldset>;
 }
@@ -143,39 +146,41 @@ export function McpAdd({ owner, snapshot, defaultScope, online, reviewTrust, clo
   const attempt = review?.attempt;
   const projectCommand = attempt?.scope === "project" && attempt.config.commandProvided;
   return <>
-    <form ref={form} className="mcp-add-form" autoComplete="off" onSubmit={begin} noValidate>
+    <form ref={form} data-connection-add-form className="grid max-w-3xl gap-4 [&_h2]:text-xl [&_h2]:font-semibold [&_p]:text-pretty [&_p]:text-muted-foreground [&_[role=alert]]:text-destructive [&>label:has(input[type=checkbox])]:flex [&>label:has(input[type=checkbox])]:min-h-11 [&>label:has(input[type=checkbox])]:items-center [&>label:has(input[type=checkbox])]:gap-2" autoComplete="off" onSubmit={begin} noValidate>
       <h2>add connection</h2>
       <p>save a definition for new sessions. adding it does not start a process or contact a server.</p>
-      <div className="mcp-add-entry">
-        <label className="mcp-add-field">scope<select name="scope" value={scope} onChange={(event) => setScope(event.currentTarget.value === "project" ? "project" : "user")}>
-          <option value="user">user</option><option value="project">zeta’s current project</option>
-        </select></label>
-        <label className="mcp-add-field">transport<select name="transport" value={http ? "http" : "stdio"} onChange={(event) => { setHttp(event.currentTarget.value === "http"); setOauth(false); }}>
-          <option value="stdio">local command (stdio)</option><option value="http">remote HTTP</option>
-        </select></label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">scope<Select name="scope" value={scope} onValueChange={(value) => setScope(value === "project" ? "project" : "user")}>
+          <SelectTrigger aria-label="scope" className="min-h-11 w-full"><SelectValue /></SelectTrigger><SelectContent>
+          <SelectItem value="user">user</SelectItem><SelectItem value="project">zeta’s current project</SelectItem>
+        </SelectContent></Select></label>
+        <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">transport<Select name="transport" value={http ? "http" : "stdio"} onValueChange={(value) => { setHttp(value === "http"); setOauth(false); }}>
+          <SelectTrigger aria-label="transport" className="min-h-11 w-full"><SelectValue /></SelectTrigger><SelectContent>
+          <SelectItem value="stdio">local command (stdio)</SelectItem><SelectItem value="http">remote HTTP</SelectItem>
+        </SelectContent></Select></label>
       </div>
-      <label className="mcp-add-field">connection name<input name="name" type="text" autoComplete="off" spellCheck={false} /></label>
+      <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">connection name<Input name="name" type="text" autoComplete="off" spellCheck={false} /></label>
       {http ? <PrivateField key="url" name="url" label="HTTP URL" /> : <PrivateField key="command" name="command" label="local command" />}
       {!http && <Fields field="argument" />}
       <Fields field="environment" paired />
       {http && <>
         <Fields field="header" paired />
         <label><input name="oauth" type="checkbox" checked={oauth} onChange={(event) => setOauth(event.currentTarget.checked)} /> configure OAuth</label>
-        {oauth && <div className="mcp-add-entry">
+        {oauth && <div className="grid gap-3 sm:grid-cols-2">
           <PrivateField name="client_id" label="client ID (optional)" />
           <PrivateField name="client_secret" label="client secret (requires a client ID)" />
         </div>}
       </>}
       <label><input name="enabled" type="checkbox" defaultChecked /> enable for new sessions</label>
-      <p className="mcp-add-limits">name: 1–256 characters. other fields: up to 8192 characters, no NUL. up to 128 arguments, environment entries, and headers each. entry keys cannot be empty. check the command or URL before confirming.</p>
+      <p className="text-xs">name: 1–256 characters. other fields: up to 8192 characters, no NUL. up to 128 arguments, environment entries, and headers each. entry keys cannot be empty. check the command or URL before confirming.</p>
       {error && <p role="alert">{error}</p>}
-      <div className="mcp-add-buttons">
-        <button ref={opener} type="submit" className="primary" disabled={!online}>review connection</button>
-        <button type="button" onClick={() => { clear(); close(); }}>cancel add</button>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" ref={opener} type="submit" disabled={!online}>review connection</Button>
+        <Button variant="outline" type="button" onClick={() => { clear(); close(); }}>cancel add</Button>
       </div>
     </form>
     <div ref={setActivity} />
-    {trustName && <button type="button" disabled={!online} onClick={() => { clear(); close(); reviewTrust(trustName); }}>open connection to review trust</button>}
+    {trustName && <Button variant="outline" type="button" disabled={!online} onClick={() => { clear(); close(); reviewTrust(trustName); }}>open connection to review trust</Button>}
     {attempt && review && <Confirmation key={review.id} level={2} external={{ opener: () => opener.current, onKeep: clear }} activity={activity ?? undefined}
       title={reviewText("review new connection")} action={reviewText("add connection")} keep={reviewText("back to fields")}
       scope={scopeLabel(attempt.scope)} current={attempt.existed ? reviewText("name already configured") : reviewText("no definition for this name")}

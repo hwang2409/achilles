@@ -27,23 +27,24 @@ test("a skill body loads only on click, and a late read for an older selection n
 
   fireEvent.click(await view.findByRole("button", { name: /alpha/ }));
   expect(calls).toStrictEqual([["skill_catalog", { scope: "effective", limit: 100 }]]);
-  expect(view.container.querySelector(".ui-reading-markdown")).toBeNull();
+  expect(document.querySelector("[data-reading-markdown]")).toBeNull();
 
   fireEvent.click(view.getByRole("button", { name: "show skill text" }));
   expect(calls.slice(1)).toStrictEqual([["skill_read", { name: "alpha", scope: "home" }]]);
-  fireEvent.click(view.getByRole("button", { name: /beta/ }));
+  fireEvent.click(view.getByRole("button", { name: "Close" }));
+  fireEvent.click(await view.findByRole("button", { name: /beta/ }));
   await act(async () => reads.get("alpha")?.("ALPHA BODY"));
 
-  expect(view.container.textContent).not.toContain("ALPHA BODY");
+  expect(document.body.textContent).not.toContain("ALPHA BODY");
   expect(view.getByRole("button", { name: "show skill text" })).toBeTruthy();
   expect(calls).toHaveLength(2);
 
   fireEvent.click(view.getByRole("button", { name: "show skill text" }));
   await act(async () => reads.get("beta")?.("<b>BETA</b> BODY"));
-  expect(view.container.querySelector(".ui-reading-markdown")?.textContent).toBe("<b>BETA</b> BODY");
-  expect(view.container.querySelector(".ui-reading-markdown b")).toBeNull();
+  expect(document.querySelector("[data-reading-markdown]")?.textContent).toBe("<b>BETA</b> BODY");
+  expect(document.querySelector("[data-reading-markdown] b")).toBeNull();
   expect(document.activeElement?.getAttribute("aria-label")).toBe("beta skill text");
-  expect(view.container.querySelector(".library-text [role=status]")?.textContent).toBe("skill text loaded");
+  expect(view.container.querySelector("[data-library-text-announcement]")?.textContent).toBe("skill text loaded");
 });
 
 test("a page with no rows still lists the files zeta skipped", async () => {
@@ -52,8 +53,8 @@ test("a page with no rows still lists the files zeta skipped", async () => {
   const view = render(createElement(LibraryModule, { client, kind: "skills", reads: { catalog: true, read: true } }));
 
   expect(await view.findByText("no skills found")).toBeTruthy();
-  expect(view.container.querySelector(".library-skipped summary")?.textContent).toBe("1 file skipped or shadowed");
-  expect(view.container.querySelector(".library-skipped li")?.textContent).toBe("home · broken/SKILL.md invalid YAML frontmatter");
+  expect(view.container.querySelector("[data-library-skipped] summary")?.textContent).toBe("1 file skipped or shadowed");
+  expect(view.container.querySelector("[data-library-skipped] li")?.textContent).toBe("home · broken/SKILL.md invalid YAML frontmatter");
 });
 
 test("a create save that lands after discard does not close or clear a form opened later", async () => {
@@ -81,7 +82,7 @@ test("a create save that lands after discard does not close or clear a form open
   await fill("fixture-second");
   await act(async () => land());
 
-  expect(view.container.querySelector<HTMLInputElement>('.library-editor input[aria-describedby$="-rules"]')?.value, "the form opened after discard").toBe("fixture-second");
+  expect(view.container.querySelector<HTMLInputElement>('[data-library-editor] input[aria-describedby$="-rules"]')?.value, "the form opened after discard").toBe("fixture-second");
   expect(write.drafts.get("skills/new")?.name).toBe("fixture-second");
   expect(await view.findByText("saved fixture-first. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
   expect(calls.filter((method) => method === "skill_write")).toHaveLength(1);
@@ -124,7 +125,7 @@ test.each([
   const again = render(createElement(LibraryModule, props));
 
   expect(await again.findByText(`saved fixture-new to ${where}. running sessions pick up the change at their next catalog refresh.`)).toBeTruthy();
-  expect(again.container.querySelector(".library-editor")).toBeNull();
+  expect(again.container.querySelector("[data-library-editor]")).toBeNull();
   expect(again.queryByText(/already exists/)).toBeNull();
   expect(writes).toEqual([expect.objectContaining({ scope })]);
 });
@@ -196,7 +197,7 @@ test("a save zeta reports as redacted closes the editor and says the file has se
   await type(view, `${fileText}token sk_fixture_0000000000\n`);
   await press(view, "save skill");
   expect(await view.findByText("this file contains text that looks like a secret; zeta stored it as written; reads show it masked")).toBeTruthy();
-  expect(view.container.querySelector(".library-editor")).toBeNull();
+  expect(view.container.querySelector("[data-library-editor]")).toBeNull();
   expect(view.container.textContent).not.toContain("sk_fixture");
 });
 
@@ -207,7 +208,7 @@ test("a stale save shows the conflict bar, sends nothing more, and loading the l
   await type(view, mine);
   zeta.file = fileText.replace("original", "theirs");
   await press(view, "save skill");
-  expect((await view.findByText("this file changed after you opened it. your text is kept.")).closest(".library-conflict")).toBeTruthy();
+  expect((await view.findByText("this file changed after you opened it. your text is kept.")).closest("[data-library-conflict]")).toBeTruthy();
   await press(view, "load the latest version first");
   await act(async () => { fireEvent.keyDown(textarea(view, /file text/), { key: "s", metaKey: true }); });
   expect(zeta.writes()).toHaveLength(1);
@@ -258,7 +259,7 @@ test("discarding unsaved text asks first, and keep editing keeps it", async () =
   await press(view, "keep editing");
   await press(view, "discard");
   await press(view, "discard changes");
-  expect(view.container.querySelector(".library-editor")).toBeNull();
+  expect(view.container.querySelector("[data-library-editor]")).toBeNull();
   expect(zeta.writes()).toEqual([]);
 });
 
@@ -272,8 +273,8 @@ test.each<[string, Fixture, string]>([
   const view = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write: writable() }));
   fireEvent.click(await view.findByRole("button", { name: /alpha/ }));
   fireEvent.click(view.getByRole("button", { name: "show skill text" }));
-  expect((await view.findByText((text) => text.startsWith(why))).className).toBe("library-edit-why");
-  expect(view.container.querySelector('[data-write-surface="library.edit"]')).toBeNull();
+  expect((await view.findByText((text) => text.startsWith(why))).closest("[data-library-edit-why]")).not.toBeNull();
+  expect(document.querySelector('[data-write-surface="library.edit"]')).toBeNull();
 });
 
 test("an open edit survives a socket drop that unmounts the library", async () => {
@@ -300,7 +301,7 @@ test("save on a tab that lost control takes control first, and sends nothing whe
   expect(view.getByText("this tab is read-only now. save takes control first, if no other tab has it.")).toBeTruthy();
   await type(view, fileText.replace("original", "edited"));
   await press(view, "save skill");
-  expect(await view.findByText("at 10:31 am another tab had control. a chat tab keeps it while it is open; try again after it finishes or closes.", { selector: ".library-error" })).toBeTruthy();
+  expect(await view.findByText("at 10:31 am another tab had control. a chat tab keeps it while it is open; try again after it finishes or closes.", { selector: "[data-library-error]" })).toBeTruthy();
   expect(zeta.writes()).toEqual([]);
   slotFree = true;
   await press(view, "save skill");
