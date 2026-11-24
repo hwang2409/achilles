@@ -4,7 +4,7 @@
 .main-pane [data-part="composer"] {
   --inset: 8px;
   width: min(var(--g1-content-max), calc(100% - 48px));
-  margin: 0 auto 24px;
+  margin: var(--g1-space-3) auto 24px; /* the top gap cuts a scrolled transcript row above the box, not on its border */
   padding: 6px;
   container-type: inline-size;
   border: 1px solid color-mix(in srgb, var(--g1-fg) 10%, transparent);
@@ -48,6 +48,11 @@
 }
 .main-pane [data-part="composer"] [data-part="composer-stop"] { border-color: var(--g1-warn); background: transparent; color: var(--g1-warn); }
 .main-pane [data-part="composer"] [data-part="composer-stop"]::before { width: 10px; height: 10px; border-radius: 2px; mask: none; }
+/* forced colors drop the icon's fill, so it takes the button text color */
+@media (forced-colors: active) {
+  .main-pane [data-part="composer"] :is([data-part="composer-submit"], [data-part="composer-stop"])::before { forced-color-adjust: none; background: ButtonText; }
+  .main-pane [data-part="composer"] [data-part="composer-submit"]:is(:disabled, [aria-disabled="true"])::before { background: GrayText; }
+}
 .main-pane [data-part="composer-reason"] { margin: 0; padding: 4px 8px; color: var(--fulcrum-muted); }
 
 @media (max-width: 639px) {

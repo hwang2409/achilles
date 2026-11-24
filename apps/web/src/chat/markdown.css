@@ -1,6 +1,8 @@
 /* Markdown rendered inside Fulcrum messages. */
 [data-part="message"] [data-part="message-content"] > :first-child { margin-top: 0; }
 [data-part="message"] [data-part="message-content"] > :last-child { margin-bottom: 0; }
+/* a reply's last paragraph keeps no margin before a tool row, so a tool group has the same 12px row gap above and below */
+[data-part="timeline"] > :has(+ * > [data-part="tool"]) [data-part="message"] > :last-child { margin-bottom: 0; }
 [data-part="message"] [data-part="md-paragraph"] { margin: 0 0 12px; }
 [data-part="message"] [data-part="md-heading"] { margin: 20px 0 8px; font-weight: 700; line-height: 1.5; text-wrap: balance; }
 [data-part="message"] [data-part="md-heading"][data-level="1"] { font-size: var(--g1-type-title); line-height: 28px; letter-spacing: -.01em; }
@@ -23,6 +25,8 @@
 [data-part="message"] [data-part="code-fence"] {
   margin: 0 0 12px;
   border: 1px solid var(--fulcrum-border);
+  border-radius: var(--g1-radius-control);
+  overflow: hidden;
   background: var(--fulcrum-surface);
 }
 /* like fulcrum's own wide blocks, a top-level fence spans the cursor gutter, so its border ends with the cards and the composer */
@@ -41,8 +45,9 @@
 [data-part="message"] [data-part="code-fence-head"] button { min-width: 32px; min-height: 24px; padding: 2px 4px; border: 0; color: var(--fulcrum-muted); font-size: inherit; }
 [data-part="message"] [data-part="code-fence-head"] button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 [data-part="message"] [data-part="code-fence"] [data-part="md-code-block"] {
-  margin: 0;
-  padding: 12px 16px;
+  /* the right inset is a margin, not padding, so a long line scrolls under a 16px gap instead of up to the border */
+  margin: 0 16px 0 0;
+  padding: 12px 0 12px 16px;
   border: 0;
   background: transparent;
   font: 13px/20px var(--achilles-code-font, var(--g1-font-mono));
@@ -60,6 +65,7 @@
   display: none;
 }
 [data-part="message"] [data-part="code-fence"] [data-part="md-code-block"][data-size="large"] {
+  margin: 0;
   padding: 0;
 }
 [data-part="message"] [data-part="code-fence"] [data-part="md-code-block"]:not([data-size="large"])::before {
@@ -68,9 +74,12 @@
 }
 [data-part="message"] [data-part="md-table"] {
   display: block;
+  width: fit-content;
   max-width: 100%;
   margin: 0 0 12px;
   overflow-x: auto;
+  border: 1px solid var(--fulcrum-border);
+  border-radius: var(--g1-radius-control);
   border-collapse: collapse;
   font-size: inherit;
   line-height: 20px;
@@ -78,12 +87,18 @@
 [data-part="message"] [data-part="md-table"] :is(th, td) {
   min-width: 8ch;
   padding: 6px 12px;
-  border: 1px solid var(--fulcrum-border);
+  border: 0 solid var(--fulcrum-border);
+  border-width: 1px 0 0 1px;
   text-align: left;
   vertical-align: top;
   overflow-wrap: normal;
   word-break: normal;
 }
+/* fulcrum lifts the max-width of a top-level table, so this stops the fit-content box at the column and its gutter */
+:is([data-part="message"], [data-part="message"]:has(> [data-wide])) > [data-part="md-table"] { max-width: calc(100% + var(--cursor-gutter)); }
+/* the rounded box draws the outer edge, so the cells draw only the inner rules */
+[data-part="message"] [data-part="md-table"] tr > :first-child { border-left-width: 0; }
+[data-part="message"] [data-part="md-table"] thead > tr > * { border-top-width: 0; }
 [data-part="message"] [data-part="md-table"] th { background: var(--fulcrum-surface); font-weight: 700; }
 [data-part="message"] [data-part="md-table"] :is(th, td)[align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
 
