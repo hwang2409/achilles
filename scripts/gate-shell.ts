@@ -16,7 +16,7 @@ export async function gateShell(
   if (JSON.stringify(grouped) !== JSON.stringify(expected)) throw new Error(`unexpected place order: ${JSON.stringify(grouped)}`);
   if (!(await places.getByRole("link", { name: "chats", exact: true }).getAttribute("aria-current"))) throw new Error("home did not select chats");
   if (await page.locator(".sidebar .page-list").count() || await page.locator(".sidebar").getByRole("button", { name: "settings", exact: true }).count()) throw new Error("sidebar duplicated a stable place");
-  await waitFor(async () => await places.locator("small").count() === 2, "only chats and pages have catalog counts");
+  if (await places.locator("small:not(.waiting-count)").count()) throw new Error("a place shows a catalog count");
   await page.keyboard.press(appShortcut("k"));
   const palette = page.getByRole("dialog", { name: "command palette" });
   const catalogPlaces = await palette.getByRole("option").evaluateAll((options) => options.flatMap((option) => {

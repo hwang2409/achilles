@@ -278,13 +278,12 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
     clearSearch: () => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); },
     searchControl: (close: () => void) => loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey(close)} placeholder="Search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>,
     counts: {
-      pages: { total: pageList.items && !pageList.error ? `${pageRows.length}${pageList.next ? "+" : ""}` : undefined },
-      chats: { total: !search && chatList.items && !chatList.error ? `${chats.length}${chatList.next ? "+" : ""}` : undefined, waiting: waitingTotal },
+      chats: { waiting: waitingTotal },
     },
     recent: (close: () => void, builds: readonly BuildRow[], onScreen: (id: string, shown: boolean) => void) => {
       const projectedBuild = (chat: Chat) => chat.purpose === "page_build" ? builds.find((row) => row.chat.session_id === chat.session_id) : undefined;
       return <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
-        <div className="list-head"><span>recent chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
+        <div className="list-head"><span>recent chats</span></div>
         {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>;
@@ -308,7 +307,7 @@ function ChatRow({ chat, build, onScreen, current, active, index, query, onSelec
   const state = chat.purpose === "page_build" ? buildTone(build) : chat.last_state;
   const label = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
   const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
-  const meta = <span><span className="chat-row-meta" title={label ? `${label} · ${chat.page_title}` : chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></span>;
+  const meta = label && <span className="chat-row-meta">{label}</span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div ref={seen} id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>

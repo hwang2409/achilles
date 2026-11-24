@@ -1,6 +1,6 @@
 .accounts-place { padding: var(--g1-page-padding); container-type: inline-size; }
 .accounts-place > h2::first-letter { text-transform: uppercase; }
-.accounts-place > h2 { font-size: var(--g1-type-page-title); letter-spacing: var(--g1-tracking-page-title); font-weight: var(--g1-weight-title); margin: 0; text-wrap: balance; }
+.accounts-place > h2 { font-size: var(--g1-type-title); font-weight: var(--g1-weight-title); margin: 0; text-wrap: balance; }
 .account-rows { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--fulcrum-border); }
 .account-rows > li { display: grid; gap: 16px; padding: 16px; border-bottom: 1px solid var(--g1-rule); overflow-wrap: anywhere; }
 .account-identity h3 { font-size: 1em; margin: 0; }
@@ -31,7 +31,7 @@
 .account-login p { margin: 8px 0; text-wrap: pretty; }
 .account-login button { min-height: 44px; }
 
-.account-stale { margin: var(--g1-space-2) 0; color: var(--g1-muted); font-size: var(--g1-type-meta); }
+.account-stale { margin: var(--g1-space-2) 0; color: var(--g1-muted); font-size: inherit; }
 .account-window meter::-webkit-meter-suboptimum-value { background: var(--g1-warn); }
 .account-window meter::-moz-meter-bar { background: var(--g1-muted); }
 .account-window meter:-moz-meter-sub-optimum::-moz-meter-bar { background: var(--g1-warn); }

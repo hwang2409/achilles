@@ -3,7 +3,6 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { DisplaySettings } from "../AppShell";
 import { Confirmation, reviewText, type ReviewText } from "../surface/Confirmation";
 import { ModuleFrame } from "../surface/ModuleState";
-import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { supportsFeature } from "../zeta";
 import { HOME_SETTINGS_FEATURE, NEEDS_OTEL, plain, readHomeSettings, receipt, STALE, telemetryChange, type HomeSettings, type Restart, type TelemetryState } from "./homeSettings";
@@ -14,32 +13,15 @@ type Props = { client: ZetaClient | null; connecting: boolean; withControl: With
 
 export function SettingsModule(props: Props) {
   const openBrowserSettings = useContext(DisplaySettings);
-  const [shown, setShown] = useState(() => ["#zeta-defaults", "#telemetry"].includes(location.hash) ? "zeta-defaults" : "browser");
-  const section = (id: string, label: string) => <a href={`#${id}`} aria-current={shown === id ? "location" : undefined}
-    onClick={(event) => {
-      // navigate first: a fragment navigation to a section that cannot take focus resets focus to the body
-      event.preventDefault();
-      location.hash = id;
-      setShown(id);
-      document.querySelector<HTMLElement>(`#${id} h2`)?.focus();
-    }}>{label}</a>;
-  return <ModuleFrame title="Settings" subtitle="Change browser preferences and Zeta defaults.">
+  return <ModuleFrame title="Settings">
     <div className="sp">
-      <nav className="sp-subnav" aria-label="settings sections">
-        {section("browser", "This browser")}
-        {section("zeta-defaults", "Zeta defaults")}
-        <a href={surfaceHref("/accounts")}>Accounts <span aria-hidden="true">→</span></a>
-        <a href={surfaceHref(connectionsRoute.path)}>Connections <span aria-hidden="true">→</span></a>
-      </nav>
       <div className="sp-content">
         <section id="browser" aria-labelledby="settings-browser">
-          <h2 id="settings-browser" tabIndex={-1}>This browser</h2>
-          <p className="sp-dim">Theme, fonts, text size, density and Vim mode. They apply to this browser only.</p>
+          <h2 id="settings-browser">This browser</h2>
           <button className="ui-button" type="button" onClick={openBrowserSettings}>Display settings</button>
         </section>
         <section id="zeta-defaults" aria-labelledby="settings-zeta">
-          <h2 id="settings-zeta" tabIndex={-1}>Zeta defaults</h2>
-          <p className="sp-dim">These apply to every Zeta on this computer.</p>
+          <h2 id="settings-zeta">Zeta defaults</h2>
           {props.client ? <ZetaDefaults {...props} client={props.client} />
             : <p className="sp-dim" role="status">{props.connecting ? "connecting to zeta…" : "zeta is not connected. retrying automatically."}</p>}
         </section>
@@ -237,9 +219,10 @@ function Defaults({ client }: { client: ZetaClient }) {
     ["Approval mode", defaults.approval === "allow" ? "Allow without asking" : defaults.approval ?? "Not set", "yolo"],
     ["Agent nesting depth", String(defaults.depth), "agents.max_depth"],
   ];
-  return <dl className="sp-defaults">
-    {rows.map(([label, value, where]) => <div key={label}>
-      <dt>{label}</dt><dd className="sp-value">{value}</dd><dd className="sp-dim">Edit <code>{where}</code> in <code>settings.toml</code>.</dd>
-    </div>)}
-  </dl>;
+  return <>
+    <dl className="sp-defaults">
+      {rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd className="sp-value">{value}</dd></div>)}
+    </dl>
+    <p className="sp-dim sp-defaults-note">Edit {rows.map(([, , where], index) => <span key={where}>{index ? ", " : ""}<code>{where}</code></span>)} in <code>settings.toml</code>.</p>
+  </>;
 }

@@ -1,29 +1,29 @@
 .agents-frame { font: var(--achilles-ui-size, 14px)/1.5 var(--achilles-ui-font, var(--g1-font-ui)); }
 .agents-frame > .agents-head { gap: 8px 16px; justify-content: space-between; flex-wrap: wrap; }
-.agents-head > span, .agents-elapsed { color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; font-size: .85em; }
+.agents-head > span, .agents-elapsed { color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; font-size: inherit; }
 .agents-split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); flex: 1; min-height: 0; }
 .agents-catalog, .agents-detail { min-width: 0; overflow: auto; scrollbar-width: thin; }
 .agents-catalog { border-inline-end: 1px solid var(--fulcrum-border); }
 .agents-filters { padding: 12px 16px; }
 .agents-filters > div { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.agents-filters label { color: var(--fulcrum-muted); flex: 0 1 auto; min-width: 0; font-size: .85em; }
+.agents-filters label { color: var(--fulcrum-muted); flex: 0 1 auto; min-width: 0; font-size: inherit; }
 .agents-filters :is(input, select), .agents-spawn-form :is(select, textarea), .agents-frame :is(.agents-catalog, .agents-detail-scroll) button:not(.agents-timeline *) { min-height: 40px; padding-inline: var(--g1-space-2); border: 1px solid var(--g1-control-border); background: var(--fulcrum-bg); color: var(--fulcrum-fg); font: inherit; }
 .agents-filters select { display: block; max-width: min(18ch, 100%); }
 .agents-filters input { width: 100%; }
 .agents-filters input::placeholder { color: var(--g1-fg-3); opacity: 1; }
-.agents-filters button { margin-inline-start: auto; font-size: .85em; }
+.agents-filters button { margin-inline-start: auto; font-size: inherit; }
 .agents-frame :is(.agents-catalog, .agents-detail-scroll) button:not(:disabled, .agents-timeline *):hover { background: var(--g1-hover); }
 .agents-frame button:disabled:not(.agents-timeline *) { color: var(--fulcrum-muted); }
 .agents-frame :is(input, select, button, a, .agents-spawn-form textarea):focus-visible:not(.agents-timeline *) { outline: var(--g1-focus-ring); outline-offset: -2px; }
-.agents-notice, .agents-lane-note { padding: 8px 16px; margin: 0; color: var(--fulcrum-muted); font-size: .85em; overflow-wrap: anywhere; }
+.agents-notice, .agents-lane-note { padding: 8px 16px; margin: 0; color: var(--fulcrum-muted); font-size: inherit; overflow-wrap: anywhere; }
 .agents-notice { background: var(--fulcrum-surface); border-bottom: 1px solid var(--fulcrum-border); }
 .agents-lane-note p { margin: 0; }
 .agents-lane-note p + p { margin-top: 4px; }
 .agents-lane { border-top: 1px solid var(--fulcrum-border); }
-.agents-lane h2 { display: flex; justify-content: space-between; gap: 8px; margin: 0; padding: 12px 16px 6px; font-size: .95em; overflow-wrap: anywhere; }
+.agents-lane h2 { display: flex; justify-content: space-between; gap: 8px; margin: 0; padding: 12px 16px 6px; font-size: inherit; overflow-wrap: anywhere; }
 .agents-lane :is(h2 small, h3) { color: var(--fulcrum-muted); font-weight: 400; }
 .agents-lane h2 small { white-space: nowrap; }
-.agents-lane h3 { margin: 8px 16px 4px; font-size: .85em; }
+.agents-lane h3 { margin: 8px 16px 4px; font-size: inherit; }
 .agents-lane ul { margin: 0 0 8px; padding: 0; list-style: none; }
 .agents-row { display: flex; align-items: center; gap: 8px; min-height: var(--g1-list-row-height); padding: 4px 16px 4px 14px; border-inline-start: var(--g1-selection-width) solid transparent; border-bottom: 1px solid var(--g1-rule); }
 .agents-row[data-nested="true"] { box-shadow: inset 1px 0 var(--fulcrum-border); }
@@ -39,16 +39,16 @@
 .agents-state[data-status="failed"] { color: var(--fulcrum-danger); }
 .agents-more { margin: 8px 16px; }
 .agents-detail { overflow-wrap: anywhere; }
-.agents-back { display: inline-flex; margin-inline: var(--g1-space-10); align-items: center; min-height: 40px; color: var(--fulcrum-accent); font-size: .85em; }
+.agents-back { display: inline-flex; margin-inline: var(--g1-space-10); align-items: center; min-height: 40px; color: var(--fulcrum-accent); font-size: inherit; }
 .agents-run-head, .agents-activity { padding: var(--g1-page-padding); }
-.agents-run-head h2 { margin: 0; font-size: var(--g1-type-page-title); letter-spacing: var(--g1-tracking-page-title); font-weight: var(--g1-weight-title); line-height: 1.3; text-wrap: balance; }
-.agents-run-head h2 span { font-size: .7em; }
+.agents-run-head h2 { margin: 0; font-size: var(--g1-type-title); font-weight: var(--g1-weight-title); line-height: 1.3; text-wrap: balance; }
+.agents-run-head h2 span { font-size: inherit; }
 .agents-run-head p { margin: 6px 0 12px; }
 .agents-run-head dl { margin: 0; border-top: 1px solid var(--g1-border); }
 .agents-run-head dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; padding-block: 8px; border-bottom: 1px solid var(--g1-rule); }
-.agents-run-head dt, .agents-activity small { color: var(--fulcrum-muted); font-size: .85em; }
+.agents-run-head dt, .agents-activity small { color: var(--fulcrum-muted); font-size: inherit; }
 .agents-run-head dd { margin: 0; font-variant-numeric: tabular-nums; }
-.agents-run-head dd a, .agents-back:hover { text-decoration: underline; }
+.agents-run-head dd a { text-decoration: underline; }
 .agents-activity { border-top: 1px solid var(--fulcrum-border); }
 .agents-activity h3 { margin: 0; font-size: 1em; }
 .agents-activity small { font-weight: 400; margin-inline-start: 8px; }
@@ -74,7 +74,7 @@
 .agents-composer textarea::placeholder { color: var(--fulcrum-muted); }
 .agents-composer textarea:focus-visible { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
 .agents-composer-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; }
-.agents-composer-actions span { flex: 1 1 16ch; color: var(--fulcrum-muted); font-size: .85em; }
+.agents-composer-actions span { flex: 1 1 16ch; color: var(--fulcrum-muted); font-size: inherit; }
 .agents-composer-actions button { min-height: 44px; max-width: 100%; margin-inline-start: auto; }
 @media (max-width: 760px), (max-height: 500px) {
   .agents-split[data-detail="true"] { display: flex; }

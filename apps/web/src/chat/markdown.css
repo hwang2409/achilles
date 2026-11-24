@@ -3,9 +3,9 @@
 [data-part="message"] [data-part="message-content"] > :last-child { margin-bottom: 0; }
 [data-part="message"] [data-part="md-paragraph"] { margin: 0 0 12px; }
 [data-part="message"] [data-part="md-heading"] { margin: 20px 0 8px; font-weight: 700; line-height: 1.5; text-wrap: balance; }
-[data-part="message"] [data-part="md-heading"][data-level="1"] { font-size: 20px; line-height: 28px; letter-spacing: -.01em; }
-[data-part="message"] [data-part="md-heading"][data-level="2"] { margin-top: 28px; font-size: var(--g1-type-reply-h2); line-height: var(--g1-leading-chat); letter-spacing: var(--g1-tracking-reply-h2); }
-[data-part="message"] [data-part="md-heading"][data-level="3"] { font-size: 14px; line-height: 22px; color: var(--fulcrum-muted); }
+[data-part="message"] [data-part="md-heading"][data-level="1"] { font-size: var(--g1-type-title); line-height: 28px; letter-spacing: -.01em; }
+[data-part="message"] [data-part="md-heading"][data-level="2"] { margin-top: 28px; font-size: var(--g1-type-title); line-height: var(--g1-leading-chat); }
+[data-part="message"] [data-part="md-heading"][data-level="3"] { font-size: inherit; line-height: 22px; color: var(--fulcrum-muted); }
 [data-part="message"] [data-part="md-list"] { margin: 0 0 12px; padding-left: 20px; }
 [data-part="message"] ul[data-part="md-list"] { padding-left: 0; list-style: none; }
 [data-part="message"] ol[data-part="md-list"] { padding-left: 28px; }
@@ -33,11 +33,10 @@
   padding: 0 8px 0 12px;
   border-bottom: 1px solid var(--fulcrum-border);
   color: var(--fulcrum-muted);
-  font-size: 12px;
+  font-size: inherit;
   line-height: 20px;
 }
-[data-part="message"] [data-part="code-fence-head"] button { min-width: 32px; min-height: 24px; padding: 2px 4px; border: 0; color: var(--fulcrum-muted); font-size: 12px; }
-[data-part="message"] [data-part="code-fence-head"] button:hover { color: var(--fulcrum-fg); background: transparent; }
+[data-part="message"] [data-part="code-fence-head"] button { min-width: 32px; min-height: 24px; padding: 2px 4px; border: 0; color: var(--fulcrum-muted); font-size: inherit; }
 [data-part="message"] [data-part="code-fence-head"] button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 [data-part="message"] [data-part="code-fence"] [data-part="md-code-block"] {
   margin: 0;
@@ -51,7 +50,7 @@
   tab-size: 2;
 }
 [data-part="message"] :is(pre, pre code, time) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
-[data-part="message"] [data-part="md-code-block"][data-language]::before { margin: -4px 0 8px; font-size: 12px; color: var(--fulcrum-muted); }
+[data-part="message"] [data-part="md-code-block"][data-language]::before { margin: -4px 0 8px; font-size: inherit; color: var(--fulcrum-muted); }
 [data-part="message"] [data-part="code-fence"]:has([data-part="md-code-block"][data-size="large"]) {
   display: contents;
 }
@@ -71,7 +70,7 @@
   margin: 0 0 12px;
   overflow-x: auto;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: inherit;
   line-height: 20px;
 }
 [data-part="message"] [data-part="md-table"] :is(th, td) {

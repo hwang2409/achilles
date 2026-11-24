@@ -35,7 +35,7 @@ export function ConnectionList({ snapshot, scope, selectScope, activeScope, row,
           const entry = snapshot[view];
           return <button key={view} type="button" ref={scope === view ? activeScope : undefined}
             aria-pressed={scope === view} disabled={offline} onClick={() => selectScope(view)}>
-            {view[0].toUpperCase() + view.slice(1)} {"rows" in entry ? <span className="ui-meta">{entry.rows.length}</span> : <span aria-label="unavailable">—</span>}
+            {view[0].toUpperCase() + view.slice(1)} {"rows" in entry ? null : <span aria-label="unavailable">—</span>}
           </button>;
         })}
       </nav>
@@ -78,7 +78,7 @@ function Status({ row }: { row: McpRow }) {
 function ConnectionFields({ row }: { row: McpRow }) {
   const config = row.config;
   return <>
-    <div className="mcp-rule"><h3>Configuration</h3><span>Secrets are hidden</span></div>
+    <div className="mcp-rule"><h3>Configuration</h3></div>
     <dl>
       <dt>transport</dt><dd>{transportOf(row)}</dd>
       {config.transport === "stdio" && <>
@@ -95,7 +95,7 @@ function ConnectionFields({ row }: { row: McpRow }) {
         <dt>client secret</dt><dd>{config.oauth.secretProvided ? "provided (redacted)" : "not provided"}</dd>
       </>}
     </dl>
-    <div className="mcp-rule"><h3>Tools <small>{row.toolCount}</small></h3><span>Reported by Zeta, not checked live</span></div>
+    <div className="mcp-rule"><h3>Tools ({row.toolCount})</h3></div>
     {row.toolCount === 0 && <ModuleState kind="empty" title="No tools reported" detail="Zeta has not reported any tools for this connection." />}
   </>;
 }

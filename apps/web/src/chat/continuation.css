@@ -3,6 +3,6 @@
   padding-block: var(--g1-space-3);
   border-top: var(--g1-border-width) solid var(--g1-rule);
   color: var(--g1-muted);
-  font-size: var(--g1-type-small);
+  font-size: inherit;
   overflow-wrap: anywhere;
 }

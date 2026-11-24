@@ -7,15 +7,14 @@ import { approvalIntent, createRoute, surfaceHref, surfaceRoutes, type SurfaceRo
 
 const groups = [...new Set(surfaceRoutes.flatMap((route) => route.group ?? []))];
 
-type PlaceCount = { total?: string; waiting?: number };
+type PlaceCount = { waiting?: number };
 
 function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: SurfaceRoute; count?: PlaceCount }) {
-  const total = count?.total;
   const waiting = count?.waiting || undefined;
   return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={route.label}>
     {route !== createRoute && <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={route.icon} /></svg>}
     <span>{route.label}</span>
-    {(total || waiting) && <small aria-hidden="true">{waiting && <span className="waiting-count">{waiting}</span>}{waiting && total && " · "}{total}</small>}
+    {waiting && <small aria-hidden="true" className="waiting-count">{waiting}</small>}
   </a>;
 }
 
@@ -50,7 +49,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
   return <aside ref={sidebar} id="surface-sidebar" className="sidebar" aria-label={narrow ? "navigation menu" : "sidebar"} role={narrow && drawer ? "dialog" : undefined} aria-modal={narrow && drawer || undefined} aria-hidden={narrow && !drawer ? true : undefined} inert={narrow && !drawer || undefined}>
     <div className="brand-row">
       <span className="brand-mark" aria-hidden="true" /><strong>achilles</strong>
-      <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected}>Zeta</span>
+      <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected} role="img" />
       {narrow && <button className="drawer-close" aria-label="close navigation" onClick={onClose}>×</button>}
     </div>
     <div className="sidebar-scroll">
@@ -62,7 +61,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
           {createMode && <button type="button" aria-label="toggle create mode for this page" aria-pressed={createMode.enabled}
             aria-busy={createMode.pending || undefined} disabled={!createMode.available || createMode.pending}
             title={createMode.error ?? "create mode for this page"} onClick={() => void createMode.toggle()}>
-            {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}<span aria-hidden="true"> {createMode.error ? "!" : "· this page"}</span>
+            {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}{createMode.error && <span aria-hidden="true"> !</span>}
           </button>}
         </div>
       </div>
@@ -73,7 +72,6 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       <div className="sidebar-destinations">
         <nav className="place-nav" aria-label="places">
           {groups.map((group) => <section aria-label={group} key={group}>
-            <h2>{group}</h2>
             {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} count={counts[route.id]} />)}
           </section>)}
         </nav>
@@ -81,7 +79,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       </div>
     </div>
     {!narrow && <footer>
-      <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span><kbd>{modKey("B")}</kbd></button>
+      <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span></button>
     </footer>}
   </aside>;
 }

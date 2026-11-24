@@ -1,35 +1,36 @@
-.command-palette, .shortcuts-sheet { padding: 0; color: var(--fulcrum-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); box-shadow: var(--g1-shadow-overlay); }
-.command-palette::backdrop, .shortcuts-sheet::backdrop { background: color-mix(in srgb, black 60%, transparent); }
+.command-palette, .shortcuts-sheet { padding: 0; color: var(--fulcrum-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
 .command-palette { width: min(680px, calc(100vw - 32px)); margin-top: 15vh; }
 .command-palette[open] { display: flex; flex-direction: column; max-height: 70vh; }
 
 .palette-input { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 20px; border-bottom: 1px solid var(--fulcrum-border); }
-.palette-input:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .palette-input > span { color: var(--fulcrum-accent); }
-.palette-input input { flex: 1; min-width: 0; padding: 0; color: inherit; font: inherit; font-size: 1.15em; background: transparent; border: 0; outline: 0; }
+.palette-input input { flex: 1; min-width: 0; padding: 0; color: inherit; font: inherit; font-size: inherit; background: transparent; border: 0; outline: 0; }
+/* the open palette is the focus context: no ring around the field, only an accent rule under it */
+.palette-input input:focus-visible { box-shadow: none; }
+.palette-input:has(input:focus-visible) { border-bottom-color: var(--g1-accent); }
 .palette-input input::placeholder { color: var(--g1-muted); }
-.palette-input kbd, .command-palette footer { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: var(--g1-type-kbd); }
+.palette-input kbd, .command-palette footer { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; }
 
 .palette-results { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
 .palette-results > div + div { border-top: 1px solid var(--fulcrum-border); }
-.palette-results h2 { margin: 0; padding: 14px 20px 6px; color: var(--fulcrum-muted); font-size: var(--g1-type-meta); font-weight: 600; }
+.palette-results h2 { margin: 0; padding: 14px 20px 6px; color: var(--fulcrum-muted); font-size: inherit; font-weight: 600; }
 .palette-option { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: 40px; box-sizing: border-box; padding: 9px 20px; cursor: pointer; }
 .palette-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-option small, .palette-option kbd { flex: none; color: var(--fulcrum-muted); }
 .palette-option:hover { background: var(--g1-hover); }
 .palette-option[aria-selected="true"] { background: var(--g1-selected); font-weight: 600; }
 .palette-results h2::first-letter, .sheet-groups h3::first-letter, .sheet-title h2::first-letter { text-transform: uppercase; }
-.palette-option :is(small, kbd) { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: var(--g1-type-meta); font-weight: 400; }
+.palette-option :is(small, kbd) { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; font-weight: 400; }
 .palette-empty { margin: 0; padding: 20px; color: var(--fulcrum-muted); }
 .command-palette footer { display: flex; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--fulcrum-border); }
 
 .shortcuts-sheet { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
 .shortcuts-sheet[open] { display: flex; flex-direction: column; }
 .sheet-title { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 20px; border-bottom: 1px solid var(--fulcrum-border); }
-.sheet-title h2 { margin: 0; font-size: 18px; }
+.sheet-title h2 { margin: 0; font-size: var(--g1-type-title); }
 .sheet-title button { padding: 5px 9px; color: var(--fulcrum-fg); font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
 .sheet-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 32px; min-height: 0; padding: 16px 20px 20px; overflow-y: auto; overscroll-behavior: contain; }
-.sheet-groups h3 { margin: 8px 0; color: var(--fulcrum-muted); font-size: var(--g1-type-meta); font-weight: 600; }
+.sheet-groups h3 { margin: 8px 0; color: var(--fulcrum-muted); font-size: inherit; font-weight: 600; }
 .sheet-groups dl { margin: 0; }
 .sheet-groups dl > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 5px 0; }
 .sheet-groups dt, .sheet-groups dd { margin: 0; }

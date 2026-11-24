@@ -1442,8 +1442,6 @@ with _database() as db:
   await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
   const pageSection = page.locator('.page-list[data-list-state="ready"]');
   await gateWait.playwright(pageSection, "waitFor");
-  const pageCount = page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).locator("small");
-  if ((await pageCount.textContent()) !== "20+") throw new Error("pages count should show 20+ while continuation exists");
   if (screenshotDir) {
     for (const [width, height] of [[1440, 900], [1440, 760], [390, 760]]) {
       await page.setViewportSize({ width, height });

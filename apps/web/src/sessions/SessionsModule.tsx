@@ -100,7 +100,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
   const owned = new Set(chats.map((chat) => chat.session_id));
   return <section className="module-frame sessions-frame">
     <header className="sessions-head ui-page-header">
-      <div><h1>Sessions</h1><p className="ui-meta">Browse Zeta sessions on this computer.</p></div>
+      <h1>Sessions</h1>
       <button type="button" className="sessions-new ui-button" onClick={newChat} disabled={!client}>New chat</button>
     </header>
     <ShellDockSlot />
@@ -127,7 +127,6 @@ function SessionCatalog({ result, online, id, owned, search, rowRefs, follow }: 
 }) {
   const { data, error, refreshing, refresh } = result;
   const rows = data.items;
-  const continuationLabel = data.complete ? "" : " loaded";
   const [query, setQuery] = useState("");
   const [projectFilter, setProject] = useState("any");
   const [statusFilter, setStatus] = useState("any");
@@ -145,7 +144,6 @@ function SessionCatalog({ result, online, id, owned, search, rowRefs, follow }: 
         {!!projects.length && <EnumListbox label="project" value={projectFilter} options={["any", ...projects]} onChange={setProject} />}
         {!!states.length && <EnumListbox label="state" value={statusFilter} options={["any", ...states]} onChange={setStatus} />}
         <button type="button" disabled={!online || refreshing} onClick={refresh}>refresh now</button>
-        <span>{shown.length} of {rows.length}{continuationLabel}</span>
       </div>
     </div>
     {online && (refreshing || !!error) && <p className="sessions-notice" role="status">{refreshing ? "refreshing…" : `showing data from ${stamp(data.reportedAt)} · refresh failed · ${readError(error)}`}</p>}
@@ -178,7 +176,7 @@ function DetailPane({ id, row, transcript, invalid, complete, reader, owned, det
     </a>}
     {invalid ? <ModuleState kind="failed" title="invalid session link" /> : row ? <SessionDetail key={row.id} row={row} reader={reader} transcript={transcript}
       owned={owned} follow={follow} continueSession={continueSession} /> : id ? <ModuleState kind="empty" title="session not in this catalog" detail={complete ? "it may have been removed." : "the catalog is incomplete."} />
-      : <ModuleState kind="empty" title="select a session" detail="read session details and transcripts without changing the session open in zeta." />}
+      : <ModuleState kind="empty" title="select a session" />}
   </section>;
 }
 

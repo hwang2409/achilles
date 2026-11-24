@@ -10,9 +10,9 @@
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   padding: var(--g1-space-2) var(--g1-space-3);
-  border: var(--g1-border-width) solid var(--g1-border);
-  border-radius: var(--g1-radius-control);
-  background: var(--g1-panel);
+  border: var(--g1-border-width) solid transparent;
+  border-radius: var(--g1-radius-container);
+  background: var(--g1-bg-subtle);
   font-weight: 400;
   overflow-wrap: anywhere;
 }
@@ -28,9 +28,8 @@
 :is([data-part="tool"], [data-part="approval"]) {
   border-width: var(--g1-border-width);
   border-radius: var(--g1-radius-control);
-  box-shadow: var(--g1-shadow-rest);
   font-family: var(--achilles-code-font, var(--g1-font-mono));
-  font-size: var(--g1-type-small);
+  font-size: inherit;
 }
 [data-part="tool"] { border-color: var(--g1-border); }
 [data-part="approval"][data-decision="approve"] { --rail: var(--g1-ok); }
@@ -42,11 +41,13 @@
   column-gap: var(--g1-space-2);
   background: var(--g1-bg-subtle);
 }
+summary[data-part="tool-header"] { cursor: pointer; }
+summary[data-part="tool-header"]:hover { background: var(--g1-hover); }
 [data-part="tool"][data-state="streaming"] > [data-part="tool-header"] { background: var(--g1-accent-tint); }
 [data-part="approval"] > [data-part="tool-header"] { background: color-mix(in srgb, var(--g1-warn-fill) 6%, var(--g1-bg)); }
 [data-part="tool-name"] { color: var(--g1-fg); }
 [data-part="tool-summary"] { color: var(--g1-muted); }
-[data-part="tool-status"] { font-size: var(--g1-type-meta); }
+[data-part="tool-status"] { font-size: inherit; }
 :is([data-part="tool-status"], [data-part="text-viewer-status"], [data-part="delivery-note"])::before {
   width: var(--g1-status-mark);
   height: var(--g1-status-mark);
@@ -69,17 +70,17 @@
 }
 .main-pane [data-part="composer"][data-error] { border-color: var(--g1-danger); }
 [data-part="composer"] button, [data-part="jump-to-approval"] { border-radius: var(--g1-radius-control); }
+/* the composer looks the same empty, typed, or focused: its buttons keep one box; only send brightens once there is text to send */
+[data-part="composer"] :is(button, button[aria-disabled="true"]) { border-color: transparent; background: transparent; text-decoration: none; transform: none; transition: none; }
 [data-part="composer"] :is([data-part="composer-reason"], [data-part="composer-message"])::before {
   width: var(--g1-status-mark);
   height: var(--g1-status-mark);
 }
 
 .empty-chat h1 {
-  font-size: var(--g1-type-page-title);
+  font-size: var(--g1-type-title);
   font-weight: var(--g1-weight-title);
-  letter-spacing: var(--g1-tracking-page-title);
 }
-.empty-chat p { font-size: var(--g1-type-chat); line-height: var(--g1-leading-chat); }
 @media (width > 760px) and (height > 500px) {
   .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-content-max)) / 2)); }
 }
@@ -87,3 +88,9 @@
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
   summary[data-part="tool-header"] { min-height: 44px; }
 }
+
+/* plain: fulcrum's transitions, press scale, and hover underlines are off; a hover only tints */
+:is([data-part="timeline"], [data-part="composer"]) :is(*, ::before) { transition: none; }
+[data-part="approval-actions"] button:active { transform: none; }
+:is([data-part="resync-retry"], [data-part="jump-to-latest"], [data-part="approval-actions"] button, [data-part="run-bar"] button):hover,
+button[data-part="sub-agent"]:hover [data-part="sub-agent-open"] { text-decoration: none; }
