@@ -850,6 +850,7 @@ with _database() as db:
         }), `state ${state} target visible and unobscured`);
       } else {
         await page.setViewportSize({ width, height: desktopHeight });
+        await gateWait.playwright(page.locator("[data-page-chat-docked][data-page-chat-surface]:not([inert])"), "waitFor", { state: "visible" });
       }
       await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>("[data-page-content]")?.scrollTo(0, 0); });
       if (assertFrame) await assertFrame(`${width}px`);
