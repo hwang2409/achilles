@@ -29,7 +29,9 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
     const style = getComputedStyle(node);
     return { ui: style.fontFamily, mono: style.getPropertyValue("--achilles-code-font"), size: style.fontSize };
   });
-  if (!fresh.ui.startsWith("ui-monospace") || !fresh.mono.trim().startsWith("ui-monospace") || fresh.size !== "15px")
+  const systemMono = "ui-monospace,Menlo,Monaco,Consolas,Liberation Mono,DejaVu Sans Mono,monospace";
+  const normalizeFont = (stack: string) => stack.split(",").map((family) => family.trim().replace(/^(["'])(.*)\1$/, "$2")).join(",");
+  if (normalizeFont(fresh.ui) !== systemMono || normalizeFont(fresh.mono) !== systemMono || fresh.size !== "15px")
     throw new Error(`wrong fresh typography: ${JSON.stringify(fresh)}`);
   const jetBrainsFaces = () => page.evaluate(() => [...document.fonts].filter(face => face.family.includes("JetBrains Mono")).length);
   if (await jetBrainsFaces()) throw new Error("JetBrains Mono was registered with default settings");
