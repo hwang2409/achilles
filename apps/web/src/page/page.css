@@ -25,8 +25,7 @@
 .metric-block strong { min-width: 0; max-width: 100%; font-size: var(--metric-value-size, 28px); line-height: calc(1em + 6px); font-variant-numeric: tabular-nums; }
 .metric-block strong:not(.metric-value-number) { text-wrap: balance; }
 .metric-block strong.metric-value-number { white-space: nowrap; }
-.metric-word { display: inline-block; max-width: 100%; vertical-align: top; }
-.metric-word[data-metric-breakable] { overflow-wrap: anywhere; }
+.metric-word { display: inline-block; max-width: 100%; vertical-align: top; overflow-wrap: anywhere; }
 .metric-measure { position: absolute; visibility: hidden; white-space: nowrap; inline-size: max-content; }
 .metric-block small, .metric-delta { min-width: 0; overflow-wrap: anywhere; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
 .metric-warn { color: var(--fulcrum-warn); }
