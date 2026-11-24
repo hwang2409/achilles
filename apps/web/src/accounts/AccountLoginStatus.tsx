@@ -16,7 +16,7 @@ export function AccountLoginStatus({ attempt, login, available, canSignIn, signI
   signIn: (target: LoginTarget, opener: HTMLButtonElement) => void;
 }) {
   const receipt = "at" in attempt ? attempt : null;
-  return <Alert role="region" className="my-2 flex max-w-2xl flex-col gap-3 border-s-2 border-s-ring p-4 wrap-anywhere data-[state=failed]:border-s-destructive data-[state=blocked]:border-s-destructive data-[state=unknown]:border-s-destructive [&_h3]:font-semibold [&_p]:my-2" data-state={attempt.state} aria-label="browser sign-in">
+  return <Alert role="region" className="my-2 max-w-2xl gap-3 border-s-2 border-s-ring p-4 wrap-anywhere data-[state=failed]:border-s-destructive data-[state=blocked]:border-s-destructive data-[state=unknown]:border-s-destructive [&_h3]:font-semibold [&_p]:my-2" data-state={attempt.state} aria-label="browser sign-in">
   <div role="status">
     <h3>{loginIdentity(attempt.target)}</h3>
     <p>{attempt.state === "starting" ? "starting browser sign-in…"
