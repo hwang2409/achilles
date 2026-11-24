@@ -10,16 +10,25 @@ export function ToolDisclosure({ sessionId, children }: { sessionId: string; chi
   return <OpenTools.Provider value={open}>{children}</OpenTools.Provider>;
 }
 
+const withNotice = (text: string, notice: string) => `${text}${text && !text.endsWith("\n") ? "\n" : ""}${notice}`;
+const humanBytes = (bytes: number) => bytes < 1024 ? `${bytes} bytes` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+// Match Fulcrum's sourceText (not exported by the pinned @fulcrum/react).
 function readText(source: ToolBodyProps["output"]): string {
-  const cut = source.omission;
+  const { omission, protocolTruncated } = source;
   let head = "", tail = "";
   for (const chunk of source.chunks()) {
-    if (cut && chunk.start >= cut.end) tail += chunk.text;
+    if (omission && chunk.start >= omission.end) tail += chunk.text;
     else head += chunk.text;
   }
-  const appendLine = (text: string, line: string) => text + (text && !text.endsWith("\n") ? "\n" : "") + line;
-  const text = cut ? appendLine(head, `${cut.bytes} bytes not kept`) + (tail ? `\n${tail}` : "") : head;
-  return source.protocolTruncated ? appendLine(text, "host did not provide the complete output") : text;
+  if (omission) {
+    const bytes = humanBytes(omission.bytes);
+    const notice = omission.whole && omission.reason === "run-cap"
+      ? `output not kept (${bytes}) to save memory in this long run` : `${bytes} not kept`;
+    const reset = head.includes("\u001b") ? "\u001b[0m" : "";
+    head = withNotice(head, reset + notice) + (tail ? `\n${tail}` : "");
+  }
+  return protocolTruncated ? withNotice(head, "host did not provide the complete output") : head;
 }
 
 export function CompactTool({ id }: { id: string }) {
