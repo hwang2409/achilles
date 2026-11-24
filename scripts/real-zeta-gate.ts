@@ -1916,6 +1916,12 @@ with _database() as db:
           mutationStyle.remove();
         }
       };
+      const pane = document.querySelector<HTMLElement>(".page-content")!;
+      const initialScroll = pane.scrollTop;
+      // Hit-test the empty track with its row visible, even when the matrix is taller than the viewport.
+      const finalCell = elements.at(-1)?.getBoundingClientRect();
+      const viewport = pane.getBoundingClientRect();
+      if (finalCell) pane.scrollTop += (finalCell.top + finalCell.bottom - viewport.top - viewport.bottom) / 2;
       const grid = snapshotGrid(elements);
       const checks = {
         hasContinuousTopology: hasContinuousTopology(grid),
@@ -1929,8 +1935,7 @@ with _database() as db:
         trackSizes: grid.strip ? getComputedStyle(grid.strip).gridTemplateColumns : null,
         rows: grid.rows.map((row) => row.map(({ x, y, width, height }) => ({ x, y, width, height }))),
       };
-      const pane = document.querySelector<HTMLElement>(".page-content")!;
-      const initialScroll = pane.scrollTop;
+      pane.scrollTop = initialScroll;
       const paneBox = pane.getBoundingClientRect();
       const entries = expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
       const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
