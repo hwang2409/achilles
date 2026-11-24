@@ -3534,7 +3534,7 @@ with _database() as db:
     const surface = observerPage.locator("[data-page-chat-surface]");
     const transcript = surface.locator('[data-part="timeline-scroll"]');
     const marker = surface.locator('[data-part="message"]').filter({ hasText: observerMarker }).first();
-    const jumpToLatest = surface.locator('[data-part="jump-to-latest"]');
+    const jumpToLatest = surface.locator('[data-jump-to-latest]');
     if (await jumpToLatest.isVisible().catch(() => false)) await jumpToLatest.click({ force: true });
     const rows = surface.locator('[data-part="message"]');
     await waitFor(async () => {

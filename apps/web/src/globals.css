@@ -521,7 +521,7 @@
 [data-chat-transcript] [data-part="timeline-scroll"] { flex: 1 1 0; min-height: 0; scroll-behavior: auto; }
 [data-chat-transcript] [data-part="timeline"] { width: 100%; max-width: none; margin: 0; padding: 32px 0 16px; }
 [data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: min(944px, calc(100% - 48px)); margin-inline: auto; }
-[data-chat-transcript] [data-part="jump-to-latest-lane"]:not([data-jump-owned="true"]) { display: none !important; }
+[data-chat-transcript] [data-part="jump-to-latest-lane"] { display: none !important; }
 [data-chat-transcript]:has(> [data-part="timeline-frame"]):not(:has(> [data-jump-owned="true"])) { padding-block-end: 48px; }
 [data-page-chat-docked] [data-part="timeline-scroll"] { margin-top: 8px; }
 [data-page-chat-docked] [data-part="timeline"] { padding: 12px 0 16px; }
