@@ -25,7 +25,7 @@
 .brand-row > span:last-of-type { color: var(--fulcrum-muted); font-size: 12px; }
 .brand-row button { width: 40px; height: 40px; margin-left: auto; color: var(--fulcrum-muted); }
 .brand-mark::after { content: ""; position: absolute; inset: 6px; background: var(--g1-primary-text); }
-.sidebar .new-chat { justify-content: flex-start; border-color: transparent; color: var(--g1-fg); background: transparent; }
+.sidebar .new-chat { justify-content: flex-start; border: 0; color: var(--g1-fg); background: transparent; }
 .new-chat:where(:not(:disabled, [aria-disabled="true"]):hover) { background: var(--g1-hover); }
 .sidebar .new-chat > span { display: none; }
 .sidebar-collapsed .sidebar .new-chat > span { display: inline; }
@@ -161,7 +161,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
   container-type: inline-size;
   border: 1px solid var(--g1-border);
 }
-.main-pane [data-part="composer"]:focus-within { border-color: var(--g1-muted); }
+.main-pane [data-part="composer"]:focus-within { border-color: var(--g1-border); }
 .main-pane [data-part="composer-field"] { min-height: 64px; }
 .main-pane [data-part="composer-field"] textarea {
   display: block; width: 100%; min-height: 64px; resize: none; padding: 12px 14px;

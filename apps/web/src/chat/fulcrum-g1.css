@@ -32,6 +32,7 @@
   font-family: var(--achilles-code-font, var(--g1-font-mono));
   font-size: var(--g1-type-small);
 }
+[data-part="tool"] { border-color: var(--g1-border); }
 [data-part="approval"][data-decision="approve"] { --rail: var(--g1-ok); }
 [data-part="approval"][data-decision="deny"] { --rail: var(--g1-danger); }
 [data-part="tool-header"] {

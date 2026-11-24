@@ -1356,7 +1356,7 @@ with _database() as db:
     await field.press("Enter", { timeout: 20_000 });
     // A fast scripted reply can move from running to idle in one browser render.
     await waitFor(async () => JSON.parse(await Bun.file(control).text()).page_open_turn_barrier === "held", "held first page turn");
-    await gateWait.playwright(page.locator(".run-state.state-running"), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page.locator('[data-part="composer-stop"]'), "waitFor", { timeout: 20_000 });
     const firstPageChat = await homeSessionId();
     await gateWait.playwright(page.locator(`[data-chat-id="${firstPageChat}"]`), "waitFor", { timeout: 20_000 });
     if (!zetaProcess.kill("SIGUSR2")) throw new Error("could not release the first page turn");

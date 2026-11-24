@@ -23,26 +23,25 @@ type ViewProps = {
   failure: (failure: Failure, project: boolean) => ReactNode;
 };
 
-export function ConnectionList({ snapshot, scope, selectScope, activeScope, row, detailOpen, offline, shadows, go, failure }: ViewProps & {
-  snapshot: Snapshot; scope: McpScope; selectScope: (scope: McpScope) => void; activeScope: Ref<HTMLButtonElement>;
+export function ConnectionList({ snapshot, scope, selectScope, activeScope, row, detailOpen, offline, shadows, go, failure, addConnection }: ViewProps & {
+  snapshot: Snapshot; scope: McpScope; selectScope: (scope: McpScope) => void; activeScope: Ref<HTMLButtonElement>; addConnection?: () => void;
 }) {
   const list = snapshot[scope];
   const rows = "rows" in list ? list.rows : [];
   return <section className="mcp-list" aria-label="configured connections">
     <div className="mcp-list-head">
-      <nav className="mcp-scopes" aria-label="connection scope">
+      <nav className="ui-tabs" aria-label="connection scope">
         {mcpScopes.map((view) => {
           const entry = snapshot[view];
           return <button key={view} type="button" ref={scope === view ? activeScope : undefined}
             aria-pressed={scope === view} disabled={offline} onClick={() => selectScope(view)}>
-            {view} {"rows" in entry ? <span>{entry.rows.length}</span> : <span aria-label="unavailable">—</span>}
+            {view[0].toUpperCase() + view.slice(1)} {"rows" in entry ? <span className="ui-meta">{entry.rows.length}</span> : <span aria-label="unavailable">—</span>}
           </button>;
         })}
       </nav>
-      {list && "at" in list && <time dateTime={new Date(list.at).toISOString()}>read from disk at {new Date(list.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</time>}
     </div>
     {list && "failure" in list ? failure(list.failure, scope === "project")
-      : rows.length === 0 ? <ModuleState kind="empty" title="no mcp connections for this scope" />
+      : rows.length === 0 ? <ModuleState kind="empty" title="No connections yet" detail="Add a connection to make its tools available in new sessions." action={addConnection && { label: "Add connection", run: addConnection }} />
       : <ul className="mcp-rows">{rows.map((item) => {
         const current = row?.name === item.name && row.scope === item.scope;
         const contents = <><span className="mcp-row-title"><strong title={item.name}>{item.name}</strong><small>{item.scope} · {transportOf(item)}{shadows(item) && ` · ${shadows(item)}`}</small></span>

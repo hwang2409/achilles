@@ -73,7 +73,7 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
           const detail = tool.description.trim();
           return { text, detail: detail && detail !== text ? detail : undefined, onSelect: () => send1(text) };
         })
-      : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => sendWithCreateMode(text) }));
+      : GENERIC_STARTERS.map((text): Starter => ({ text, onSelect: () => sendWithCreateMode(text) }));
   const starters: Starter[] = [
     ...pageStarters,
     ...(hasWaitingChat ? [{ text: "continue your waiting chat", tag: "waiting chat", onSelect: continueWaiting }] : []),

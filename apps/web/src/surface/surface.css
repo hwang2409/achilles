@@ -36,8 +36,12 @@
 .sidebar > footer > button kbd { margin-left: auto; }
 
 .module-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.module-frame > header { min-height: 64px; flex: none; display: flex; align-items: center; border-bottom: 1px solid var(--g1-border); padding: 0 var(--g1-page-gutter); }
-.module-frame > header h1 { margin: 0; }
+.module-frame > header { min-height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--g1-space-2); border-bottom: 1px solid var(--g1-border); padding: var(--g1-space-2) var(--g1-page-gutter); }
+.module-frame > header :is(h1, p) { margin: 0; }
+.module-frame > header > button { flex: none; }
+.ui-tabs { display: flex; flex-wrap: wrap; gap: var(--g1-space-1); }
+.ui-tabs :is(button, a) { display: inline-flex; align-items: center; gap: var(--g1-space-1); padding-inline: var(--g1-space-2); color: var(--g1-muted); border-radius: var(--g1-radius-control); }
+.ui-tabs :is([aria-pressed="true"], [aria-current="page"]) { background: var(--g1-selected); color: var(--g1-fg); }
 .module-frame > header h1::first-letter, .module-state h2::first-letter { text-transform: uppercase; }
 .module-body > :not(.module-state), .agents-split, .sessions-split { width: 100%; max-width: var(--g1-page-max); }
 .module-body { flex: 1; min-height: 0; overflow: auto; }
