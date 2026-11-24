@@ -133,65 +133,7 @@
 
 .page-chat { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; }
 .page-chat-surface { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
-/* The pane owns the transcript scroll area; page blocks and chat scroll separately. */
-.transcript { position: relative; font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, var(--g1-font-ui)); flex: 1 1 0; min-height: 0; overflow: hidden; padding: 0; }
-html[data-density="compact"] .transcript { line-height: 1.35; }
-.transcript > [data-part="timeline-frame"] { width: 100%; max-width: none; height: 100%; margin: 0; }
-/* virtual rows are absolutely placed and ignore the timeline padding: the gap under the header lives on the scrollport */
-.transcript [data-part="timeline-scroll"] { scroll-behavior: auto; margin-top: var(--g1-space-4); }
-.transcript [data-part="timeline"] { width: 100%; max-width: none; margin: 0; padding: 32px 0 16px; }
-.transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: min(var(--g1-content-max), calc(100% - 48px)); margin-inline: auto; }
 .main-pane .chat-row { scroll-margin-top: 72px; }
-
-/* fills the transcript's box exactly (never taller) and scrolls its own content, so a tall
-   page above it or a short viewport never pushes starters under the composer;
-   see minor-7 and A-2/A-4 in firstrun-c028cdd.md and firstrun-e797f07.md. */
-.empty-chat { position: absolute; z-index: 1; top: 0; right: 0; bottom: 0; left: 0; overflow-y: auto; padding: min(20vh, 180px) max(24px, calc((100% - var(--g1-content-max)) / 2)) 32px; }
-.empty-chat h1 { display: -webkit-box; overflow: hidden; margin: 0 0 14px; max-width: 34ch; font-size: var(--g1-type-title); line-height: 32px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-/* the docked panel has one 16px text edge: its head, the empty-chat heading, and the starter text (the buttons hang their padding outside it) */
-.page-chat-docked .empty-chat { padding-top: var(--g1-space-4); padding-inline: var(--g1-space-4); }
-.page-chat-docked .chat-starters { margin-inline: calc(-1 * var(--g1-space-2)); }
-.page-chat-docked .empty-chat h1 { font-size: var(--g1-type-title); line-height: 1.35; }
-.chat-starters { margin-top: 24px; }
-.chat-starters button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--g1-space-2); width: 100%; padding: var(--g1-space-2); text-align: start; }
-.chat-starters span { text-wrap: pretty; }
-.chat-starters i { color: var(--fulcrum-muted); font-style: normal; font-size: inherit; }
-.main-pane [data-part="composer"] {
-  width: min(var(--g1-content-max), calc(100% - 48px));
-  margin: 0 auto 24px;
-  container-type: inline-size;
-  border: 1px solid var(--g1-border);
-}
-/* the top inset lives on the field, not in the textarea, so a scrolled draft clips 12px below the border, not on it */
-.main-pane [data-part="composer-field"] { min-height: 64px; }
-.main-pane [data-part="composer-field"]:has(> textarea) { padding-top: 12px; }
-/* the hidden copy that sizes the field pads like the textarea, so the box keeps its height */
-.main-pane [data-part="composer-field"]:has(> textarea)::after { padding: 0 14px 12px; }
-.main-pane [data-part="composer-field"] textarea {
-  display: block; width: 100%; min-height: 52px; resize: none; padding: 0 14px 12px;
-  border: 0; outline: 0; background: transparent; line-height: 22px;
-}
-.main-pane [data-part="composer-field"] textarea::placeholder,
-.vim-composer [data-part="composer-field"] .cm-content::before { font-family: var(--achilles-ui-font, var(--g1-font-ui)); }
-.main-pane [data-part="composer-bar"] { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 6px 8px 8px 14px; }
-.main-pane [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--fulcrum-muted); font-size: inherit; line-height: 16px; white-space: nowrap; overflow: hidden; }
-.main-pane [data-part="composer-hint"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; font-size: calc(var(--achilles-ui-size, var(--g1-type-chat)) - 1px); }
-.main-pane [data-part="composer-submit"],
-.main-pane [data-part="composer-stop"] { min-height: 32px; padding: 0 12px; font-size: inherit; }
-.main-pane [data-part="composer-submit"] { color: var(--g1-fg-3); background: transparent; }
-.main-pane [data-part="composer-submit"][aria-disabled="true"] { color: var(--fulcrum-muted); background: transparent; }
-.main-pane [data-part="composer-stop"] { color: var(--fulcrum-warn); border-color: var(--fulcrum-warn); }
-.main-pane [data-part="composer-reason"] { margin: 0; padding: 12px 14px; color: var(--fulcrum-muted); }
-.main-pane .vim-composer { --inset: 12px; }
-.main-pane .vim-composer [data-part="composer-bar"] { padding-top: 6px; }
-
-@media (max-width: 639px) {
-  .main-pane [data-part="composer-hint"] { display: none; }
-}
-@container (max-width: 480px) {
-  .vim-guidance { flex-wrap: nowrap; }
-  .vim-mode-chip { min-width: auto; padding-inline: 6px; }
-}
 
 /* Anchor popup height to the dock/sheet. Keep timeline overlays in the transcript's own layer. */
 .page-chat-docked .page-chat-surface { container-type: size; }
@@ -251,20 +193,11 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
   .skip-link:focus { top: 56px; }
   .chat-heading strong { max-width: calc(100vw - 150px); }
   .chat-heading span { display: block; max-width: calc(100vw - 150px); margin-top: 2px; }
-  /* less top padding than the desktop rule: at narrow widths there is less room to spare, so
-     content starts close to the top instead of visually centering. */
-  .empty-chat { padding: 16px 12px 24px; }
-  .chat-starters button { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; row-gap: 4px; min-height: 60px; }
-  .chat-starters i { display: block; }
   .chat-header { height: 48px; flex-basis: 48px; padding-inline: 60px 8px; }
   .chat-header > [role="alert"] { top: 48px; }
   .chat-heading strong[role="button"] { line-height: 44px; }
   .chat-title-edit { min-width: 0; min-height: 44px; }
   .chat-actions button { min-height: 44px; min-width: 44px; }
-  .transcript [data-part="timeline"] { padding: 14px 12px 8px; }
-  .transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: 100%; }
-  .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
-  .main-pane [data-part="composer"] :is([data-part="composer-submit"], [data-part="composer-stop"]) { min-width: 44px; min-height: 44px; }
   .page-chat-docked .transcript [data-part="timeline"] { padding-inline: 16px; }
   .page-chat-docked .page-chat-surface [data-part="composer"] { width: calc(100% - 32px); }
 }
