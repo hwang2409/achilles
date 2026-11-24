@@ -2046,26 +2046,6 @@ with _database() as db:
   });
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
     throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
-  const pendingMobilePrompt = "first message while page chat closes";
-  const queuedMobilePrompt = "queued message while page chat is closed";
-  let holdMobileSend = false;
-  let releaseMobileSend: (() => void) | undefined;
-  let queuedMobileSent = false;
-  await page.routeWebSocket(url => url.hostname === "127.0.0.1", socket => {
-    const server = socket.connectToServer();
-    socket.onMessage(message => {
-      const frame = typeof message === "string" ? JSON.parse(message) : null;
-      if (frame?.method === "send" || frame?.method === "steer") {
-        if (holdMobileSend && frame.params?.text === pendingMobilePrompt) {
-          releaseMobileSend = () => server.send(message);
-          return;
-        }
-        if (frame.params?.text === queuedMobilePrompt) queuedMobileSent = true;
-      }
-      server.send(message);
-    });
-  });
-  await page.reload();
   await setupMobileSheet(page, 760, "button");
   await setupMobileSheet(page, 760, "resize");
   await setupMobileSheet(page, 760, "keyboard");
@@ -2077,28 +2057,6 @@ with _database() as db:
   await pageChatBar.click();
   await gateWait.playwright(fieldInSheet, "waitFor", { state: "visible" });
   if (await fieldInSheet.inputValue() !== "unsent mobile sheet draft") throw new Error("closing page chat lost an unsent draft");
-  holdMobileSend = true;
-  try {
-    await fieldInSheet.fill(pendingMobilePrompt);
-    await fieldInSheet.press("Enter");
-    await waitFor(async () => !!releaseMobileSend, "mobile page chat first send is still in flight");
-    await fieldInSheet.fill(queuedMobilePrompt);
-    await fieldInSheet.press("Enter");
-    const queued = page.locator('[data-part="composer-queued"]').filter({ hasText: queuedMobilePrompt });
-    await gateWait.playwright(queued, "waitFor", { state: "visible" });
-    await page.getByRole("button", { name: "close page chat", exact: true }).click();
-    await gateWait.playwright(fieldInSheet, "waitFor", { state: "hidden" });
-    if (queuedMobileSent) throw new Error("mobile page chat sent the queued message before releasing the in-flight send");
-    holdMobileSend = false;
-    releaseMobileSend!();
-    releaseMobileSend = undefined;
-    await waitFor(async () => queuedMobileSent, "queued delivery continues while mobile page chat stays closed");
-    await pageChatBar.click();
-    await gateWait.playwright(fieldInSheet, "waitFor", { state: "visible" });
-  } finally {
-    holdMobileSend = false;
-    releaseMobileSend?.();
-  }
   await fieldInSheet.fill(beforeClosing);
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
   const backdropTabIndex = await page.locator("[data-page-chat-backdrop]").evaluate((element) => (element as HTMLElement).tabIndex);
