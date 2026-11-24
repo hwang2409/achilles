@@ -17,7 +17,9 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   const vimDraft = () => page.locator('.vim-composer [data-part="composer-field"]').getAttribute("data-value");
   const runCommand = async (query: string, option: string) => {
     await paletteInput.fill(query);
-    await waitFor(async () => (await palette.getByRole("option", { selected: true }).innerText()).startsWith(option), `palette selects ${option}`);
+    await waitFor(async () => (await palette.getByRole("option", { selected: true }).allTextContents()).some(text => text.startsWith(option)), `palette selects ${option}`).catch(async (error) => {
+      throw new Error(`${error}; options=${JSON.stringify(await palette.getByRole("option").evaluateAll(items => items.map(item => [item.textContent, item.getAttribute("aria-selected")])))}`);
+    });
     await paletteInput.press("Enter");
     await gateWait.playwright(palette, "waitFor", { state: "hidden", timeout: 10_000 });
   };
@@ -77,6 +79,7 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await page.keyboard.press("ControlOrMeta+k");
   await runCommand("keyboard shortcuts", "keyboard shortcuts");
   await gateWait.playwright(sheet, "waitFor", { state: "visible", timeout: 10_000 });
+  if (!await sheet.evaluate(dialog => dialog.contains(document.activeElement))) throw new Error("palette-opened shortcuts did not take focus");
   await page.keyboard.press("Escape");
   await gateWait.playwright(sheet, "waitFor", { state: "hidden", timeout: 10_000 });
   if (!(await settings.isVisible())) throw new Error("escape closed settings under the shortcuts sheet");

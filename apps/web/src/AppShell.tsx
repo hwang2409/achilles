@@ -151,10 +151,10 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   const commands: PaletteEntry[] = [
     ...!newChat.available || newChat.pending ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: startNewChat }],
     ...loading || !createMode?.available || createMode.pending ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), detail: createMode.enabled ? "on · this page" : "off · this page", run: () => void createMode.toggle() }],
-    ...displaySettings ? [{ id: "display-settings", label: "display settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) }] : [],
+    ...displaySettings ? [{ id: "display-settings", label: "display settings", shortcut: modKey(","), opensOverlay: true, run: () => openSettings(paletteOpener.current) }] : [],
     ...workspace ? [
       { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
-      { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
+      { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", opensOverlay: true, run: () => openShortcuts(paletteOpener.current) },
     ] : [],
   ];
   const receipt = activity.latestReceipt;
