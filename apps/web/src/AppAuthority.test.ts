@@ -177,7 +177,7 @@ const composer = (action: "send" | "steer" | "abort", options: Options = { attac
   const control = app.container.querySelector<HTMLElement>(`button${tag(`composer.${action}`)}`);
   if (authority === "observer") {
     expect(Boolean(control)).toBe(false);
-    expect(select(app, '[data-part="composer-reason"]').textContent).toContain("read-only");
+    expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("Read-only");
     await keydown(field ?? select(app, '[data-part="composer"]'), "Enter");
   } else {
     expect(Boolean(control) && !disabled(control!), `${action}: ${field?.outerHTML}; ${control?.outerHTML}`).toBe(true);
@@ -196,7 +196,7 @@ const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row =
   expect(disabled(control)).toBe(authority === "observer");
   if (authority === "observer") {
     const description = select(app, `#${CSS.escape(control.getAttribute("aria-describedby")!)}`);
-    expect(description.textContent).toContain("this tab is read-only");
+    expect(description.textContent).toContain("read-only");
   }
   await click(control);
   if (authority === "controller") {
@@ -564,7 +564,7 @@ const rows: Record<WriteSurfaceId, Row> = {
       await keydown(field, "Enter");
     };
     if (authority === "observer") {
-      expect(select(app, '[data-part="composer-reason"]').textContent).toContain("read-only");
+      expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("Read-only");
       expect(requests).not.toContain("account_list");
       return;
     }

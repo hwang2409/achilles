@@ -50,7 +50,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
   return <aside ref={sidebar} id="surface-sidebar" className="sidebar" aria-label={narrow ? "navigation menu" : "sidebar"} role={narrow && drawer ? "dialog" : undefined} aria-modal={narrow && drawer || undefined} aria-hidden={narrow && !drawer ? true : undefined} inert={narrow && !drawer || undefined}>
     <div className="brand-row">
       <span className="brand-mark" aria-hidden="true" /><strong>achilles</strong>
-      <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected}><i aria-hidden="true" />zeta</span>
+      <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected}>Zeta</span>
       {narrow && <button className="drawer-close" aria-label="close navigation" onClick={onClose}>×</button>}
     </div>
     <div className="sidebar-scroll">

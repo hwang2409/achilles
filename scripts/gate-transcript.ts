@@ -88,14 +88,13 @@ export async function gateTranscript(
     const prose = getComputedStyle(document.querySelector('.transcript [data-part="message"][data-format="markdown"]')!);
     const code = getComputedStyle(document.querySelector(".transcript pre code")!);
     const timeline = document.querySelector('.transcript [data-part="timeline"]')!;
-    const cap = parseFloat(getComputedStyle(root).getPropertyValue("--g1-content-max"));
     return {
       font: transcript.fontFamily,
       proseFont: prose.fontFamily,
       proseSize: prose.fontSize,
       proseLineHeight: prose.lineHeight,
       rowWidth: timeline.querySelector("[data-virtual-id]")!.getBoundingClientRect().width,
-      expectedWidth: Math.min(cap, timeline.getBoundingClientRect().width - 48),
+      expectedWidth: document.querySelector('[data-part="composer"]')!.getBoundingClientRect().width,
       size: transcript.fontSize,
       lineHeight: transcript.lineHeight,
       codeFont: code.fontFamily,

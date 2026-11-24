@@ -2,9 +2,7 @@
 .sidebar-scroll { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: auto; scrollbar-width: thin; }
 .sidebar-destinations { display: contents; }
 .sidebar-destinations > .chat-list { flex: 0 0 auto; max-height: 170px; }
-.brand-row > .surface-connection { display: inline-flex; align-items: center; gap: var(--g1-space-1); margin-left: auto; padding: 0; font: var(--g1-type-kbd) var(--achilles-code-font, var(--g1-font-mono)); }
-.surface-connection i { width: var(--g1-status-mark); height: var(--g1-status-mark); border: 1px solid var(--fulcrum-muted); }
-.surface-connection[data-connected="true"] i { border-color: var(--g1-ok); background: var(--g1-ok); }
+.brand-row > .surface-connection { display: inline-flex; align-items: center; gap: var(--g1-space-1); margin-left: auto; padding: 0; font-size: var(--g1-type-meta); font-variant-numeric: tabular-nums; }
 .surface-actions, .surface-search { flex: none; display: grid; gap: var(--g1-space-2); margin: 0 var(--g1-sidebar-padding); }
 .surface-actions { padding-block: var(--g1-space-2) var(--g1-space-1); row-gap: 0; }
 .surface-actions > :is(.new-chat, .place-link) { display: flex; align-items: center; min-width: 0; min-height: var(--g1-nav-row-height); gap: var(--g1-space-2); padding: 0 var(--g1-space-2); font-size: var(--g1-type-small); }
@@ -12,17 +10,17 @@
 .surface-actions kbd, .surface-actions small { margin-left: auto; color: var(--fulcrum-muted); font-size: 11px; }
 .surface-actions b { font-weight: 400; }
 .surface-search { position: relative; }
-.surface-search .chat-search { background: transparent; border-color: transparent; min-height: var(--g1-nav-row-height); display: flex; align-items: center; padding-inline: var(--g1-space-2) 44px; font-size: var(--g1-type-small); }
+.surface-search .chat-search { background: transparent; border-color: transparent; min-height: var(--g1-nav-row-height); display: flex; align-items: center; padding-inline: var(--g1-space-2) 44px; border: 0; font-size: var(--g1-type-small); }
 .surface-search .chat-search > :is(span, kbd) { display: none; }
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; box-shadow: var(--g1-focus-halo); }
-.surface-search .palette-button { position: absolute; right: 0; top: 0; height: var(--g1-nav-row-height); min-width: 44px; color: var(--fulcrum-muted); border-color: transparent; }
+.surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0; color: var(--fulcrum-muted); border-color: transparent; }
 .surface-search .palette-button > span { display: none; }
 .place-nav { flex: none; margin: 0 var(--g1-sidebar-padding) var(--g1-space-3); }
 .place-nav h2 { margin: var(--g1-space-3) 0 var(--g1-space-1); padding-inline: var(--g1-space-2); font-size: var(--g1-type-meta); font-weight: 600; color: var(--g1-muted); }
 .place-nav h2::first-letter, .place-link > span::first-letter { text-transform: uppercase; }
 .place-link > span { display: block; }
 .place-link { display: flex; align-items: center; gap: var(--g1-space-2); min-height: var(--g1-nav-row-height); padding: 0 var(--g1-space-2); font-size: var(--g1-type-small); line-height: 1.25; }
-.place-nav .place-link small { margin-left: auto; color: var(--fulcrum-muted); font: var(--g1-type-kbd) var(--achilles-code-font, var(--g1-font-mono)); }
+.place-nav .place-link small { margin-left: auto; color: var(--fulcrum-muted); font-size: var(--g1-type-meta); font-variant-numeric: tabular-nums; }
 .place-link .waiting-count { color: var(--fulcrum-warn); }
 .place-link .waiting-count::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: 4px; vertical-align: .1em; background: currentColor; }
 .place-link svg { display: none; }

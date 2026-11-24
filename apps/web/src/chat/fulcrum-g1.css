@@ -79,14 +79,6 @@
   letter-spacing: var(--g1-tracking-page-title);
 }
 .empty-chat p { font-size: var(--g1-type-chat); line-height: var(--g1-leading-chat); }
-.chat-starters :is(b, i) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
-.chat-starters i {
-  justify-self: start;
-  padding-inline: var(--g1-space-1);
-  border: 1px solid var(--g1-border);
-  border-radius: var(--g1-radius-chip);
-  background: var(--g1-bg-subtle);
-}
 @media (width > 760px) and (height > 500px) {
   .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-content-max)) / 2)); }
 }

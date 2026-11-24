@@ -3269,9 +3269,7 @@ with _database() as db:
   await setupMobileSheet(observerPage, 844);
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   if (screenshotDir) await writeFile(join(screenshotDir, "s2-header-manifest.json"), JSON.stringify({ head: (await Bun.$`git rev-parse HEAD`.text()).trim(), theme, captures: [...s2Images, "s2-header-switcher-390.png", "s2-header-confirmation-390.png", "s2-header-one-chat-controller-390.png", "s2-header-one-chat-observer-390.png"] }, null, 2) + "\n");
-  const observerComposerReason = observerPage.locator('[data-part="composer-reason"]');
   const observerBody = await observerPage.locator("body").innerText();
-  if ((await observerComposerReason.count()) && !(await observerComposerReason.first().innerText()).includes("read-only")) throw new Error("observer composer did not explain its disabled state");
   if (!observerBody.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
   const observerNewChat = observerPage.locator("button.new-chat");
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
@@ -3281,7 +3279,10 @@ with _database() as db:
   const observerFrameCountAtActions = observerFrames.length;
   const observerHttpCountAtActions = observerHttp.length;
   const observerComposer = observerPage.getByRole("textbox", { name: "message", exact: true });
-  if (await observerComposer.count()) { await observerComposer.fill("observer must not send"); await observerComposer.press("Enter"); }
+  if (await observerComposer.count()) {
+    if (await observerComposer.isEditable()) throw new Error("observer composer was editable");
+    await observerComposer.press("Enter");
+  }
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   await observerPage.keyboard.press(appShortcut("Comma"));
   const observerSettings = observerPage.getByRole("dialog", { name: "settings", exact: true });
