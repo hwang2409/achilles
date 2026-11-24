@@ -70,7 +70,7 @@ summary[data-part="tool-header"]:hover { background: var(--g1-hover); }
 }
 .main-pane [data-part="composer"][data-error] { border-color: var(--g1-danger); }
 [data-part="composer"] button, [data-part="jump-to-approval"] { border-radius: var(--g1-radius-control); }
-/* the composer looks the same empty, typed, or focused: its buttons never change box or tone with the draft */
+/* the composer looks the same empty, typed, or focused: its buttons keep one box; only send brightens once there is text to send */
 [data-part="composer"] :is(button, button[aria-disabled="true"]) { border-color: transparent; background: transparent; text-decoration: none; transform: none; transition: none; }
 [data-part="composer"] :is([data-part="composer-reason"], [data-part="composer-message"])::before {
   width: var(--g1-status-mark);
@@ -80,7 +80,6 @@ summary[data-part="tool-header"]:hover { background: var(--g1-hover); }
 .empty-chat h1 {
   font-size: var(--g1-type-title);
   font-weight: var(--g1-weight-title);
- 
 }
 @media (width > 760px) and (height > 500px) {
   .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-content-max)) / 2)); }

@@ -95,7 +95,7 @@ function ConnectionFields({ row }: { row: McpRow }) {
         <dt>client secret</dt><dd>{config.oauth.secretProvided ? "provided (redacted)" : "not provided"}</dd>
       </>}
     </dl>
-    <div className="mcp-rule"><h3>Tools</h3></div>
+    <div className="mcp-rule"><h3>Tools ({row.toolCount})</h3></div>
     {row.toolCount === 0 && <ModuleState kind="empty" title="No tools reported" detail="Zeta has not reported any tools for this connection." />}
   </>;
 }

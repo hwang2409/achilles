@@ -228,6 +228,7 @@ function TelemetryOff({ openSettings }: { openSettings?: () => void }) {
           <div><h2>Never records</h2><ul><li>prompts or replies</li><li>reasoning</li><li>tool arguments or results</li><li>error messages, env values</li></ul></div>
         </div>
         <div className="tm-turn-on">
+          <p>Telemetry is off.</p>
           {openSettings
             ? <button type="button" className="tm-button tm-primary" onClick={openSettings}>Open settings</button>
             : <>

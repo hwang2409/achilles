@@ -32,7 +32,6 @@
 .chat-search input { padding: 0; width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
 .chat-search input::placeholder { color: var(--fulcrum-muted); }
 .chat-search:focus-within { border-color: var(--fulcrum-accent); }
-.list-head b { color: var(--g1-muted); font-size: inherit; font-weight: 400; font-variant-numeric: tabular-nums; }
 .page-list-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; color: var(--fulcrum-muted); font-size: inherit; }
 .page-list-error button { min-height: 40px; padding: 8px 0; color: var(--fulcrum-accent); }
 /* no scroll snap here: a row inserted on top re-snapped the list to the old first row, under the sticky heads.
@@ -47,6 +46,7 @@
 /* the pencil shows only on the open or focused row, never on hover; F2 renames any row */
 .chat-row-rename { position: absolute; top: 1px; right: 1px; width: 40px; height: 40px; padding: 0; visibility: hidden; background: transparent; }
 :is(.chat-row.current, .chat-row:focus) .chat-row-rename { visibility: visible; }
+:is(.chat-row.current, .chat-row:focus):not(.editing) > strong { padding-right: 40px; }
 /* editing drops the pencil, so the input can use the row's full width instead of the pencil's gutter */
 /* the editor sits over the hidden title in one grid cell, so the row keeps its height and its page/time line */
 .chat-row.editing { display: grid; }
