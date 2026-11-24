@@ -97,7 +97,7 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await capture(main, "cancel-review-1440");
     await main.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
-    if (!await review.evaluate(node => node === document.activeElement)) throw new Error("cancel review did not restore opener focus");
+    await waitFor(() => review.evaluate(node => node === document.activeElement), "cancel review restored opener focus");
     await main.setViewportSize({ width: 390, height: 844 });
     await Bun.sleep(350);
     await review.click();
