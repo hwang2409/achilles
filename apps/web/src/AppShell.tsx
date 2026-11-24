@@ -180,13 +180,13 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     {status}
     {receipt && <aside className="flex flex-wrap items-center gap-2 border-t px-3 py-2 text-sm" aria-label="build receipt">
       <span><strong title={titleOf(receipt.chat)}>{titleOf(receipt.chat)}</strong> finished{" ·\u00a0"}{receipt.route} is ready</span>
-      <Button asChild variant="outline" className="min-h-11"><a href={receiptHref} onClick={(event) => {
+      <Button asChild variant="outline" className="min-h-[44px]"><a href={receiptHref} onClick={(event) => {
         // a new-tab or new-window click is the browser's: no acknowledgement
         if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         openReceipt();
       }} onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); openReceipt(); } }}>open page</a></Button>
-      <Button variant="ghost" className="min-h-11" type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</Button>
+      <Button variant="ghost" className="min-h-[44px]" type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</Button>
     </aside>}
   </div> : null;
   return <SidebarProvider data-shell data-sidebar-collapsed={collapsed} className="h-dvh min-h-0 overflow-hidden bg-background" open={!collapsed} onOpenChange={(open) => setCollapsed(!open)} mobile={narrow} openMobile={drawer} onOpenMobileChange={setDrawer}>
@@ -197,7 +197,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     <main data-main-pane className="main-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}
       <div className={narrow ? "relative shrink-0" : "contents"}>
-        {narrow && <Button ref={menuButton} variant="ghost" size="icon-lg" className="menu-button absolute top-0.5 left-2 z-2 min-h-11 min-w-11" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}><Menu aria-hidden="true" /></Button>}
+        {narrow && <Button ref={menuButton} variant="ghost" size="icon-lg" className="menu-button absolute top-0.5 left-2 z-2 min-h-[44px] min-w-[44px]" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}><Menu aria-hidden="true" /></Button>}
         {header}
       </div>
       {workspace && dock}

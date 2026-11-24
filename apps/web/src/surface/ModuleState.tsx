@@ -28,6 +28,6 @@ export function ModuleState({ kind, title, detail, action }: StateProps) {
       {detail && <p className="mt-2 max-w-[55ch] break-words text-muted-foreground">{detail}</p>}
     </div>
     {kind === "loading" && <div className="mt-4 grid gap-3" aria-hidden="true"><Skeleton className="h-2.5 w-[min(48ch,100%)]" /><Skeleton className="h-2.5 w-[min(36ch,75%)]" /><Skeleton className="h-2.5 w-[min(24ch,55%)]" /></div>}
-    {action && <Button type="button" variant="outline" className="mt-4 min-h-11" onClick={action.run}>{action.label}</Button>}
+    {action && <Button type="button" variant="outline" className="mt-4 min-h-[44px]" onClick={action.run}>{action.label}</Button>}
   </div>;
 }

@@ -15,7 +15,7 @@ type PlaceCount = { total?: string; waiting?: number };
 function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: SurfaceRoute; count?: PlaceCount }) {
   const total = count?.total;
   const waiting = count?.waiting || undefined;
-  return <a className="flex min-h-8 min-w-0 items-center gap-2 px-2 text-sm hover:bg-sidebar-accent aria-[current=page]:bg-sidebar-accent group-data-[collapsible=icon]:justify-center group-data-[mobile=true]:min-h-11" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={route.label}>
+  return <a className="flex min-h-8 min-w-0 items-center gap-2 px-2 text-sm hover:bg-sidebar-accent aria-[current=page]:bg-sidebar-accent group-data-[collapsible=icon]:justify-center group-data-[mobile=true]:min-h-[44px]" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={route.label}>
     {route !== createRoute && <svg className="hidden shrink-0 group-data-[collapsible=icon]:block" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={route.icon} /></svg>}
     <span className={route === createRoute ? "first-letter:uppercase" : "first-letter:uppercase group-data-[collapsible=icon]:hidden"}>{route.label}</span>
     {(total || waiting) && <small className="ml-auto text-muted-foreground group-data-[collapsible=icon]:hidden" aria-hidden="true">{waiting && <span data-waiting-count className="text-warning">{waiting}</span>}{waiting && total && " · "}{total}</small>}
@@ -28,8 +28,8 @@ export function BuildStatus({ activity, current, className = "" }: { activity: B
   const attention = rows.filter((row) => row.state === "needs you" && !row.reason);
   const create = surfaceHref(createRoute.path);
   return <span className={`flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground ${className}`} aria-label="page build progress">
-    {building > 0 && (current === createRoute ? <span aria-current="page">{building} building</span> : <a className="inline-flex min-h-11 items-center hover:underline" href={create}>{building} building</a>)}
-    {needsYou > 0 && <a className="inline-flex min-h-11 items-center text-warning hover:underline" href={attention.length === 1 ? chatHref(attention[0]!.chat) + approvalIntent : create}>{needsYou} needs you</a>}
+    {building > 0 && (current === createRoute ? <span aria-current="page">{building} building</span> : <a className="inline-flex min-h-[44px] items-center hover:underline" href={create}>{building} building</a>)}
+    {needsYou > 0 && <a className="inline-flex min-h-[44px] items-center text-warning hover:underline" href={attention.length === 1 ? chatHref(attention[0]!.chat) + approvalIntent : create}>{needsYou} needs you</a>}
   </span>;
 }
 
@@ -55,7 +55,7 @@ export function SurfaceNav({ current, sidebar, narrow, restoreDrawerFocus, colla
       <SidebarHeader className="h-11 shrink-0 flex-row items-center gap-2 border-b px-4 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
         <span className="grid size-5 shrink-0 place-items-center bg-primary after:size-2 after:bg-primary-foreground" aria-hidden="true" /><strong className="group-data-[collapsible=icon]:hidden">achilles</strong>
         <span className="ml-auto text-xs text-muted-foreground group-data-[collapsible=icon]:hidden" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected}>Zeta</span>
-        {narrow && <Button variant="ghost" size="icon-lg" className="min-h-11 min-w-11" aria-label="close navigation" onClick={onClose}><X /></Button>}
+        {narrow && <Button variant="ghost" size="icon-lg" className="min-h-[44px] min-w-[44px]" aria-label="close navigation" onClick={onClose}><X /></Button>}
       </SidebarHeader>
       <SidebarContent className="gap-1 pt-2" >
         <div className="mx-2 grid shrink-0 gap-1">

@@ -81,8 +81,8 @@ export async function gateShell(
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("button", { name: "collapse sidebar" }).press("Enter");
-  const railWidth = await page.locator("aside.sidebar").evaluate((element) => element.getBoundingClientRect().width);
-  if (railWidth !== 56 || await places.getByRole("link").count() !== 11) throw new Error("the 56px rail dropped place links");
+  await waitFor(() => page.locator("[data-shell-nav]").evaluate(element => element.getBoundingClientRect().width === 56), "collapsed sidebar reached 56px");
+  if (await places.getByRole("link").count() !== 11) throw new Error("the 56px rail dropped place links");
   await capture("v5-railed-chat-1280x900-light.png");
   await page.getByRole("button", { name: "expand sidebar" }).press("Enter");
   await page.setViewportSize({ width: 390, height: 844 });
