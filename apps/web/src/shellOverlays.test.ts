@@ -26,6 +26,7 @@ test("shell overlay requests survive closing layers without duplicating or dismi
       if (event.type === "dismiss") {
         const index = state.stack.findIndex(layer => layer.id === event.id);
         expect(next.stack.slice(0, index < 0 ? state.stack.length : index)).toEqual(state.stack.slice(0, index < 0 ? state.stack.length : index));
+        if (index >= 0) expect(next.stack.slice(index)).toEqual(state.stack.slice(index).map(({ id }) => ({ id, phase: "closing" })));
         if (event.id === latest || (index >= 0 && state.stack.slice(index).some(layer => layer.id === latest) && state.pending !== latest)) latest = undefined;
       }
       verify(next, depth - 1, latest);
