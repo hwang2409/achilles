@@ -549,7 +549,8 @@ with _database() as db:
   };
   const waitCreateMode = async (enabled: boolean) => {
     if (!await dockHead(page).count()) return gateWait.playwright(page.getByRole("button", { name: `create mode ${enabled ? "on" : "off"}`, exact: true }), "waitFor");
-    await gateWait.playwright(page.locator(`.page-chat-head${enabled ? ":not(:has(.page-chat-data))" : ":has(.page-chat-data)"}`), "waitFor");
+    await ensureModeMenu(page);
+    await waitFor(async () => (await modeItem(page, "create mode").getAttribute("aria-checked")) === String(enabled), "page chat create mode updated");
     if (await modeMenu(page).getAttribute("aria-expanded") === "true") await page.keyboard.press("Escape");
   };
   const mobileSheet = {
