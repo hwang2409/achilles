@@ -104,6 +104,7 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
           {tabs.map((tab) => <span key={tab}>{link(hrefOf(route.id, tab), tab === "memory" ? "Memory" : "Inbox", tab === route.tab)}</span>)}
         </nav>
       </div>
+      <ControlNote control={borrow} />
       {route.tab === "memory"
         ? <MemoryTab key={route.id} client={client} projectId={route.id} control={borrow} projectName={name} actions={actions} refresh={actions?.refresh ?? 0} />
         : <InboxTab key={route.id} client={client} projectId={route.id} control={borrow} names={lookup.names} />}
@@ -219,8 +220,8 @@ function Paged<T extends { id: string }>({ view, noun, empty, children }: { view
 
 const kindLabel = { brief: "Brief", decision: "Decisions", state: "State", backlog: "Backlog", changelog: "Changelog", legacy: "Documents" } satisfies Record<MemoryKind, string>;
 
-/** Shown only where a reveal button is: there is no control to take elsewhere. */
-const ControlNote = ({ control, shown }: { control: Borrow; shown: boolean }) => control.observer && shown
+/** One line under the tabs for a tab that is not in control, so Memory and Inbox start at the same height. */
+const ControlNote = ({ control }: { control: Borrow }) => control.observer
   ? <p id={CONTROL_NOTE} className="projects-note">Zeta lets only the tab in control read full text. This read will not interrupt another tab.</p> : null;
 
 function MemoryTab({ client, projectId, projectName, control, actions, refresh }: {
@@ -256,7 +257,6 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
       </div>
     </aside>}
     {actions?.working && <p className="projects-note" role="status">preparing or finishing memory review…</p>}
-    <ControlNote control={control} shown={view.state === "data" && (canWrite || view.rows.length > 0)} />
     {canWrite && view.state === "data" && view.rows.some((row) => isMemoryId(row.id)) && <div className="projects-selection">
       <button className="ui-button" type="button" aria-pressed={selecting} onClick={() => { setSelecting(!selecting); setSelection({ refresh, ids: new Set() }); }}>{selecting ? "Cancel selection" : "Select"}</button>
       {selecting && <><span role="status">{active.length} selected{active.length === MAX_RESOLVE ? " (limit reached)" : " (up to 64)"}</span>
@@ -311,7 +311,6 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
 function InboxTab({ client, projectId, control, names }: { client: ZetaClient; projectId: string; control: Borrow; names: ReadonlyMap<string, ProjectRow> }) {
   const view = usePages(client, (reader, cursor, signal) => readInbox(reader, projectId, cursor, { signal }), [projectId]);
   return <section className="projects-tab" aria-label="inbox">
-    <ControlNote control={control} shown={view.state === "data" && view.rows.some((row) => row.hasBody)} />
     {view.state === "data" && view.rows.length > 0 && <p className="projects-note">newest first · titles and senders only · a message loads when you open it, is not cached, and never goes in the address</p>}
     <Paged view={view} noun="inbox messages" empty="no messages were sent to this project.">
       {(rows: InboxRow[]) => <ul className="projects-inbox">

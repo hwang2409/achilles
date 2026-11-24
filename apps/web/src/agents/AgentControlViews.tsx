@@ -31,7 +31,7 @@ export function AgentSpawn({ client, owner, refresh }: Props) {
   }, [open, client, unavailable]);
   const profile = parent?.profiles.find((entry) => entry.name === name);
   return <section className="agents-spawn" aria-label="spawn an agent">
-    <button type="button" disabled={!!unavailable} aria-expanded={open} onClick={() => {
+    <button type="button" className="ui-button" disabled={!!unavailable} aria-expanded={open} onClick={() => {
       if (!open) { setParent(undefined); setNote(""); }
       setOpen(!open);
     }}>{open ? "close spawn form" : "+ spawn agent"}</button>

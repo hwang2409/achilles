@@ -13,7 +13,7 @@ import "./sessions.css";
 
 type ContinueSession = (id: string, signal: AbortSignal) => Promise<string | null>;
 
-const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase();
+const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
 const short = (id: string) => id.length > 10 ? id.slice(0, 8) + "…" : id;
 const href = (id?: string, transcript = false) => surfaceHref(`/sessions${id ? `/${encodeURIComponent(id)}` : ""}${transcript ? "/transcript" : ""}`);
 function selection() {

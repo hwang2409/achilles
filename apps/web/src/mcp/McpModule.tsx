@@ -98,7 +98,7 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
     project={project} retry={retryRead} reading={reading} offline={offline} />;
 
   const openAdd = () => setAdding(true);
-  return <ModuleFrame title="Connections" actions={snapshot && !adding && <button type="button" className="ui-button ui-button-primary" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!supported} onClick={openAdd}>Add connection</button>}>
+  return <ModuleFrame title="Connections" actions={snapshot && !adding && <button type="button" className="ui-button" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!supported} onClick={openAdd}>Add connection</button>}>
     <div className="mcp-place">
       {client && !supported ? <ModuleState kind="unsupported" title="needs a newer zeta" detail="update zeta to manage MCP connections here" />
         : offline && !retained ? connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
@@ -160,7 +160,7 @@ function McpTest({ owner, row, revision, online, heading }: {
   }
 
   return <section className="mcp-test" aria-label="connection test">
-    {needsTrust ? <p>{testTrust}</p> : <button ref={opener} type="button" disabled={!online} data-write-surface={WRITE_SURFACE.mcpTest}
+    {needsTrust ? <p>{testTrust}</p> : <button ref={opener} type="button" className="ui-button" disabled={!online} data-write-surface={WRITE_SURFACE.mcpTest}
       onClick={() => setReview((prior) => ({ id: (prior?.id ?? 0) + 1, target }))}>{testAction}</button>}
     <div role="status">{last && <p data-test-result={last.status}>{testReceipt(last)}</p>}</div>
     {review && reviewed && <Confirmation key={review.id} level={2} external={{ opener: () => opener.current?.disabled === false ? opener.current : heading.current }}

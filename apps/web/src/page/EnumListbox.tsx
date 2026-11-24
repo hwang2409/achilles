@@ -157,7 +157,6 @@ export function EnumListbox({
         <span className="enum-listbox-value">
           {open && query ? <><span className="enum-listbox-query-label">jump</span> <span className="enum-listbox-query">{query}</span></> : display(value)}
         </span>
-        <span aria-hidden="true">⌄</span>
       </button>
       {open && (
         <div

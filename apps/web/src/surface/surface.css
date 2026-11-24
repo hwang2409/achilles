@@ -14,7 +14,8 @@
 .surface-search .chat-search { background: transparent; border-color: transparent; min-height: var(--g1-nav-row-height); display: flex; align-items: center; padding-inline: var(--g1-space-2) 44px; border: 0; font-size: inherit; }
 .surface-search .chat-search > :is(span, kbd) { display: none; }
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; }
-.surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0; color: var(--fulcrum-muted); border-color: transparent; }
+/* the hint ends at the row padding, where "off" and the rename pencil end */
+.surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center end; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0 var(--g1-space-2); color: var(--fulcrum-muted); border-color: transparent; }
 .surface-search .palette-button > span { display: none; }
 .place-nav { flex: none; margin: var(--g1-space-3) var(--g1-sidebar-padding); }
 .chat-group h2 { font-size: inherit; font-weight: 600; color: var(--g1-muted); }
@@ -36,18 +37,22 @@
 .collapse-label::first-letter { text-transform: uppercase; }
 
 .module-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.module-frame > header { min-height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--g1-space-2); border-bottom: 1px solid var(--g1-border); padding: var(--g1-space-2) var(--g1-page-gutter); }
+/* no block padding: a 40px action fits the 56px bar, so every route header is the same height */
+.module-frame > header { min-height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--g1-space-2); border-bottom: 1px solid var(--g1-border); padding: 0 var(--g1-page-gutter); }
 .module-frame > header > div { display: flex; align-items: baseline; gap: var(--g1-space-3); min-width: 0; }
 .module-frame > header :is(h1, .ui-meta) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .module-frame > header :is(h1, p) { margin: 0; }
 .module-frame > header > button { flex: none; }
 .ui-tabs { display: flex; flex-wrap: wrap; gap: var(--g1-space-1); }
-.ui-tabs :is(button, a) { min-height: var(--g1-touch-height); display: inline-flex; align-items: center; gap: var(--g1-space-1); padding-inline: var(--g1-space-2); color: var(--g1-muted); border-radius: var(--g1-radius-control); }
+.ui-tabs :is(button, a) { min-height: var(--g1-control-height); display: inline-flex; align-items: center; gap: var(--g1-space-1); padding-inline: var(--g1-space-2); color: var(--g1-muted); border-radius: var(--g1-radius-control); }
+@media (max-width: 760px), (pointer: coarse) { .ui-tabs :is(button, a) { min-height: var(--g1-touch-height); } }
 .ui-tabs :is([aria-pressed="true"], [aria-current="page"]) { background: var(--g1-selected); color: var(--g1-fg); }
 .module-frame > header h1::first-letter, .module-state h2::first-letter { text-transform: uppercase; }
 .module-body > :not(.module-state), .agents-split, .sessions-split { width: 100%; }
 .module-body { flex: 1; min-height: 0; overflow: auto; }
 .module-state { max-width: 56rem; padding-inline: var(--g1-page-gutter); }
+/* a place that already pads its content does not pad its empty state again */
+:is(.accounts-place, .projects) .module-state { padding-inline: 0; }
 .module-state h2 { font-size: var(--g1-type-title); margin: 0; }
 .module-state p { max-width: 55ch; margin: 8px 0 0; color: var(--g1-muted); overflow-wrap: anywhere; }
 .module-state button { min-height: 44px; margin-top: 16px; padding: 0 12px; }
@@ -61,15 +66,16 @@
 @media (min-width: 761px) and (min-height: 501px) {
   .surface-search { position: sticky; top: 0; z-index: 3; }
   .sidebar-scroll { scroll-padding-top: 36px; }
-  .sidebar-collapsed .create-split .place-link span { display: block; font-size: var(--g1-type-kbd); }
   .sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
   .sidebar-collapsed .sidebar-scroll { scrollbar-width: none; }
   .sidebar-collapsed .sidebar :is(.brand-row strong, .surface-connection, .new-chat b, .surface-search .chat-search, .search-skeleton, .place-link span, .place-link small, .chat-list, .collapse-label) { display: none; }
   .sidebar-collapsed :is(.surface-actions, .surface-search, .place-nav) { margin-inline: 6px; }
   .sidebar-collapsed :is(.place-link, .surface-actions > .place-link, .new-chat) { justify-content: center; min-height: 42px; padding: 0; }
-  .sidebar-collapsed .surface-search .palette-button { position: static; min-width: 0; }
-  .sidebar-collapsed .surface-search .palette-button > span { display: inline; }
+  .sidebar-collapsed .surface-search .palette-button { position: static; min-width: 0; height: auto; min-height: 42px; place-items: center; padding: 0; }
+  .sidebar-collapsed .surface-search .palette-button > span { display: flex; }
+  .sidebar-collapsed :is(.new-chat, .palette-button) svg { color: var(--fulcrum-muted); }
   .sidebar-collapsed .surface-search .palette-button > kbd { display: none; }
+  .sidebar-collapsed .sidebar > footer { padding-inline: 6px; }
   .sidebar-collapsed .collapse-button { justify-content: center; padding: 0; }
 }
 

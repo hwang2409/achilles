@@ -15,12 +15,14 @@
 .palette-results > div + div { border-top: 1px solid var(--fulcrum-border); }
 .palette-results h2 { margin: 0; padding: 14px 20px 6px; color: var(--fulcrum-muted); font-size: inherit; font-weight: 600; }
 .palette-option { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: 40px; box-sizing: border-box; padding: 9px 20px; cursor: pointer; }
-.palette-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the label takes the free space, so a detail and a shortcut both sit in the right column */
+.palette-option > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-option small, .palette-option kbd { flex: none; color: var(--fulcrum-muted); }
 .palette-option:hover { background: var(--g1-hover); }
 .palette-option[aria-selected="true"] { background: var(--g1-selected); font-weight: 600; }
 .palette-results h2::first-letter, .sheet-groups h3::first-letter, .sheet-title h2::first-letter { text-transform: uppercase; }
-.palette-option :is(small, kbd) { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; font-weight: 400; }
+/* one font for every hint in the right column; the mono font has no ⌘ glyph, so mono hints mixed two fonts */
+.palette-option :is(small, kbd) { font-family: inherit; font-size: inherit; font-weight: 400; }
 .palette-empty { margin: 0; padding: 20px; color: var(--fulcrum-muted); }
 .command-palette footer { display: flex; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--fulcrum-border); }
 

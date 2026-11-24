@@ -8,7 +8,7 @@ import { WRITE_SURFACE } from "./writeSurfaces";
 
 import { ShellDock } from "./surface/ModuleState";
 import type { BuildActivity } from "./create/buildActivity";
-import { BuildStatus, SurfaceNav } from "./surface/SurfaceNav";
+import { BuildStatus, NavIcon, SurfaceNav } from "./surface/SurfaceNav";
 import type { CreateModeOwner } from "./create/createMode";
 import { surfaceHref, type SurfaceRoute } from "./surface/routes";
 
@@ -185,6 +185,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     return () => document.removeEventListener("close", speak, true);
   }, [pending, narrow, drawer]);
   // One in-flow slot under the route's bar: the chat header here, or the module/create/telemetry bar via ShellDock.
+  // A module route's banner sits in that slot too, under its page header like every other route.
   const status = !showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />;
   const dock = (status || receipt) ? <div className="build-dock">
     {status}
@@ -203,16 +204,16 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={showNavActivity ? activity : undefined}
-      action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>{newChat.pending ? "Starting…" : "New chat"}</b></button>}
+      action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : collapsed ? "new chat" : undefined} onClick={startNewChat}><span aria-hidden="true"><NavIcon d="M8 3v10 M3 8h10" /></span><b>{newChat.pending ? "Starting…" : "New chat"}</b></button>}
       search={nav.searchControl(dismissDrawer)} counts={{ ...nav.counts, chats: nav.counts.chats && { ...nav.counts.chats, waiting: (nav.counts.chats.waiting ?? 0) + activity.needsYou } }} recent={nav.recent(dismissDrawer, activity.rows, activity.onScreen)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
-      {banner}
+      {workspace && banner}
       <div className="shell-header">
         <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
       {workspace && dock}
-      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows, onScreen: activity.onScreen }}>{settingsPlace ? <DisplaySettings.Provider value={() => openSettings(activeElement())}>{children}</DisplaySettings.Provider> : children}</PageChatCatalog.Provider></ShellDock.Provider>
+      <ShellDock.Provider value={workspace ? null : <>{banner}{dock}</>}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows, onScreen: activity.onScreen }}>{settingsPlace ? <DisplaySettings.Provider value={() => openSettings(activeElement())}>{children}</DisplaySettings.Provider> : children}</PageChatCatalog.Provider></ShellDock.Provider>
     </main>
     {/* outside main and the drawer, so it is never inert or aria-hidden */}
     <span ref={liveRegion} className="visually-hidden" role="status">{spoken}</span>

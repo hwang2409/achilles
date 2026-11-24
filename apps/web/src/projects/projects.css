@@ -5,6 +5,8 @@
 .projects button[aria-disabled="true"] { color: var(--fulcrum-muted); cursor: default; }
 .projects :is(a, button):hover { background: var(--g1-hover); }
 .projects ul { list-style: none; margin: 0; padding: 0; }
+/* list rows hang their 16px padding outside the content edge, so row text lines up with the header title */
+.projects .projects-list { margin-inline: calc(-1 * var(--g1-space-4)); }
 .projects-inbox li + li, .projects-group li + li { border-top: 1px solid var(--g1-rule); }
 .projects-list { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) auto; column-gap: var(--g1-space-4); }
 .projects-list :is(li, a) { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
@@ -14,7 +16,7 @@
 .projects-list :is(span, small), .projects-note, .projects-group small, .projects-inbox small { color: var(--fulcrum-muted); }
 .projects-list small, .projects-note, .projects-group small, .projects-inbox small { font-size: inherit; }
 .projects-note { margin: 0; text-wrap: pretty; }
-.projects-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.projects-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px 16px; }
 .projects-bar > a { display: inline-flex; align-items: center; min-height: 40px; padding-inline: 10px; text-decoration: none; }
 .projects-tab, .projects-paged { display: flex; flex-direction: column; gap: 12px; }
 .projects-group { border-top: 1px solid var(--g1-border); }
@@ -61,5 +63,8 @@
 .projects-entry[aria-expanded="true"], .projects-group li:has(input:checked) { background: var(--g1-selected); }
 .projects-select-entry { flex-shrink: 0; display: grid; place-items: center; width: 44px; }
 .projects-group > .projects-reveal { margin-block: var(--g1-space-2); }
+/* the tab fills the page, so the reading panel and its border run to the bottom */
+.projects { min-height: 100%; }
+.projects-tab { flex: 1; }
 .projects-tab .ui-reading-panel { min-height: min(480px, 70dvh); max-height: calc(100dvh - 128px); }
 @media (max-width: 760px) { .projects-tab .ui-reading-panel { min-height: 0; max-height: none; } }

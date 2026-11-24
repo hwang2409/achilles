@@ -43,10 +43,10 @@ function AccountRows({ accounts, stale, signIn, switchAction }: { accounts: Acco
         </div>)}
         {usage?.refreshFailed && <p className="account-availability" data-failed="true">last usage refresh failed</p>}
       </div>
-      {available && !current && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountPageSwitch}
+      {available && !current && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountPageSwitch}
         aria-label={`switch active chat to ${account}`} disabled={!!switchAction.reason} aria-describedby={switchAction.reason ? "account-switch-reason" : undefined}
         onClick={event => switchAction.open(account, event.currentTarget)}>switch chat</button>}
-      {!available && signIn && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
+      {!available && signIn && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
         aria-label={`sign in again to ${account}`} onClick={event => signIn({ provider: account.startsWith("anthropic:") ? "claude" : "codex", account }, event.currentTarget)}>sign in again</button>}
     </li>)}
   </ul></>;
@@ -119,15 +119,15 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
       {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} switchAction={switchAction} />}
       <AccountSwitchReceipt />
       {switchAction.reason && supported && <div className="account-switch-availability">
-        {!rows.some(row => row.available && !row.current) && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountPageSwitch} disabled aria-describedby="account-switch-reason">switch chat</button>}
-        <p id="account-switch-reason">{switchAction.reason}</p>{switchAction.refusal && !failure && <button className="account-action" type="button" onClick={() => void show(true)}>try again</button>}
+        {!rows.some(row => row.available && !row.current) && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountPageSwitch} disabled aria-describedby="account-switch-reason">switch chat</button>}
+        <p id="account-switch-reason">{switchAction.reason}</p>{switchAction.refusal && !failure && <button className="ui-button account-action" type="button" onClick={() => void show(true)}>try again</button>}
       </div>}
       {attempt && <AccountLoginStatus attempt={attempt} login={login} canSignIn={canSignIn} signIn={signIn}
         available={fresh && rows.some(row => row.account === loginIdentity(attempt.target) && row.available)} />}
       {canSignIn && !rows.length && <div className="account-actions">
-        <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
+        <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
           onClick={event => signIn({ provider: "claude" }, event.currentTarget)}>sign in to claude</button>
-        <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
+        <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
           onClick={event => signIn({ provider: "codex" }, event.currentTarget)}>sign in to codex</button>
       </div>}
       {review && <Confirmation level={2} external={{ onKeep: () => { setReview(null); review.opener.focus(); } }}

@@ -1,11 +1,13 @@
 .pages-landing { padding: var(--g1-page-padding); }
 .pages-landing .module-state { padding: 0; }
-.pages-grid { padding: 0; margin: 0; list-style: none; }
+/* list rows hang their 16px padding outside the content edge, so row text lines up with the header title (as on Projects) */
+.pages-grid { padding: 0; margin: 0 calc(-1 * var(--g1-space-4)); list-style: none; }
 .pages-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, .7fr) minmax(0, 1fr);
   align-items: baseline;
   padding: 12px 16px;
+  border-bottom: 1px solid var(--g1-rule);
   gap: 4px 16px;
   color: inherit;
   text-decoration: none;

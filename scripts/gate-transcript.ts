@@ -320,10 +320,11 @@ export async function gateTranscript(
         return { top: Math.max(rowRect.top, scrollRect.top), bottom: Math.min(rowRect.bottom, scrollRect.bottom), left: Math.max(rowRect.left, scrollRect.left), right: Math.min(rowRect.right, scrollRect.right) };
       }).filter((rowRect) => rowRect.bottom > rowRect.top && rowRect.right > rowRect.left);
       const rowIntersecting = rowRects.filter((rowRect) => rowRect.left < controlRect.right && rowRect.right > controlRect.left && rowRect.top < controlRect.bottom && rowRect.bottom > controlRect.top).length;
-      return { fullVisible: visible(full), compactVisible: visible(compact), control: controlRect, pane: paneRect, lane: laneRect, rows: rows.length, rowRects, rowIntersecting, insidePane: controlRect.left >= paneRect.left && controlRect.right <= paneRect.right && controlRect.top >= paneRect.top && controlRect.bottom <= paneRect.bottom, laneHeight: laneRect.height, ariaLabel: control.getAttribute("aria-label"), title: control.getAttribute("title") };
+      return { fullVisible: visible(full), compactVisible: visible(compact), control: controlRect, pane: paneRect, lane: laneRect, rows: rows.length, rowRects, rowIntersecting, insidePane: controlRect.left >= paneRect.left && controlRect.right <= paneRect.right && controlRect.top >= paneRect.top && controlRect.bottom <= paneRect.bottom, scrollGap: paneRect.bottom - scrollRect.bottom, ariaLabel: control.getAttribute("aria-label"), title: control.getAttribute("title") };
     });
     const expectedCompact = width <= 480;
-    if (!geometry.insidePane || geometry.rowIntersecting !== 0 || geometry.laneHeight < 48 || geometry.laneHeight > 48 || (expectedCompact && (geometry.control.width !== 44 || geometry.control.height !== 44)) || geometry.compactVisible !== expectedCompact || geometry.fullVisible === expectedCompact || geometry.ariaLabel !== "jump to latest" || geometry.title !== "jump to latest")
+    // the control floats over the rows, so the timeline still runs to the bottom of the pane: no reserved band
+    if (!geometry.insidePane || Math.abs(geometry.scrollGap) > 1 || (expectedCompact && (geometry.control.width !== 44 || geometry.control.height !== 44)) || geometry.compactVisible !== expectedCompact || geometry.fullVisible === expectedCompact || geometry.ariaLabel !== "jump to latest" || geometry.title !== "jump to latest")
       throw new Error(`jump control geometry or labels failed at ${width}: ${JSON.stringify(geometry)}`);
     if (width === 390) {
       const sheet = page.getByRole("dialog", { name: "page chat" });

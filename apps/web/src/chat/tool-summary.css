@@ -28,6 +28,10 @@
 }
 .transcript [data-part="tool-foot"] { display: none; }
 
+/* fulcrum hides a shell card's name; here every tool card shows its name, then a muted summary */
+.compact-tool[data-tool-view="shell"] > [data-part="tool-header"] { grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto; }
+.compact-tool[data-tool-view="shell"] [data-part="tool-name"] { position: static; width: auto; height: auto; clip-path: none; }
+.compact-tool[data-tool-view="shell"] [data-part="tool-summary"] { color: var(--g1-muted); }
 .compact-tool-error { grid-column: 2 / -1; grid-row: 2; min-width: 0; color: var(--fulcrum-danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) {
   .transcript .compact-tool > [data-part="tool-header"] { grid-template-columns: 12px minmax(0, 2fr) minmax(0, 3fr) auto; grid-template-rows: auto; }

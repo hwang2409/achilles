@@ -39,7 +39,7 @@
 .tm-primary:not(:disabled) { border-color: var(--g1-primary); background: var(--g1-primary); color: var(--g1-primary-text); }
 .tm-link { min-height: 36px; padding: 0 4px; border: 0; background: none; color: var(--fulcrum-accent); cursor: pointer; font: inherit; }
 /* achilles' EnumListbox, fitted to the boards: range is a bare bordered button; a filter shows its label inside the frame */
-.telemetry-module .enum-listbox-button { width: auto; min-height: 36px; gap: 10px; padding: 0 12px; background: none; }
+.telemetry-module .enum-listbox-button { width: auto; min-height: var(--g1-control-height); gap: 10px; padding: 0 32px 0 12px; background-color: transparent; }
 .telemetry-module .enum-listbox-menu { right: auto; width: max-content; min-width: 100%; max-width: min(44ch, 90vw); }
 .tm-range .enum-listbox-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tm-range .enum-listbox-menu { left: auto; right: 0; }
@@ -67,9 +67,10 @@
 .tm-actions .tm-button { min-height: 44px; }
 
 /* Align the intro and empty copy with the telemetry data. */
-.tm-intro { max-width: 62ch; margin: 0; padding-block: var(--g1-space-4) var(--g1-space-7); }
-.tm-intro h1 { margin: 0 0 var(--g1-space-4); }
-.tm-records { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 8px 0; margin-bottom: 24px; }
+/* the first heading sits one page padding under the header, as on every other route */
+.tm-intro { max-width: 62ch; margin: 0; padding-block: 0 var(--g1-space-7); }
+.tm-records { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 0 0 8px; margin-bottom: 24px; }
+.tm-records h2 { margin-top: 0; }
 .tm-records ul { margin: 0; padding: 0; list-style: none; line-height: 1.8; }
 .tm-turn-on p { margin: 0 0 12px; }
 .tm-turn-on pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -124,7 +125,7 @@
 .tm-select { border: 1px solid var(--fulcrum-border); }
 .tm-select .enum-listbox { display: flex; align-items: center; }
 .tm-select .enum-listbox-label { margin: 0; padding-left: 12px; font-size: inherit; line-height: inherit; }
-.tm-select .enum-listbox-button { min-height: 44px; max-width: 28ch; padding-left: 8px; border: 0; }
+.tm-select .enum-listbox-button { min-height: var(--g1-control-height); max-width: 28ch; padding-left: 8px; border: 0; }
 .tm-select .enum-listbox-menu { left: -1px; }
 .tm-select-on { border-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .tm-check { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
@@ -230,4 +231,3 @@
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
   .tm-button, .tm-toggle button { min-width: 44px; min-height: 44px; }
 }
-.tm-intro > .ui-page-header h1 { font-size: var(--g1-type-title); line-height: 32px; }

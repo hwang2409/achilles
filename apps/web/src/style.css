@@ -33,7 +33,7 @@ button, input, textarea, select { border-radius: var(--g1-radius-control); }
 @media (max-width: 760px), (pointer: coarse) { :where(.ui-button, .ui-icon-button) { min-height: var(--g1-touch-height); } :where(.ui-icon-button) { min-width: var(--g1-touch-height); } }
 :where(input:not([type="checkbox"], [type="radio"]), textarea, select) {
   background: var(--g1-bg);
-  border: var(--g1-border-width) solid var(--g1-border);
+  border: var(--g1-border-width) solid var(--g1-control-border);
 }
 :where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
 :is(.primary, .ui-button-primary):hover { background-color: color-mix(in srgb, var(--g1-primary) 88%, var(--g1-primary-text)); }
@@ -44,10 +44,19 @@ button, input, textarea, select { border-radius: var(--g1-radius-control); }
 :is(input:not([type="checkbox"], [type="radio"]), textarea, select):focus-visible {
   border-color: var(--g1-accent);
 }
+/* one dropdown look: native selects and the custom listbox draw the same chevron, in a gray that reads on both themes */
+select, .enum-listbox-button { appearance: none; padding-inline-end: 32px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23888' stroke-width='1.2'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
+/* radios match the checkboxes instead of the browser blue */
+:where(input[type="radio"], input[type="checkbox"]) { accent-color: var(--g1-accent); }
+/* one disclosure mark: every plain summary draws the tool card's small muted triangle, turned down when open */
+summary:not([data-part]) { list-style: none; }
+summary:not([data-part])::-webkit-details-marker { display: none; }
+summary:not([data-part])::before { content: ""; display: inline-block; margin-inline-end: 8px; border-block: 4px solid transparent; border-left: 5px solid var(--fulcrum-muted); vertical-align: 1px; }
+details[open] > summary:not([data-part])::before { transform: rotate(90deg); }
 a { color: inherit; text-decoration: none; }
 kbd { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
-.observer-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; flex: none; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--fulcrum-border); background: color-mix(in srgb, var(--fulcrum-accent) 8%, var(--fulcrum-bg)); color: var(--fulcrum-fg); }
+.observer-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; flex: none; gap: 8px 16px; padding: 10px var(--g1-page-gutter); border-bottom: 1px solid var(--fulcrum-border); background: color-mix(in srgb, var(--fulcrum-accent) 8%, var(--fulcrum-bg)); color: var(--fulcrum-fg); }
 .observer-banner div { display: grid; gap: 2px; min-width: 0; }
 .observer-banner > div:first-child { flex: 1 1 0; }
 .observer-banner strong { color: var(--fulcrum-accent); }

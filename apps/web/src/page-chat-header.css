@@ -9,8 +9,10 @@
 .page-chat-head strong { font-size: inherit; font-weight: 600; }
 .page-chat-readouts { padding-inline: var(--g1-space-2); overflow: hidden; text-overflow: ellipsis; }
 .page-chat-new-reason { padding: var(--g1-space-1) var(--g1-space-4); color: var(--g1-muted); font-size: inherit; }
-.page-chat-switcher { display: flex; align-items: center; gap: var(--g1-space-2); flex: 1; min-width: 0; text-align: start; padding-inline-start: 0; border-inline-start-width: 0; }
-.page-chat-title-row > button { min-width: 44px; min-height: 44px; }
+/* padded like every button; the negative margin keeps its text on the panel edge */
+.page-chat-switcher { display: flex; align-items: center; gap: var(--g1-space-2); flex: 0 1 auto; min-width: 0; margin-inline-end: auto; text-align: start; padding-inline: var(--g1-space-2); margin-inline-start: calc(-1 * var(--g1-space-2)); border-inline-start-width: 0; }
+.page-chat-title-row > button { min-width: var(--g1-control-height); min-height: var(--g1-control-height); }
+@media (max-width: 760px), (pointer: coarse) { .page-chat-title-row > button { min-width: var(--g1-touch-height); min-height: var(--g1-touch-height); } }
 .page-chat-icon { flex: none; font-size: 18px; }
 .page-chat-head [aria-expanded="true"] { background: var(--g1-selected); }
 .page-chat-popup {
@@ -19,7 +21,6 @@
   background: var(--fulcrum-bg); color: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border);
   white-space: normal;
 }
-.page-chat-popup[data-kind="modes"] { width: min(326px, calc(100% - 32px)); }
 .page-chat-choice, .page-chat-mode, .page-chat-more {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px;
   padding: 6px 10px; border: 0; border-bottom: 1px solid var(--fulcrum-border); border-left: 2px solid transparent;
@@ -29,7 +30,7 @@
 .page-chat-choice time { color: var(--fulcrum-muted); white-space: nowrap; }
 .page-chat-choice[aria-selected="true"] { border-left-color: var(--fulcrum-accent); background: var(--g1-accent-tint); }
 .page-chat-choice:hover, .page-chat-mode:hover, .page-chat-more:hover { background: var(--fulcrum-surface); }
-.page-chat-mode-check { display: inline-grid; place-items: center; width: 14px; height: 14px; border: 1px solid var(--fulcrum-muted); color: var(--fulcrum-accent); }
+.page-chat-mode-check { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; line-height: 1; border: 1px solid var(--fulcrum-muted); color: var(--fulcrum-accent); }
 .page-chat-popup-note { padding: 8px 12px; color: var(--fulcrum-muted); }
 .page-chat-more { color: var(--fulcrum-accent); }
 .page-chat-error { color: var(--fulcrum-danger); }

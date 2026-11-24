@@ -108,7 +108,8 @@ function argValue(value: unknown): string {
       return `in [${values.join(", ")}${omission}]`;
     }
   }
-  return isScalar(value) ? text(value, 48) : "…";
+  // long enough to fill a wide card; the header ellipsis cuts it to the room it has, and argsText still caps the line at 260
+  return isScalar(value) ? text(value, 200) : "…";
 }
 
 function argsText(item: ToolItem): string {
