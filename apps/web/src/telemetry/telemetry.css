@@ -237,3 +237,4 @@
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
   .tm-button, .tm-toggle button { min-width: 44px; min-height: 44px; }
 }
+.tm-intro > .ui-page-header h1 { font-size: var(--g1-type-page-title); line-height: 32px; letter-spacing: var(--g1-tracking-page-title); }

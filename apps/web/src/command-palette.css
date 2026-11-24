@@ -1,12 +1,13 @@
 .command-palette, .shortcuts-sheet { padding: 0; color: var(--fulcrum-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); box-shadow: var(--g1-shadow-overlay); }
-.command-palette::backdrop, .shortcuts-sheet::backdrop { background: color-mix(in srgb, black 60%, transparent); }
+.command-palette::backdrop, .shortcuts-sheet::backdrop { background: color-mix(in srgb, black 35%, transparent); }
 .command-palette { width: min(680px, calc(100vw - 32px)); margin-top: 15vh; }
 .command-palette[open] { display: flex; flex-direction: column; max-height: 70vh; }
 
 .palette-input { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 20px; border-bottom: 1px solid var(--fulcrum-border); }
-.palette-input:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .palette-input > span { color: var(--fulcrum-accent); }
 .palette-input input { flex: 1; min-width: 0; padding: 0; color: inherit; font: inherit; font-size: 1.15em; background: transparent; border: 0; outline: 0; }
+/* the open palette is the focus context; the caret marks the field, so no second ring */
+.palette-input input:focus-visible { box-shadow: none; }
 .palette-input input::placeholder { color: var(--g1-muted); }
 .palette-input kbd, .command-palette footer { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: var(--g1-type-kbd); }
 
