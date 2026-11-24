@@ -27,9 +27,15 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   };
   const fresh = await page.locator("html").evaluate((node) => {
     const style = getComputedStyle(node);
-    return { ui: style.fontFamily, mono: style.getPropertyValue("--achilles-code-font"), size: style.fontSize };
+    const sample = document.createElement("span");
+    sample.hidden = true;
+    sample.style.fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif";
+    document.body.append(sample);
+    const expectedUi = getComputedStyle(sample).fontFamily;
+    sample.remove();
+    return { ui: style.fontFamily, expectedUi, mono: style.getPropertyValue("--achilles-code-font"), size: style.fontSize };
   });
-  if (!fresh.ui.includes("BlinkMacSystemFont") || fresh.mono.trim() !== 'ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace' || fresh.size !== "15px")
+  if (fresh.ui !== fresh.expectedUi || fresh.mono.trim() !== 'ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace' || fresh.size !== "15px")
     throw new Error(`wrong fresh typography: ${JSON.stringify(fresh)}`);
   const jetBrainsFaces = () => page.evaluate(() => [...document.fonts].filter(face => face.family.includes("JetBrains Mono")).length);
   if (await jetBrainsFaces()) throw new Error("JetBrains Mono was registered with default settings");
