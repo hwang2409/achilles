@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { ReadingMarkdown, ReadingPanel } from "../surface/ReadingPanel";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
@@ -250,7 +252,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     <ModuleState kind="unsupported" title="no active session" detail="this zeta only reports library catalogs for an active session." />
     <a href={surfaceHref(chatsRoute.path)}>open a chat</a>
   </div>;
-  else content = <div className="library-layout" data-detail={Boolean(selected)}>
+  else content = <div className="library-layout ui-reading-host" data-detail={Boolean(selected)}>
     <LibraryList view={catalog} kind={kind} title={title} live={reads.catalog} selected={selected} query={query} onQuery={setQuery}
       more={more} onLoadMore={() => void loadMore()} onPick={pick} search={search} focusNew={focusNew} />
     <section className="library-detail" aria-label="catalog detail" onKeyDown={(event) => {
@@ -290,13 +292,13 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   return <ModuleFrame title={`library / ${title}`}>
     <div className="library">
       <div className="library-bar">
-        <nav aria-label="library catalogs">
+        <nav className="ui-tabs" aria-label="library catalogs">
           {tabs.map((tab) => <a key={tab.id} href={surfaceHref(tab.path)} aria-current={tab.id === kind ? "page" : undefined}>{tab.label}</a>)}
         </nav>
         <div className="library-snapshot">
-          <span data-live={reads.catalog || undefined}>{reads.catalog ? "live catalog · effective scope" : "active session snapshot · may be stale"}</span>
+          <span data-live={reads.catalog || undefined}>{reads.catalog ? "Effective scope" : "Session snapshot may be stale"}</span>
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
-          {write && !creating && !editing && <button type="button" className="library-new" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
+          {write && !creating && !editing && <button type="button" className="library-new ui-button" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
             ref={newButton}
             aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
@@ -416,6 +418,8 @@ function LibraryText({ client, method, row, noun, edit, onGone }: { client: Zeta
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const pending = useRef<AbortController | null>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const close = () => { pending.current?.abort(); setReveal(null); requestAnimationFrame(() => opener.current?.focus()); };
   const region = useRef<HTMLDivElement>(null);
   useEffect(() => () => pending.current?.abort(), []);
   useEffect(() => {
@@ -435,6 +439,7 @@ function LibraryText({ client, method, row, noun, edit, onGone }: { client: Zeta
     } catch (error) {
       next = { state: "failed", problem: problemOf(error) };
     }
+    if (abort.signal.aborted) return;
     setReveal(next);
     // clear first and set on the next frame, so a second show of the same text is announced again.
     setAnnouncement("");
@@ -444,28 +449,25 @@ function LibraryText({ client, method, row, noun, edit, onGone }: { client: Zeta
   }
 
   const gone = reveal?.state === "failed" && reveal.problem.gone;
+  const host = opener.current?.closest(".library-layout");
   return <section className="library-text" aria-label={`${noun} text`}>
-    <p className="library-untrusted">file text is untrusted. it is shown as plain text and never sent to a model.</p>
     <p role="status" className="library-visually-hidden">{announcement}</p>
-    <div className="library-text-actions">
-      {reveal?.state === "data"
-        ? <button type="button" onClick={() => setReveal(null)}>hide text</button>
-        : (!reveal || reveal.state === "loading" || reveal.problem.retry) &&
-          <button type="button" aria-disabled={reveal?.state === "loading"} onClick={() => void show()}>
-            {reveal?.state === "loading" ? `reading ${noun} text…` : reveal ? "retry" : `show ${noun} text`}
-          </button>}
-      {gone && <button type="button" onClick={onGone}>refresh list</button>}
-    </div>
-    {reveal?.state === "failed" && <div ref={region} tabIndex={-1} className="library-text-region">
-      <p role="alert" className="library-error">could not show the text: {reveal.problem.message}</p>
-    </div>}
-    {reveal?.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={`${row.name} ${noun} text`} className="library-text-region">
-      {reveal.body.redacted && <p className="library-flag">this file has text that looks like a secret; it is shown masked here and is still in the file</p>}
-      {reveal.body.truncated && <p className="library-flag">truncated at 128 KiB</p>}
-      <pre className="library-body">{reveal.body.text}</pre>
-      {reveal.body.truncated && <p className="library-flag">text truncated at 128 KiB</p>}
-    </div>}
-    {edit && reveal?.state === "data" && <EditEntry edit={edit} row={row} body={reveal.body} />}
+    <button ref={opener} className="ui-button" type="button" aria-expanded={!!reveal} onClick={() => void show()}>{`show ${noun} text`}</button>
+    {reveal && host && createPortal(<ReadingPanel title={`${row.name} ${noun} text`} onClose={close}>
+      {reveal.state === "loading" && <p role="status">Reading {noun} text…</p>}
+      {reveal.state === "failed" && <div ref={region} tabIndex={-1} className="library-text-region">
+        <p role="alert" className="library-error">could not show the text: {reveal.problem.message}</p>
+        {reveal.problem.retry && <button type="button" className="ui-button" onClick={() => void show()}>retry</button>}
+        {gone && <button type="button" className="ui-button" onClick={onGone}>refresh list</button>}
+      </div>}
+      {reveal.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={`${row.name} ${noun} text`} className="library-text-region">
+        {reveal.body.redacted && <p className="library-flag">this file has text that looks like a secret; it is shown masked here and is still in the file</p>}
+        {reveal.body.truncated && <p className="library-flag">truncated at 128 KiB</p>}
+        <ReadingMarkdown source={reveal.body.text} />
+        {reveal.body.truncated && <p className="library-flag">text truncated at 128 KiB</p>}
+        {edit && <EditEntry edit={edit} row={row} body={reveal.body} />}
+      </div>}
+    </ReadingPanel>, host)}
   </section>;
 }
 

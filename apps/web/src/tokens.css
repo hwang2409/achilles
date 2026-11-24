@@ -73,7 +73,6 @@
   --g1-page-padding: var(--g1-space-6) var(--g1-page-gutter);
   --g1-list-row-height: 52px;
   --g1-content-max: 944px;
-  --g1-page-max: calc(var(--g1-content-max) + 336px);
 }
 
 [data-achilles-theme="g1-dark"] {

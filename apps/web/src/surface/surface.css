@@ -44,7 +44,7 @@
 .ui-tabs :is(button, a) { min-height: var(--g1-touch-height); display: inline-flex; align-items: center; gap: var(--g1-space-1); padding-inline: var(--g1-space-2); color: var(--g1-muted); border-radius: var(--g1-radius-control); }
 .ui-tabs :is([aria-pressed="true"], [aria-current="page"]) { background: var(--g1-selected); color: var(--g1-fg); }
 .module-frame > header h1::first-letter, .module-state h2::first-letter { text-transform: uppercase; }
-.module-body > :not(.module-state), .agents-split, .sessions-split { width: 100%; max-width: var(--g1-page-max); }
+.module-body > :not(.module-state), .agents-split, .sessions-split { width: 100%; }
 .module-body { flex: 1; min-height: 0; overflow: auto; }
 .module-state { max-width: 56rem; padding-inline: var(--g1-page-gutter); }
 .module-state h2 { font-size: var(--g1-type-section); margin: 0; }
@@ -96,3 +96,21 @@
 }
 
 @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+
+.ui-reading-host { position: relative; }
+.ui-reading-panel { position: absolute; inset: 0 0 0 auto; width: min(100%, max(320px, 40%)); display: flex; flex-direction: column; min-height: 0; background: var(--g1-bg); border-inline-start: 1px solid var(--g1-border); z-index: 2; }
+.ui-reading-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--g1-space-2); padding: var(--g1-space-3) var(--g1-page-gutter); border-bottom: 1px solid var(--g1-rule); }
+.ui-reading-panel > header h2 { margin: 0; font-size: var(--g1-type-section); overflow-wrap: anywhere; }
+.ui-reading-panel > header small { color: var(--g1-muted); }
+.ui-reading-body { flex: 1; min-height: 0; overflow: auto; padding: var(--g1-page-gutter); }
+.ui-reading-markdown { max-width: 72ch; overflow-wrap: anywhere; }
+.ui-reading-markdown > :first-child { margin-top: 0; }
+.ui-reading-markdown pre { padding: var(--g1-space-2); overflow: auto; background: var(--g1-bg-subtle); border-radius: var(--g1-radius-control); }
+.ui-reading-markdown :is(th, td) { text-align: start; padding: var(--g1-space-1) var(--g1-space-2); border-bottom: 1px solid var(--g1-rule); }
+.module-body, .ui-reading-body { scrollbar-width: thin; scrollbar-color: var(--g1-border) transparent; }
+@media (min-width: 1100px) {
+  .ui-reading-host:has(> .ui-reading-panel) { padding-inline-end: 40%; }
+}
+@media (max-width: 760px) {
+  .ui-reading-panel { position: fixed; width: 100%; z-index: 10; }
+}

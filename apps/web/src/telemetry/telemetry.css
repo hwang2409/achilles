@@ -45,7 +45,7 @@
 .tm-range .enum-listbox-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tm-range .enum-listbox-menu { left: auto; right: 0; }
 
-.tm-main { flex: 1 0 auto; box-sizing: border-box; width: 100%; min-width: 0; max-width: var(--g1-page-max); padding: var(--g1-page-padding); font-family: var(--achilles-ui-font, var(--g1-font-ui)); }
+.tm-main { flex: 1 0 auto; box-sizing: border-box; width: 100%; min-width: 0; padding: var(--g1-page-padding); font-family: var(--achilles-ui-font, var(--g1-font-ui)); }
 
 /* states */
 .tm-loading { margin: 0 0 24px; padding-bottom: 16px; border-bottom: 1px solid var(--tm-line); color: var(--fulcrum-muted); }
