@@ -1,3 +1,6 @@
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { libraryMethods, projectBody, sourceTiers, type Body, type CatalogRow, type LibraryKind } from "./catalog";
@@ -69,22 +72,22 @@ function EditorActions({ dirty, what, onDiscard, save, status }: { dirty: boolea
     asked.current ||= confirm;
   }, [confirm]);
   // distinct keys: React must not reuse "keep editing" as the save button, or the next Enter saves.
-  if (confirm) return <div key="confirm" role="group" aria-label="discard changes?" className="library-editor-actions">
+  if (confirm) return <div key="confirm" role="group" aria-label="discard changes?" className="flex flex-wrap items-center gap-2 border-t pt-4">
     {/* a long name breaks after its hyphens, like the editor heading (copy gives the real name); "?" stays in view */}
-    <span>discard your changes to <span className="library-name">{what.split("-").flatMap((part, index) => index ? ["-", <wbr key={index} />, part] : [part])}?</span></span>
-    <button type="button" ref={keep} onClick={() => setConfirm(false)}>keep editing</button>
-    <button type="button" className="library-danger" onClick={onDiscard}>discard changes</button>
+    <span>discard your changes to <span className="font-semibold wrap-anywhere">{what.split("-").flatMap((part, index) => index ? ["-", <wbr key={index} />, part] : [part])}?</span></span>
+    <Button variant="outline" type="button" ref={keep} onClick={() => setConfirm(false)}>keep editing</Button>
+    <Button variant="outline" type="button"  onClick={onDiscard}>discard changes</Button>
   </div>;
-  return <div key="bar" className="library-editor-actions">
+  return <div key="bar" className="flex flex-wrap items-center gap-2 border-t pt-4">
     {status}
-    <button type="button" ref={discard} onClick={() => dirty ? setConfirm(true) : onDiscard()}>{dirty ? "discard" : "close"}</button>
+    <Button variant="outline" type="button" ref={discard} onClick={() => dirty ? setConfirm(true) : onDiscard()}>{dirty ? "discard" : "close"}</Button>
     {save}
   </div>;
 }
 
 /** A tab that lost control (another tab took it while this one reconnected) says so before save. */
 const Demoted = ({ show }: { show: boolean }) => show
-  ? <p role="status" className="library-flag">this tab is read-only now. save takes control first, if no other tab has it.</p> : null;
+  ? <p role="status" className="text-sm text-muted-foreground">this tab is read-only now. save takes control first, if no other tab has it.</p> : null;
 
 /** The form's save outcomes from the writer, also one that settled while the form was unmounted by a socket drop.
  * Returns whether a save of this form is in flight now. */
@@ -171,56 +174,56 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   }
   const onEnter = (event: KeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") { event.preventDefault(); void save(); } };
 
-  return <section className="library-editor" aria-label={`new ${noun}`} onKeyDown={(event) => {
+  return <section className="mx-auto grid w-full max-w-4xl gap-4 overflow-auto p-4 md:p-8 [&_h2]:text-xl [&_h2]:font-semibold" data-library-editor aria-label={`new ${noun}`} onKeyDown={(event) => {
     if (event.key === "Escape") event.preventDefault();
     if (event.key === "s" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void save(); }
   }}>
     <h2>new {noun}</h2>
-    <div className="library-editor-row">
+    <div className="grid gap-2 [&>legend]:mb-2 [&_small]:text-muted-foreground [&_small[data-invalid]]:text-destructive [&>label]:grid [&>label]:gap-2 [&>label:has(input[type=radio])]:flex">
       <label htmlFor={`${id}-name`}>name</label>
-      <input id={`${id}-name`} ref={nameField} readOnly={Boolean(blocked)} value={name} autoComplete="off" spellCheck={false} aria-describedby={`${id}-rules`} aria-invalid={Boolean(name && nameProblem(name))}
+      <Input id={`${id}-name`} ref={nameField} readOnly={Boolean(blocked)} value={name} autoComplete="off" spellCheck={false} aria-describedby={`${id}-rules`} aria-invalid={Boolean(name && nameProblem(name))}
         onChange={(event) => change(setName)(event.target.value)} onKeyDown={onEnter} />
       <small id={`${id}-rules`} data-invalid={Boolean(name && nameProblem(name)) || undefined}>one word: no spaces, no / or \, not . or ..</small>
     </div>
-    <fieldset className="library-editor-row">
+    <fieldset className="grid gap-2 [&>legend]:mb-2 [&_small]:text-muted-foreground [&_small[data-invalid]]:text-destructive [&>label]:grid [&>label]:gap-2 [&>label:has(input[type=radio])]:flex">
       <legend>scope</legend>
       <label><input type="radio" name={`${id}-scope`} checked={scope === "home"} disabled={Boolean(blocked) && scope !== "home"} onChange={() => change(setScope)("home")} /> home · every project</label>
       <label><input type="radio" name={`${id}-scope`} checked={scope === "project"} disabled={project.state !== "available" || (Boolean(blocked) && scope !== "project")} aria-describedby={`${id}-project`}
         onChange={() => change(setScope)("project")} /> project · {project.state === "available" ? project.label : "this project only"}</label>
       <small id={`${id}-project`}>{project.state === "available" ? `saves to ${file} in ${project.label}` : project.why}</small>
     </fieldset>
-    <div className="library-editor-row">
+    <div className="grid gap-2 [&>legend]:mb-2 [&_small]:text-muted-foreground [&_small[data-invalid]]:text-destructive [&>label]:grid [&>label]:gap-2 [&>label:has(input[type=radio])]:flex">
       <label htmlFor={`${id}-description`}>description</label>
       {edited === null
         ? <input id={`${id}-description`} readOnly={Boolean(blocked)} value={description} autoComplete="off" onChange={(event) => change(setDescription)(event.target.value)} onKeyDown={onEnter} />
         : <small id={`${id}-description`}>the description is in the file text now. edit it there.</small>}
     </div>
-    <div className="library-editor-row">
+    <div className="grid gap-2 [&>legend]:mb-2 [&_small]:text-muted-foreground [&_small[data-invalid]]:text-destructive [&>label]:grid [&>label]:gap-2 [&>label:has(input[type=radio])]:flex">
       <label htmlFor={`${id}-text`}>{name || "<name>"}.md · file text</label>
-      <textarea id={`${id}-text`} readOnly={Boolean(blocked)} value={text} spellCheck={false} rows={12} onChange={(event) => change(setEdited)(event.target.value)} />
+      <Textarea id={`${id}-text`} readOnly={Boolean(blocked)} value={text} spellCheck={false} rows={12} onChange={(event) => change(setEdited)(event.target.value)} />
       <small>the name and description fill the header until you edit the file text. sessions pick up the change at their next catalog refresh.</small>
     </div>
-    {shadow && <p className="library-flag">{shadow}</p>}
-    {collision && <p className="library-flag">{`a ${scope} ${noun} named ${name} already exists.`} <button type="button" onClick={() => onOpen(name)}>open it</button></p>}
+    {shadow && <p className="text-sm text-muted-foreground">{shadow}</p>}
+    {collision && <p className="text-sm text-muted-foreground">{`a ${scope} ${noun} named ${name} already exists.`} <Button variant="outline" type="button" onClick={() => onOpen(name)}>open it</Button></p>}
     <Demoted show={!controller && !blocked} />
-    <div ref={alert} tabIndex={-1} className="library-editor-status">
-      {blocked && <p role="alert" className="library-error">{blocked}. your text is kept; nothing was sent.</p>}
-      {tried && listed.length > 0 && <ul role="alert" className="library-error">{listed.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
+    <div ref={alert} tabIndex={-1} className="grid gap-2 empty:hidden [&>div]:grid [&>div]:gap-2 [&_button]:w-fit">
+      {blocked && <p role="alert" className="text-destructive">{blocked}. your text is kept; nothing was sent.</p>}
+      {tried && listed.length > 0 && <ul role="alert" className="text-destructive">{listed.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
       {failure && <div role="alert">
-        <p className="library-error">{failure.message}</p>
-        {failure.status === "stale" && <button type="button" onClick={() => onOpen(name)}>open it</button>}
+        <p data-library-error className="text-destructive">{failure.message}</p>
+        {failure.status === "stale" && <Button variant="outline" type="button" onClick={() => onOpen(name)}>open it</Button>}
         {failure.status === "observer" && <>
-          <button type="button" onClick={() => void takeControl().then((reason) => {
+          <Button variant="outline" type="button" onClick={() => void takeControl().then((reason) => {
             setFailure(reason ? { status: "observer", message: reason } : null);
             if (!reason) nameField.current?.focus();
-          })}>take control</button>
+          })}>take control</Button>
         </>}
       </div>}
     </div>
     <EditorActions dirty={dirty} what={`the new ${noun}`} onDiscard={onClose}
-      save={!blocked && <button type="button" className="library-primary" aria-disabled={pending || problems.length > 0} onClick={() => void save()}>
+      save={!blocked && <Button type="button" aria-disabled={pending || problems.length > 0} onClick={() => void save()}>
         {pending ? "saving…" : problems.length ? problemLabel(problems.length) : `save ${noun}`}
-      </button>} />
+      </Button>} />
   </section>;
 }
 
@@ -310,43 +313,43 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
   }
 
   const stale = failure?.status === "stale";
-  return <section className="library-editor" aria-label={`edit ${noun} ${target.name}`} onKeyDown={(event) => {
+  return <section className="mx-auto grid w-full max-w-4xl gap-4 overflow-auto p-4 md:p-8 [&_h2]:text-xl [&_h2]:font-semibold" data-library-editor aria-label={`edit ${noun} ${target.name}`} onKeyDown={(event) => {
     if (event.key === "Escape") event.preventDefault();
     if (event.key === "s" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void save(); }
   }}>
     <h2>edit {target.name} <small>{target.scope}</small></h2>
-    <div className="library-editor-row">
+    <div className="grid gap-2 [&>legend]:mb-2 [&_small]:text-muted-foreground [&_small[data-invalid]]:text-destructive [&>label]:grid [&>label]:gap-2 [&>label:has(input[type=radio])]:flex">
       <label htmlFor={`${id}-text`}>{target.name} · file text{dirty ? " · edited" : ""}</label>
-      <textarea id={`${id}-text`} ref={field} readOnly={Boolean(blocked) || pending} value={text} spellCheck={false} rows={16} onChange={(event) => setText(event.target.value)} />
+      <Textarea id={`${id}-text`} ref={field} readOnly={Boolean(blocked) || pending} value={text} spellCheck={false} rows={16} onChange={(event) => setText(event.target.value)} />
       <small>the whole file: the header between --- lines, then the text. sessions pick up the change at their next catalog refresh.</small>
     </div>
-    {mine !== null && <div className="library-editor-row">
+    {mine !== null && <div className="grid gap-2 [&>legend]:mb-2 [&_small]:text-muted-foreground [&_small[data-invalid]]:text-destructive [&>label]:grid [&>label]:gap-2 [&>label:has(input[type=radio])]:flex">
       <label htmlFor={`${id}-mine`}>your unsaved text · copy what you need</label>
-      <textarea id={`${id}-mine`} className="library-mine" readOnly value={mine} spellCheck={false} rows={8} />
-      <button type="button" className="library-dismiss" onClick={() => setMine(null)}>dismiss your text</button>
+      <Textarea id={`${id}-mine`} className="bg-muted" readOnly value={mine} spellCheck={false} rows={8} />
+      <Button variant="outline" type="button" className="w-fit" onClick={() => setMine(null)}>dismiss your text</Button>
     </div>}
     <Demoted show={!controller && !blocked} />
-    <div ref={alert} tabIndex={-1} className="library-editor-status">
-      {blocked && <p role="alert" className="library-error">{blocked}. your text is kept; nothing was sent.</p>}
-      {tried && problems.length > 0 && <ul role="alert" className="library-error">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
-      {failure && <div role="alert" className={stale ? "library-conflict" : undefined}>
-        <p className="library-error">{failure.message}</p>
-        {stale && <button type="button" aria-disabled={loading} onClick={() => void loadLatest()}>{loading ? "loading…" : "load the latest version"}</button>}
+    <div ref={alert} tabIndex={-1} className="grid gap-2 empty:hidden [&>div]:grid [&>div]:gap-2 [&_button]:w-fit">
+      {blocked && <p role="alert" className="text-destructive">{blocked}. your text is kept; nothing was sent.</p>}
+      {tried && problems.length > 0 && <ul role="alert" className="text-destructive">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
+      {failure && <div role="alert" data-library-conflict={stale || undefined}>
+        <p data-library-error className="text-destructive">{failure.message}</p>
+        {stale && <Button variant="outline" type="button" aria-disabled={loading} onClick={() => void loadLatest()}>{loading ? "loading…" : "load the latest version"}</Button>}
         {failure.status === "observer" && <>
-          <button type="button" onClick={() => void takeControl().then((reason) => {
+          <Button variant="outline" type="button" onClick={() => void takeControl().then((reason) => {
             setFailure(reason ? { status: "observer", message: reason } : null);
             if (!reason) field.current?.focus();
-          })}>take control</button>
+          })}>take control</Button>
         </>}
-        {failure.status === "busy" && <button type="button" onClick={() => void save()}>try again</button>}
+        {failure.status === "busy" && <Button variant="outline" type="button" onClick={() => void save()}>try again</Button>}
       </div>}
     </div>
     <EditorActions dirty={dirty} what={target.name} onDiscard={onClose} status={<>
-      <p role="status" className="library-editor-saved">{saved && !dirty ? savedNotice(target.name, saved) : ""}</p>
-      {saved && !dirty && controller && <p className="library-edit-why">this tab keeps control of zeta until you close the editor.</p>}
+      <p role="status" className="text-sm text-muted-foreground empty:hidden">{saved && !dirty ? savedNotice(target.name, saved) : ""}</p>
+      {saved && !dirty && controller && <p className="text-sm text-muted-foreground">this tab keeps control of zeta until you close the editor.</p>}
     </>}
-      save={!blocked && <button type="button" className="library-primary" aria-disabled={pending || stale || !dirty || problems.length > 0} onClick={() => void save()}>
+      save={!blocked && <Button type="button" aria-disabled={pending || stale || !dirty || problems.length > 0} onClick={() => void save()}>
         {pending ? "saving…" : stale ? "load the latest version first" : problems.length ? problemLabel(problems.length) : `save ${noun}`}
-      </button>} />
+      </Button>} />
   </section>;
 }

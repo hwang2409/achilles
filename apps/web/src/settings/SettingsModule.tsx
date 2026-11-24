@@ -1,3 +1,5 @@
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { DisplaySettings } from "../AppShell";
@@ -7,7 +9,6 @@ import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { supportsFeature } from "../zeta";
 import { HOME_SETTINGS_FEATURE, NEEDS_OTEL, plain, readHomeSettings, receipt, STALE, telemetryChange, type HomeSettings, type Restart, type TelemetryState } from "./homeSettings";
-import "./settings-place.css";
 
 type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;
 type Props = { client: ZetaClient | null; connecting: boolean; withControl: WithControl; live: () => ZetaClient | null };
@@ -24,24 +25,24 @@ export function SettingsModule(props: Props) {
       document.querySelector<HTMLElement>(`#${id} h2`)?.focus();
     }}>{label}</a>;
   return <ModuleFrame title="Settings" subtitle="Change browser preferences and Zeta defaults.">
-    <div className="sp">
-      <nav className="sp-subnav" aria-label="settings sections">
+    <div className="flex min-h-0 w-full flex-col overflow-auto md:grid md:grid-cols-[11rem_minmax(0,1fr)]">
+      <nav className="flex flex-wrap content-start gap-1 border-b p-3 md:flex-col md:border-e md:border-b-0 [&_a]:flex [&_a]:min-h-10 [&_a]:items-center [&_a]:px-3 [&_a]:text-muted-foreground [&_a]:hover:bg-accent [&_a[aria-current]]:bg-accent [&_a[aria-current]]:text-accent-foreground" aria-label="settings sections">
         {section("browser", "This browser")}
         {section("zeta-defaults", "Zeta defaults")}
         <a href={surfaceHref("/accounts")}>Accounts <span aria-hidden="true">→</span></a>
         <a href={surfaceHref(connectionsRoute.path)}>Connections <span aria-hidden="true">→</span></a>
       </nav>
-      <div className="sp-content">
+      <div className="grid max-w-4xl content-start gap-6 p-4 md:p-8 [&_section]:grid [&_section]:gap-3 [&_h2]:text-lg [&_h2]:font-semibold">
         <section id="browser" aria-labelledby="settings-browser">
           <h2 id="settings-browser" tabIndex={-1}>This browser</h2>
-          <p className="sp-dim">Theme, fonts, text size, density and Vim mode. They apply to this browser only.</p>
-          <button className="ui-button" type="button" onClick={openBrowserSettings}>Display settings</button>
+          <p className="text-sm text-muted-foreground">Theme, fonts, text size, density and Vim mode. They apply to this browser only.</p>
+          <Button variant="outline" className="w-fit" type="button" onClick={openBrowserSettings}>Display settings</Button>
         </section>
         <section id="zeta-defaults" aria-labelledby="settings-zeta">
           <h2 id="settings-zeta" tabIndex={-1}>Zeta defaults</h2>
-          <p className="sp-dim">These apply to every Zeta on this computer.</p>
+          <p className="text-sm text-muted-foreground">These apply to every Zeta on this computer.</p>
           {props.client ? <ZetaDefaults {...props} client={props.client} />
-            : <p className="sp-dim" role="status">{props.connecting ? "connecting to zeta…" : "zeta is not connected. retrying automatically."}</p>}
+            : <p className="text-sm text-muted-foreground" role="status">{props.connecting ? "connecting to zeta…" : "zeta is not connected. retrying automatically."}</p>}
         </section>
       </div>
     </div>
@@ -51,7 +52,7 @@ export function SettingsModule(props: Props) {
 function ZetaDefaults({ client, withControl, live }: Props & { client: ZetaClient }) {
   return <>
     {supportsFeature(client, HOME_SETTINGS_FEATURE) ? <TelemetryRow client={client} withControl={withControl} live={live} />
-      : <Row id="telemetry" title="Telemetry" detail={RECORDS}><p className="sp-note">this zeta cannot change settings here. update zeta.</p></Row>}
+      : <Row id="telemetry" title="Telemetry" detail={RECORDS}><p className="text-sm text-muted-foreground sm:col-span-2 [&[role=alert]]:text-destructive">this zeta cannot change settings here. update zeta.</p></Row>}
     {supportsFeature(client, "state_read_v1") && <Defaults client={client} />}
   </>;
 }
@@ -59,10 +60,10 @@ function ZetaDefaults({ client, withControl, live }: Props & { client: ZetaClien
 const RECORDS = "records timings, model, tokens, tool names and error types on this computer. never prompts, replies, or tool arguments.";
 
 function Row({ id, title, detail, children }: { id?: string; title: string; detail: string; children: ReactNode }) {
-  return <div className="sp-row" id={id}>
-    <div className="sp-row-text"><h3 tabIndex={-1}>{title}</h3><p className="sp-dim">{detail}</p></div>
+  return <Card className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" id={id}>
+    <div className="grid content-start gap-1 [&_h3]:font-semibold"><h3 tabIndex={-1}>{title}</h3><p className="text-sm text-muted-foreground">{detail}</p></div>
     {children}
-  </div>;
+  </Card>;
 }
 
 type Load = { kind: "loading" } | { kind: "failed"; unsafe: boolean } | { kind: "ready"; settings: HomeSettings };
@@ -128,11 +129,11 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   }, [attempts, load]);
 
   let control: ReactNode;
-  if (load.kind === "loading") control = <p className="sp-dim" role="status">reading settings…</p>;
-  else if (load.kind === "failed") control = <div className="sp-switch">
-    <span className="sp-value">unknown</span>
-    <p className="sp-note" role="alert">{load.unsafe ? "settings.toml is a link or a shared file. zeta does not change it." : "could not read settings from zeta."}
-      {!load.unsafe && <button type="button" onClick={reread}>try again</button>}</p>
+  if (load.kind === "loading") control = <p className="text-sm text-muted-foreground" role="status">reading settings…</p>;
+  else if (load.kind === "failed") control = <div className="flex flex-wrap items-center gap-2">
+    <span className="font-medium">unknown</span>
+    <p className="text-sm text-muted-foreground sm:col-span-2 [&[role=alert]]:text-destructive" role="alert">{load.unsafe ? "settings.toml is a link or a shared file. zeta does not change it." : "could not read settings from zeta."}
+      {!load.unsafe && <Button variant="outline" type="button" onClick={reread}>try again</Button>}</p>
   </div>;
   else {
     const { settings } = load;
@@ -158,8 +159,8 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
         effect={reviewText("turn telemetry off? it stops new traces after zeta serve and running sessions restart. recorded traces stay.")}
         onCommitted={() => {}} {...op(false)} />;
     } else if (settings.editable) {
-      control = <div className="sp-switch">
-        <span className="sp-value">off</span>
+      control = <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">off</span>
         {activity && <Confirmation key={attempts} level={2} surface={WRITE_SURFACE.settingsTelemetry} activity={activity} title={reviewText("turn on telemetry")}
           scope={reviewText("every zeta on this computer (settings.toml in your zeta home)")}
           current={reviewText("off")} after={reviewText("on. zeta sends traces to the built-in receiver on 127.0.0.1:4323")}
@@ -170,9 +171,9 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
       </div>;
     } else {
       const custom = settings.telemetry === "custom-on" || settings.telemetry === "custom-off";
-      control = <div className="sp-switch">
-        <span className="sp-value">{custom ? `${settings.telemetry === "custom-on" ? "on" : "off"} (custom endpoint)` : "unknown"}</span>
-        <p className="sp-note">{custom ? "telemetry uses a custom endpoint from settings.toml. change it there."
+      control = <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{custom ? `${settings.telemetry === "custom-on" ? "on" : "off"} (custom endpoint)` : "unknown"}</span>
+        <p className="text-sm text-muted-foreground sm:col-span-2 [&[role=alert]]:text-destructive">{custom ? "telemetry uses a custom endpoint from settings.toml. change it there."
           : settings.malformed ? "settings.toml has an error. zeta will not start until it is fixed."
           : "zeta reports a telemetry setting this page does not know. change it in settings.toml."}</p>
       </div>;
@@ -180,11 +181,11 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   }
   return <Row id="telemetry" title="Telemetry" detail={RECORDS}>
     {control}
-    <div ref={setActivity} className="sp-activity" />
-    {note && <p ref={noteRef} className="sp-note sp-result" tabIndex={-1} role={stale ? "alert" : "status"}>{note}</p>}
+    <div ref={setActivity} className="empty:hidden sm:col-span-2" />
+    {note && <p ref={noteRef} className="text-sm text-muted-foreground sm:col-span-2 [&[role=alert]]:text-destructive" tabIndex={-1} role={stale ? "alert" : "status"}>{note}</p>}
     {/* another tab turned it on: no receipt, this tab wrote nothing and no zeta checked this install */}
-    {note && stale && load.kind === "ready" && load.settings.telemetry === "on" && <p className="sp-note sp-result">{NEEDS_OTEL}</p>}
-    {change && <div className="sp-receipt">
+    {note && stale && load.kind === "ready" && load.settings.telemetry === "on" && <p className="text-sm text-muted-foreground sm:col-span-2 [&[role=alert]]:text-destructive">{NEEDS_OTEL}</p>}
+    {change && <div className="grid gap-1 border-s-2 border-s-ring ps-3 text-sm text-muted-foreground sm:col-span-2">
       <p ref={status} tabIndex={-1} role="status">at <time dateTime={change.at.toISOString()}>
         {change.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</time>: {receipt(change.enabled)}</p>
       <p>{restartText(change.restart)} this list goes away when you leave this page.</p>
@@ -229,17 +230,17 @@ function Defaults({ client }: { client: ZetaClient }) {
       (error) => { if (live) setDefaults({ failed: defaultsFailure(error) }); });
     return () => { live = false; };
   }, [client]);
-  if (defaults === "loading") return <p className="sp-dim" role="status">reading zeta defaults…</p>;
-  if ("failed" in defaults) return <p className="sp-note">{defaults.failed}</p>;
+  if (defaults === "loading") return <p className="text-sm text-muted-foreground" role="status">reading zeta defaults…</p>;
+  if ("failed" in defaults) return <p className="text-sm text-muted-foreground sm:col-span-2 [&[role=alert]]:text-destructive">{defaults.failed}</p>;
   const rows: [string, string, string][] = [
     ["Model", defaults.model ?? "Not set", "model"],
     ["Provider", defaults.provider ?? "Not set", "provider"],
     ["Approval mode", defaults.approval === "allow" ? "Allow without asking" : defaults.approval ?? "Not set", "yolo"],
     ["Agent nesting depth", String(defaults.depth), "agents.max_depth"],
   ];
-  return <dl className="sp-defaults">
+  return <dl className="divide-y [&>div]:grid [&>div]:gap-1 [&>div]:py-3 [&>div]:sm:grid-cols-[1fr_1fr_2fr]">
     {rows.map(([label, value, where]) => <div key={label}>
-      <dt>{label}</dt><dd className="sp-value">{value}</dd><dd className="sp-dim">Edit <code>{where}</code> in <code>settings.toml</code>.</dd>
+      <dt>{label}</dt><dd className="font-medium">{value}</dd><dd className="text-sm text-muted-foreground">Edit <code>{where}</code> in <code>settings.toml</code>.</dd>
     </div>)}
   </dl>;
 }

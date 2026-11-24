@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { ReadingMarkdown, ReadingPanel } from "../surface/ReadingPanel";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ZetaError, type ZetaClient } from "@fulcrum/zeta";
@@ -8,7 +9,6 @@ import type { MemoryActions } from "./MemoryActions";
 import { MAX_RESOLVE, memoryWriteAccess, type MemoryAction, type MemoryReceipt } from "./memoryWrites";
 import { canAcceptMemory, hasKindText, isMemoryId, memoryKinds, projectReads, readInbox, readKindText, readMemory, readMemoryEntry, readMessage, readProjects, Unreadable,
   type Body, type InboxRow, type MemoryKind, type MemoryRow, type MemoryPage, type Page, type ProjectRow } from "./reads";
-import "./projects.css";
 
 type Tab = "memory" | "inbox";
 type Problem = { message: string; retry: boolean };
@@ -76,9 +76,9 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
   const link = (href: string, children: ReactNode, current?: boolean) =>
     <a href={surfaceHref(href)} aria-current={current ? "page" : undefined} onClick={(event) => go(event, href)}>{children}</a>;
   if (!route) return <ModuleFrame title="Projects">
-    <div className="projects">
+    <div className="flex min-h-0 w-full flex-col overflow-auto">
       <Paged view={projects} noun="projects" empty="no projects yet. zeta creates one when a chat opens in a git folder.">
-        {(rows) => <ul className="projects-list">
+        {(rows) => <ul className="divide-y [&_a]:grid [&_a]:gap-1 [&_a]:px-4 [&_a]:py-3 [&_a]:hover:bg-accent [&_strong]:font-semibold [&_span]:text-muted-foreground [&_small]:text-muted-foreground">
           {rows.map((row) => <li key={row.id}>{link(hrefOf(row.id), <>
             <strong data-row={row.id} title={row.name}>{row.name}</strong>
             <span title={row.path ?? undefined}>{row.path ?? "no folder"}</span>
@@ -91,16 +91,16 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
   const project = lookup.names.get(route.id);
   const name = project?.name ?? (lookup.state === "reading" ? "…" : "unknown project");
   if (lookup.state === "missing") return <ModuleFrame title="Projects">
-    <div className="projects">
-      <div className="projects-bar">{link(hrefOf(), "‹ All projects")}</div>
+    <div className="flex min-h-0 w-full flex-col overflow-auto">
+      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2 [&>a]:text-accent-foreground [&>a]:hover:underline">{link(hrefOf(), "‹ All projects")}</div>
       <ModuleState kind="empty" title="no project with this id" detail="it may have been removed, or the address is wrong." />
     </div>
   </ModuleFrame>;
   return <ModuleFrame title={`Projects / ${name}`} subtitle={project?.path ?? undefined}>
-    <div className="projects">
-      <div className="projects-bar">
+    <div className="flex min-h-0 w-full flex-col overflow-auto">
+      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2 [&>a]:text-accent-foreground [&>a]:hover:underline">
         {link(hrefOf(), "‹ All projects")}
-        <nav className="ui-tabs" aria-label="project views">
+        <nav className="flex min-w-0 flex-wrap gap-1 [&_a]:inline-flex [&_a]:min-h-10 [&_a]:items-center [&_a]:px-3 [&_a]:text-muted-foreground [&_a]:hover:bg-accent [&_a[aria-current]]:bg-accent [&_a[aria-current]]:text-accent-foreground" aria-label="project views">
           {tabs.map((tab) => <span key={tab}>{link(hrefOf(route.id, tab), tab === "memory" ? "Memory" : "Inbox", tab === route.tab)}</span>)}
         </nav>
       </div>
@@ -208,10 +208,10 @@ function Paged<T extends { id: string }>({ view, noun, empty, children }: { view
   if (view.state === "failed") return <ModuleState kind="failed" title={`could not read ${noun}: ${view.problem.message}`} action={view.problem.retry ? { label: "retry", run: view.retry } : undefined} />;
   if (!view.rows.length) return <ModuleState kind="empty" title={`no ${noun}`} detail={empty} />;
   const more = view.more;
-  return <div ref={list} className="projects-paged">
+  return <div ref={list} className="min-w-0">
     {children(view.rows)}
-    {more && <div className="projects-more">
-      <button type="button" aria-disabled={view.loadingMore} onClick={() => { firstNew.current = rows.length; more(); }}>{view.loadingMore ? "loading more…" : "load more"}</button>
+    {more && <div className="flex flex-wrap items-center gap-2 py-2 text-sm">
+      <Button variant="outline" type="button" aria-disabled={view.loadingMore} onClick={() => { firstNew.current = rows.length; more(); }}>{view.loadingMore ? "loading more…" : "load more"}</Button>
       {view.moreProblem && <span role="alert">could not load more: {view.moreProblem.message}</span>}
     </div>}
   </div>;
@@ -221,7 +221,7 @@ const kindLabel = { brief: "Brief", decision: "Decisions", state: "State", backl
 
 /** Shown only where a reveal button is: there is no control to take elsewhere. */
 const ControlNote = ({ control, shown }: { control: Borrow; shown: boolean }) => control.observer && shown
-  ? <p id={CONTROL_NOTE} className="projects-note">Zeta lets only the tab in control read full text. This read will not interrupt another tab.</p> : null;
+  ? <p id={CONTROL_NOTE} className="text-sm text-muted-foreground">Zeta lets only the tab in control read full text. This read will not interrupt another tab.</p> : null;
 
 function MemoryTab({ client, projectId, projectName, control, actions, refresh }: {
   client: ZetaClient; projectId: string; projectName: string; control: Borrow; actions?: MemoryActions; refresh: number;
@@ -230,7 +230,8 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
   const oldFormat = view.state === "data" && view.oldFormat;
   const [selection, setSelection] = useState<{ refresh: number; ids: Set<string> }>(() => ({ refresh, ids: new Set() }));
   const [selecting, setSelecting] = useState(false);
-  const [opened, setOpened] = useState<MemoryRow | null>(null);
+  const [openedId, setOpened] = useState<string | null>(null);
+  const opened = view.state === "data" ? view.rows.find((row) => row.id === openedId) : undefined;
   const lastOpened = useRef<HTMLButtonElement>(null);
   const selected = selecting && selection.refresh === refresh ? selection.ids : new Set<string>();
   const canWrite = !!actions && !oldFormat && memoryWriteAccess(client, !control.observer);
@@ -242,37 +243,37 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
   };
   // format 1 summaries are the files' first lines, usually a markdown heading: show the heading text.
   const summary = (text: string) => (oldFormat ? text.replace(/^#+\s*/, "") : text) || "(empty)";
-  return <section className="projects-tab ui-reading-host" aria-label="memory" tabIndex={-1} data-memory-tab>
-    {feedback && <aside className="projects-notice" tabIndex={-1} data-memory-feedback>
+  return <section className="grid gap-4 p-4 md:p-8" aria-label="memory" tabIndex={-1} data-memory-tab>
+    {feedback && <aside className="grid gap-2 border bg-card p-4 text-sm wrap-anywhere" tabIndex={-1} data-memory-feedback>
       <div role={feedback.error ? "alert" : "status"}>{feedback.message}</div>
-      <div className="projects-actions">
-        {feedback.receipt && canWrite && <button type="button" data-write-surface="project.memory.undo" aria-disabled={waiting}
+      <div className="flex flex-wrap gap-2">
+        {feedback.receipt && canWrite && <Button variant="outline" type="button" data-write-surface="project.memory.undo" aria-disabled={waiting}
           aria-describedby={control.observer ? CONTROL_NOTE : undefined}
-          onClick={(event) => start(event, "undo", [], feedback.receipt)}>undo this memory change</button>}
-        <button type="button" onClick={(event) => { actions?.dismiss(); event.currentTarget.closest<HTMLElement>("[data-memory-tab]")?.focus(); }}>dismiss</button>
+          onClick={(event) => start(event, "undo", [], feedback.receipt)}>undo this memory change</Button>}
+        <Button variant="outline" type="button" onClick={(event) => { actions?.dismiss(); event.currentTarget.closest<HTMLElement>("[data-memory-tab]")?.focus(); }}>dismiss</Button>
       </div>
     </aside>}
-    {actions?.working && <p className="projects-note" role="status">preparing or finishing memory review…</p>}
+    {actions?.working && <p className="text-sm text-muted-foreground" role="status">preparing or finishing memory review…</p>}
     <ControlNote control={control} shown={view.state === "data" && (canWrite || view.rows.length > 0)} />
-    {canWrite && view.state === "data" && view.rows.some((row) => isMemoryId(row.id)) && <div className="projects-selection">
-      <button className="ui-button" type="button" aria-pressed={selecting} onClick={() => { setSelecting(!selecting); setSelection({ refresh, ids: new Set() }); }}>{selecting ? "Cancel selection" : "Select"}</button>
+    {canWrite && view.state === "data" && view.rows.some((row) => isMemoryId(row.id)) && <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+      <Button variant="outline"  type="button" aria-pressed={selecting} onClick={() => { setSelecting(!selecting); setSelection({ refresh, ids: new Set() }); }}>{selecting ? "Cancel selection" : "Select"}</Button>
       {selecting && <><span role="status">{active.length} selected{active.length === MAX_RESOLVE ? " (limit reached)" : " (up to 64)"}</span>
-        <button className="ui-button" type="button" data-write-surface="project.memory.resolve" aria-disabled={!active.length || waiting}
+        <Button variant="outline"  type="button" data-write-surface="project.memory.resolve" aria-disabled={!active.length || waiting}
           aria-describedby={control.observer ? CONTROL_NOTE : undefined}
-          onClick={(event) => { if (active.length) start(event, "resolve", active); }}>review resolve</button></>}
+          onClick={(event) => { if (active.length) start(event, "resolve", active); }}>review resolve</Button></>}
     </div>}
-    {oldFormat && <aside className="projects-notice" role="status">
+    {oldFormat && <aside className="grid gap-2 border bg-card p-4 text-sm wrap-anywhere" role="status">
       <strong>this project uses the old memory format</strong>
       <p>achilles shows its summaries only. read or edit it with <code>zeta project memory</code>.</p>
     </aside>}
     <Paged view={view} noun="memory" empty="zeta has no memory entries for this project yet.">
       {(rows) => memoryKinds.map((kind) => {
         const group = rows.filter((row) => row.kind === kind);
-        return group.length > 0 && <details open key={kind} className="projects-group">
+        return group.length > 0 && <details open key={kind} className="border-b pb-2 [&>summary]:cursor-pointer [&>summary]:py-2 [&>summary]:font-semibold [&>summary>small]:ml-2 [&>summary>small]:font-normal [&>summary>small]:text-muted-foreground [&_li]:flex [&_li]:items-center [&_li]:border-t [&_li:has(input:checked)]:bg-accent">
           <summary>{kindLabel[kind]} <small>{group.length}</small></summary>
           <ul>
             {group.map((row) => <li key={row.id} data-row={row.id} tabIndex={-1}>
-              {selecting && canWrite && isMemoryId(row.id) && <label className="projects-select-entry">
+              {selecting && canWrite && isMemoryId(row.id) && <label className="grid min-h-10 min-w-10 place-items-center">
                 <input type="checkbox" aria-label={summary(row.summary)} checked={selected.has(row.id)} disabled={waiting || (!selected.has(row.id) && selected.size >= MAX_RESOLVE)}
                   onChange={(event) => {
                     const ids = new Set(selected);
@@ -280,10 +281,10 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
                     setSelection({ refresh, ids });
                   }} />
               </label>}
-              <button type="button" className="projects-entry" aria-expanded={opened?.id === row.id} onClick={(event) => {
+              <Button variant="outline" type="button" className="h-auto min-h-11 flex-1 justify-start px-3 py-2 text-start whitespace-normal wrap-anywhere aria-expanded:bg-accent" aria-expanded={opened?.id === row.id} onClick={(event) => {
                 lastOpened.current = event.currentTarget;
-                setOpened(row);
-              }}><span>{summary(row.summary)}</span></button>
+                setOpened(row.id);
+              }}><span>{summary(row.summary)}</span></Button>
             </li>)}
           </ul>
           {!oldFormat && hasKindText(kind) && <Reveal id={`${projectId}/${kind}`} noun={`${kind} text`} client={client} control={control}
@@ -291,14 +292,11 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
         </details>;
       })}
     </Paged>
-    {opened && <ReadingPanel title={kindLabel[opened.kind]} onClose={() => {
-      setOpened(null);
-      requestAnimationFrame(() => lastOpened.current?.focus());
-    }}>
+    {opened && <ReadingPanel title={kindLabel[opened.kind]} opener={lastOpened} onClose={() => setOpened(null)}>
       <ReadingMarkdown source={summary(opened.summary)} />
-      {opened.automatic && <p className="projects-note">{opened.accepted ? "Accepted" : "Automatic"}</p>}
-      {canWrite && canAcceptMemory(opened) && <button className="ui-button" type="button" data-write-surface="project.memory.accept" aria-disabled={waiting}
-        aria-describedby={control.observer ? CONTROL_NOTE : undefined} onClick={(event) => start(event, "accept", [opened])}>review accept</button>}
+      {opened.automatic && <p className="text-sm text-muted-foreground">{opened.accepted ? "Accepted" : "Automatic"}</p>}
+      {canWrite && canAcceptMemory(opened) && <Button variant="outline"  type="button" data-write-surface="project.memory.accept" aria-disabled={waiting}
+        aria-describedby={control.observer ? CONTROL_NOTE : undefined} onClick={(event) => start(event, "accept", [opened])}>review accept</Button>}
       {!oldFormat && <Reveal key={opened.id} id={`${projectId}/${opened.id}`} noun="full entry" client={client} control={control}
         load={(reader, signal) => readMemoryEntry(reader, projectId, opened.id, { signal })} markdown />}
     </ReadingPanel>}
@@ -307,18 +305,18 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
 
 function InboxTab({ client, projectId, control, names }: { client: ZetaClient; projectId: string; control: Borrow; names: ReadonlyMap<string, ProjectRow> }) {
   const view = usePages(client, (reader, cursor, signal) => readInbox(reader, projectId, cursor, { signal }), [projectId]);
-  return <section className="projects-tab" aria-label="inbox">
+  return <section className="grid gap-4 p-4 md:p-8" aria-label="inbox">
     <ControlNote control={control} shown={view.state === "data" && view.rows.some((row) => row.hasBody)} />
-    {view.state === "data" && view.rows.length > 0 && <p className="projects-note">newest first · titles and senders only · a message loads when you open it, is not cached, and never goes in the address</p>}
+    {view.state === "data" && view.rows.length > 0 && <p className="text-sm text-muted-foreground">newest first · titles and senders only · a message loads when you open it, is not cached, and never goes in the address</p>}
     <Paged view={view} noun="inbox messages" empty="no messages were sent to this project.">
-      {(rows: InboxRow[]) => <ul className="projects-inbox">
+      {(rows: InboxRow[]) => <ul className="divide-y [&>li]:grid [&>li]:gap-2 [&>li]:py-3 [&_h3]:font-semibold [&_small]:text-muted-foreground">
         {rows.map((row) => {
           const title = row.summary || "(no title)";
           const sender = names.get(row.sender)?.name ?? row.sender;
           return <li key={row.id} data-row={row.id} tabIndex={-1} data-status={row.status}>
             <small>{row.kind.replace("_", " ")} · {row.status} · <span data-trusted={row.trusted || undefined}>{row.trusted ? "trusted assignment" : "information"}</span></small>
             <h3>{title}</h3>
-            <small className="projects-from" title={sender}>from {sender} · {new Date(row.createdNs / 1e6).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</small>
+            <small className="text-muted-foreground" title={sender}>from {sender} · {new Date(row.createdNs / 1e6).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</small>
             {row.hasBody && <Reveal id={`${projectId}/${row.id}`} noun="message" context={title} client={client} control={control}
               load={(reader, signal) => readMessage(reader, projectId, row.id, { signal })} />}
           </li>;
@@ -372,21 +370,21 @@ function Reveal({ id, noun, context, client, control, load, markdown }: { markdo
   }
 
   const label = shown?.state === "loading" ? `reading ${noun}…` : waiting ? "reading…" : control.observer ? `take control and show ${noun}` : `show ${noun}`;
-  const hide = <button type="button" aria-label={context ? `hide ${noun}: ${context}` : undefined} onClick={() => { hidden.current = true; setShown(null); }}>hide {noun}</button>;
-  return <div className="projects-reveal">
+  const hide = <Button variant="outline" type="button" aria-label={context ? `hide ${noun}: ${context}` : undefined} onClick={() => { hidden.current = true; setShown(null); }}>hide {noun}</Button>;
+  return <div className="flex flex-wrap items-center gap-2 py-2">
     {shown?.state === "data" ? hide
       : (shown?.state !== "failed" || shown.problem.retry) &&
-        <button ref={button} type="button" aria-disabled={shown?.state === "loading" || waiting} aria-label={context && !waiting ? `${label}: ${context}` : undefined}
-          aria-describedby={control.observer ? CONTROL_NOTE : undefined} onClick={() => void show()}>{label}</button>}
-    {shown?.state === "failed" && <div ref={region} tabIndex={-1} className="projects-region">
-      <p role="alert" className="projects-error">could not load the {noun}: {shown.problem.message}</p>
+        <Button variant="outline" ref={button} type="button" aria-disabled={shown?.state === "loading" || waiting} aria-label={context && !waiting ? `${label}: ${context}` : undefined}
+          aria-describedby={control.observer ? CONTROL_NOTE : undefined} onClick={() => void show()}>{label}</Button>}
+    {shown?.state === "failed" && <div ref={region} tabIndex={-1} className="grid w-full gap-2 rounded-xs border bg-card p-4 focus-visible:outline-ring">
+      <p role="alert" className="text-destructive">could not load the {noun}: {shown.problem.message}</p>
     </div>}
-    {shown?.state === "refused" && <div ref={region} tabIndex={-1} className="projects-region">
-      <p role="alert" className="projects-error">{shown.reason}</p>
+    {shown?.state === "refused" && <div ref={region} tabIndex={-1} className="grid w-full gap-2 rounded-xs border bg-card p-4 focus-visible:outline-ring">
+      <p role="alert" className="text-destructive">{shown.reason}</p>
     </div>}
-    {shown?.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={context ? `${noun}: ${context}` : noun} className="projects-region">
-      {markdown ? <ReadingMarkdown source={shown.body.text} /> : <><p className="projects-note">plain text · never sent to a model</p><pre className="projects-body" tabIndex={0}>{shown.body.text}</pre></>}
-      {shown.body.truncated && <p className="projects-flag">cut short · the rest stays in zeta</p>}
+    {shown?.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={context ? `${noun}: ${context}` : noun} className="grid w-full gap-2 rounded-xs border bg-card p-4 focus-visible:outline-ring">
+      {markdown ? <ReadingMarkdown source={shown.body.text} /> : <><p className="text-sm text-muted-foreground">plain text · never sent to a model</p><pre className="max-h-[60dvh] overflow-auto whitespace-pre-wrap wrap-anywhere" tabIndex={0}>{shown.body.text}</pre></>}
+      {shown.body.truncated && <p className="text-sm text-muted-foreground">cut short · the rest stays in zeta</p>}
       {longBody(shown.body.text) && hide}
     </div>}
   </div>;
