@@ -93,7 +93,7 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat, canW
   const addFor = (collection: string) => insertCapabilities.find((item) => item.capability.collection === collection)?.capability;
   return <main data-page-content="" className="min-h-0 min-w-0 flex-auto overflow-y-auto p-4 min-[761px]:p-6" data-write-surface={WRITE_SURFACE.pageChat}>
     <header data-page-head="" className="mx-auto mb-6 flex max-w-[720px] flex-col gap-2 min-[761px]:mb-8 min-[761px]:flex-row min-[761px]:items-end min-[761px]:justify-between min-[761px]:gap-6">
-      <div><h1 className="text-[26px] leading-tight font-semibold tracking-tight text-balance first-letter:uppercase">{page.title}</h1>{lead && <p data-page-lead="" className="mt-2 max-w-[64ch] text-sm leading-[22px] text-muted-foreground first-letter:uppercase">{lead}</p>}</div>
+      <div><h1 className="text-[26px] leading-tight font-semibold tracking-tight text-balance first-letter:uppercase">{page.title}</h1>{lead && <p data-page-lead="" className="mt-2 max-w-[64ch] text-sm leading-[22px] text-muted-foreground">{lead}</p>}</div>
     </header>
     <div className="mx-auto grid max-w-[720px] gap-6 min-[761px]:gap-8">{groupBlocks(content).map((group, index) => {
       if (group[0].type === "metric") {
