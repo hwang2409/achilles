@@ -498,3 +498,30 @@
   [data-chat-composer] button[data-slot="button"], [data-part="approval"] button { min-height: 40px; }
   [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
 }
+
+/* Fulcrum's frame stays in flex flow; only its internal scrollport scrolls. */
+[data-chat-transcript] > [data-part="timeline-frame"] { display: flex; flex: 1 1 0; flex-direction: column; width: 100%; max-width: none; height: auto; min-height: 0; margin: 0; }
+[data-chat-transcript] [data-part="timeline-scroll"] { flex: 1 1 0; min-height: 0; scroll-behavior: auto; }
+[data-chat-transcript] [data-part="timeline"] { width: 100%; max-width: none; margin: 0; padding: 32px 0 16px; }
+[data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: min(944px, calc(100% - 48px)); margin-inline: auto; }
+[data-chat-transcript] [data-part="jump-to-latest-lane"]:not([data-jump-owned="true"]) { display: none !important; }
+[data-chat-transcript]:has(> [data-part="timeline-frame"]):not(:has(> [data-jump-owned="true"])) { padding-block-end: 48px; }
+[data-page-chat-docked] [data-part="timeline-scroll"] { margin-top: 8px; }
+[data-page-chat-docked] [data-part="timeline"] { padding: 12px 0 16px; }
+[data-page-chat-docked] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: calc(100% - 32px); }
+[data-chat-composer] { --inset: 12px; width: min(944px, calc(100% - 48px)); margin: 0 auto 24px; }
+[data-chat-composer] [data-part="composer-field"] { min-height: 64px; }
+[data-chat-composer] [data-part="composer-field"] textarea { min-height: 64px; padding: 12px 14px; line-height: 22px; }
+[data-chat-composer] [data-part="composer-field"] textarea::placeholder,
+[data-vim-composer] .cm-content::before { font-family: var(--achilles-ui-font, var(--font-sans)); }
+[data-chat-composer] [data-part="composer-bar"] { gap: 8px; min-height: 36px; padding: 6px 8px 8px 14px; }
+[data-chat-composer] [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 12px; line-height: 16px; }
+[data-chat-composer] [data-part="composer-hint"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+[data-page-chat-docked] [data-chat-composer] { width: calc(100% - 32px); margin-bottom: 16px; }
+@media (max-width: 760px), (max-height: 500px) {
+  [data-chat-transcript] [data-part="timeline"] { padding: 14px 12px 8px; }
+  [data-chat-transcript] [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: 100%; }
+  [data-page-chat-docked] [data-part="timeline"] { padding-inline: 16px; }
+  [data-chat-composer] { width: calc(100% - 24px); margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  [data-chat-composer] :is([data-part="composer-submit"], [data-part="composer-stop"]) { min-width: 44px; min-height: 44px; }
+}

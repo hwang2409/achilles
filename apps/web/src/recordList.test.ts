@@ -260,7 +260,7 @@ for (const [label, value, expected] of [["marked six digit", "999999", "1M"], ["
   test(`numeric metric boundary: ${label}`, () => {
     const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label, value, status: "done" }] } };
     const result = render(React.createElement(PageView, { canWrite: true, page, pageId: `metric-fail-first-${label}`, credential: "secret", refreshKey: "0" }));
-    expect(result.container.querySelector(".metric-value")?.textContent, label).toBe(expected);
+    expect(result.container.querySelector("[data-metric-value]")?.textContent, label).toBe(expected);
   });
 }
 
@@ -274,8 +274,8 @@ test("numeric metric displays stay within the declared matrix boundary", () => {
   const page = { title: "page", route: "/page", layout: { blocks: metricBoundaryMatrix.map(({ label, value, status }) => ({ type: "metric", label, value, ...(status ? { status } : {}) })) } };
   const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "metric-wrap", credential: "secret", refreshKey: "0" }));
   for (const entry of metricBoundaryMatrix) {
-    const block = [...result.container.querySelectorAll(".metric-block")].find((node) => node.querySelector(".metric-label")?.textContent === entry.label)!;
-    const value = block.querySelector(".metric-value")!;
+    const block = [...result.container.querySelectorAll("[data-metric-block]")].find((node) => node.querySelector("[data-metric-label]")?.textContent === entry.label)!;
+    const value = block.querySelector("[data-metric-value]")!;
     expect(value.textContent, entry.label).toBe(entry.expectedText);
     expect(value.getAttribute("title"), entry.label).toBe(entry.value);
     expect(value.getAttribute("aria-label"), entry.label).toBe(entry.value);
@@ -288,7 +288,7 @@ test("text metrics expose the full value", () => {
     { type: "metric", label: "single token", value: "supercalifragilisticexpialidocious" },
   ] } };
   const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "metric-text-boundary", credential: "secret", refreshKey: "0" }));
-  const values = [...result.container.querySelectorAll(".metric-value")];
+  const values = [...result.container.querySelectorAll("[data-metric-value]")];
   expect(values[0]?.getAttribute("aria-label")).toBe("intentionally editorial text");
   expect(values[1]?.getAttribute("title")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.getAttribute("aria-label")).toBe("supercalifragilisticexpialidocious");
@@ -305,7 +305,7 @@ test("page metrics render a live static layout value", () => {
 
 test("page-owned metric counts keep unchanged values across layout lifecycles", async () => {
   const metric = (label: string) => ({ type: "metric", label, count: true, collection: `books-${label}` });
-  const value = (result: RenderResult, label: string) => [...result.container.querySelectorAll(".metric-label")].find((node) => node.textContent === label)?.closest(".metric-block")?.querySelector(".metric-value")?.textContent;
+  const value = (result: RenderResult, label: string) => [...result.container.querySelectorAll("[data-metric-label]")].find((node) => node.textContent === label)?.closest("[data-metric-block]")?.querySelector("[data-metric-value]")?.textContent;
   const cases = [
     { name: "prepend", initial: [metric("one"), metric("two")], next: [metric("new"), metric("one"), metric("two")], extra: 1 },
     { name: "remove settled", initial: [metric("one"), metric("two")], next: [metric("one")], extra: 0 },

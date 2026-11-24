@@ -64,8 +64,8 @@ export function DetailRecordView({ title, collection, fields, filter, records, t
   const shownRecords = selected ? [selected] : records;
   const firstRecord = shownRecords?.[0];
   const selectedTitle = selectedMatches ? String(selected.title ?? selected.name ?? selected.label ?? title) : title;
-  return <section className="record-detail">
-    <h2>{selectedMatches ? <>{selectedTitle} <small className="selected-note">selected</small></> : title}</h2>
+  return <section data-record-detail="" className="min-w-0 [&>p]:text-sm [&>p]:text-muted-foreground">
+    <h2 className="mb-3 text-base font-semibold text-balance">{selectedMatches ? <>{selectedTitle} <small className="text-xs font-normal text-muted-foreground">selected</small></> : title}</h2>
     <DetailRecordBody error={error} refreshing={refreshing} records={shownRecords} firstRecord={firstRecord} collection={collection} filter={filter} filterValue={filterValue} fields={fields} total={total} selectedMatches={selectedMatches} />
   </section>;
 }
@@ -74,7 +74,7 @@ function DetailRecordBody({ error, refreshing, records, firstRecord, collection,
   if (error) return <p role="alert">{error}</p>;
   if (records === null) return <>{refreshing && <p role="status">loading record…</p>}</>;
   if (!firstRecord) return <>{refreshing && <p role="status">loading record…</p>}<p>no {collection} with {filter.field} = {filterValue} yet</p></>;
-  return <>{refreshing && <p role="status">loading record…</p>}<dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{field === "status" ? <><RecordMark status={String(firstRecord[field] ?? "")} />{formatValue(firstRecord[field]) || "—"}</> : formatValue(firstRecord[field]) || "—"}</dd></div>)}</dl>{total > 1 && !selectedMatches && <p className="match-note">{total} records match</p>}</>;
+  return <>{refreshing && <p role="status">loading record…</p>}<dl className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-x-4 [&_dt]:text-muted-foreground [&_dd]:whitespace-pre-wrap [&_:is(dt,dd)]:min-w-0 [&_:is(dt,dd)]:border-b [&_:is(dt,dd)]:py-2 [&_:is(dt,dd)]:[overflow-wrap:anywhere] [&_[data-record-mark]]:me-2">{fields.map((field) => <div className="contents" key={field}><dt>{field}</dt><dd>{field === "status" ? <><RecordMark status={String(firstRecord[field] ?? "")} />{formatValue(firstRecord[field]) || "—"}</> : formatValue(firstRecord[field]) || "—"}</dd></div>)}</dl>{total > 1 && !selectedMatches && <p className="mt-2">{total} records match</p>}</>;
 }
 
 function formatValue(value: unknown): string {

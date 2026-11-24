@@ -170,7 +170,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     <QueuedMessages model={model} onRetry={(id) => { retry(id); viewRef.current?.focus(); }} onRestore={restore} onCancel={(id) => { cancel(id); viewRef.current?.focus(); }} />
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
-      <div className="flex min-w-0 flex-1 items-center gap-2 @max-[480px]:order-1 @max-[480px]:basis-full [&_[data-part=composer-hint]]:block [&_[data-part=composer-hint]]:whitespace-nowrap">
+      <div data-vim-guidance="" className="flex min-w-0 flex-1 items-center gap-2 @max-[480px]:order-1 @max-[480px]:basis-full [&_[data-part=composer-hint]]:block [&_[data-part=composer-hint]]:whitespace-nowrap">
         <span data-vim-mode="" className="shrink-0 min-w-[62px] rounded-sm border border-input px-2 text-center text-xs leading-5 text-muted-foreground data-[mode=normal]:bg-muted data-[mode=visual]:bg-muted" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
         <p data-part="composer-status" data-tone={tone} title={model.error?.text}>
           <ComposerHint id={`${id}-hint`} state={state} mode={mode} queues={queues} focused={focused} questionWaiting={questionWaiting} override={note || undefined} hidden={Boolean(message)} />
