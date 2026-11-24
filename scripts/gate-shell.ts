@@ -161,14 +161,14 @@ export async function gateStablePlace(tab: Page, origin: string, gateWait: GateW
   await tab.goto(`${origin}/agents?theme=g1-dark`);
   const frame = tab.locator(".module-frame");
   await gateWait.playwright(frame.getByRole("heading", { name: "Agents", exact: true, level: 1 }), "waitFor");
-  await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
+  await gateWait.playwright(tab.locator('[data-shell-nav] [data-connected="true"]'), "waitFor");
   if (sockets !== 1) throw new Error(`agents opened ${sockets} zeta connections`);
   if (await frame.getByRole("heading", { name: "not available in this build" }).count() || await tab.getByText("page not found", { exact: true }).count()) throw new Error("agents rendered a placeholder or page-not-found state");
-  if (await tab.locator('nav[aria-label="places"] [aria-current="page"]').innerText() !== "Agents") throw new Error("agents route did not select agents");
+  if (await tab.locator('nav[aria-label="places"] [aria-current="page"]').textContent() !== "agents") throw new Error("agents route did not select agents");
   if (!process.env.SCREENSHOT_DIR) return;
   for (const theme of ["dark", "light"]) {
     if (theme === "light") await tab.goto(`${origin}/agents?theme=g1-light`);
-    await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
+    await gateWait.playwright(tab.locator('[data-shell-nav] [data-connected="true"]'), "waitFor");
     await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor");
     for (const width of [390, 1280, 1440, 1920]) {
       const height = width === 390 ? 844 : 900;
@@ -202,7 +202,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   };
   await tab.setViewportSize({ width: 1440, height: 900 });
   await tab.goto(landingUrl);
-  const connected = tab.locator('.surface-connection[data-connected="true"]');
+  const connected = tab.locator('[data-shell-nav] [data-connected="true"]');
   await gateWait.playwright(connected, "waitFor", { state: "attached" });
   if (await tab.locator('.create-split a[aria-current="page"]').getAttribute("href") !== `/create${theme}` || await tab.locator(".create-split button").count()) throw new Error("create is not selected as a place without a switch");
   await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor", { state: "attached" });
