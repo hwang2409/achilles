@@ -320,7 +320,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await tab.setViewportSize({ width: 390, height: 844 });
   await capture("chat-on", 390);
   await tab.setViewportSize({ width: 1280, height: 900 });
-  await gateWait.playwright(tab.locator(".run-state.state-running"), "waitFor", { state: "hidden" });
+  await gateWait.playwright(tab.locator("[data-chat-status=running]"), "waitFor", { state: "hidden" });
   await toggle.click();
   await gateWait.playwright(tab.locator('.create-split button[aria-pressed="false"]'), "waitFor");
   await tab.getByRole("button", { name: "collapse sidebar" }).click();

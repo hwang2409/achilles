@@ -880,7 +880,6 @@ with _database() as db:
     return {
       viewport: { width: innerWidth, height: innerHeight },
       mobileQuery: matchMedia("(width < 1280px)").matches,
-      pageChat: describe(document.querySelector(".page-chat")),
       surface: describe(document.querySelector("[data-page-chat-surface]")),
       transcript: describe(document.querySelector("[data-chat-transcript]")),
     };
@@ -2767,21 +2766,21 @@ with _database() as db:
   await page.setViewportSize({ width: 390, height: 760 });
   await page.goto(`${origin}/allow`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
-  const blocklessChat = page.locator(".page-chat");
+  const blocklessChat = page.locator("[data-page-chat-surface]");
   const blocklessComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
   const blocklessLayout = await page.evaluate(() => {
-    const chat = document.querySelector<HTMLElement>(".page-chat");
+    const chat = document.querySelector<HTMLElement>("[data-page-chat-surface]");
     const transcript = chat?.querySelector<HTMLElement>("[data-chat-transcript]");
     const composer = document.querySelector<HTMLElement>('[data-part="composer"]');
     return {
-      chatClass: chat?.className ?? "",
+      docked: chat?.hasAttribute("data-page-chat-docked"),
       transcriptHeight: transcript?.getBoundingClientRect().height ?? 0,
       composerVisible: Boolean(composer && getComputedStyle(composer).display !== "none" && composer.getBoundingClientRect().height > 0),
       barCount: document.querySelectorAll("[data-page-chat-bar]").length,
-      dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
+      dialogCount: document.querySelectorAll('[data-page-chat-surface][role="dialog"], [data-page-chat-surface] [role="dialog"]').length,
     };
   });
-  if (!blocklessChat.count() || blocklessLayout.chatClass.includes("page-chat-docked") || blocklessLayout.transcriptHeight <= 0 || !blocklessLayout.composerVisible || blocklessLayout.barCount !== 0 || blocklessLayout.dialogCount !== 0 || !(await blocklessComposer.isVisible()) || await blocklessComposer.isDisabled())
+  if (!await blocklessChat.count() || blocklessLayout.docked || blocklessLayout.transcriptHeight <= 0 || !blocklessLayout.composerVisible || blocklessLayout.barCount !== 0 || blocklessLayout.dialogCount !== 0 || !(await blocklessComposer.isVisible()) || await blocklessComposer.isDisabled())
     throw new Error(`390px blockless page chat gained sheet semantics or lost its layout: ${JSON.stringify(blocklessLayout)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "blockless-chat-390x760.png"), fullPage: true });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
@@ -3181,7 +3180,7 @@ with _database() as db:
   });
   if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
-  if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
+  if (!(await page.locator("[data-chat-status]").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
   await restartZeta("zeta reconnect after dropped connection");
   // automatic reconnect can clear the compact banner before the manual retry click.
