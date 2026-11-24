@@ -175,18 +175,18 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     return () => document.removeEventListener("close", speak, true);
   }, [pending, narrow, drawer, settingsOpen, shortcutsOpen, paletteOpen]);
   // One in-flow slot under the route's bar: the chat header here, or the module/create/telemetry bar via ShellDock.
-  const status = !showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />;
-  const dock = (status || receipt) ? <div className="build-dock">
+  const status = !showNavActivity && <BuildStatus activity={activity} current={current} className="px-3" />;
+  const dock = (status || receipt) ? <div className="shrink-0 border-b bg-card">
     {status}
-    {receipt && <aside className="build-receipt" aria-label="build receipt">
+    {receipt && <aside className="flex flex-wrap items-center gap-2 border-t px-3 py-2 text-sm" aria-label="build receipt">
       <span><strong title={titleOf(receipt.chat)}>{titleOf(receipt.chat)}</strong> finished{" ·\u00a0"}{receipt.route} is ready</span>
-      <a className="build-open" href={receiptHref} onClick={(event) => {
+      <Button asChild variant="outline" className="min-h-11"><a href={receiptHref} onClick={(event) => {
         // a new-tab or new-window click is the browser's: no acknowledgement
         if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         openReceipt();
-      }} onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); openReceipt(); } }}>open page</a>
-      <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
+      }} onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); openReceipt(); } }}>open page</a></Button>
+      <Button variant="ghost" className="min-h-11" type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</Button>
     </aside>}
   </div> : null;
   return <SidebarProvider data-shell data-sidebar-collapsed={collapsed} className="h-dvh min-h-0 overflow-hidden bg-background" open={!collapsed} onOpenChange={(open) => setCollapsed(!open)} mobile={narrow} openMobile={drawer} onOpenMobileChange={setDrawer}>

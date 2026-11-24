@@ -27,9 +27,9 @@ export function BuildStatus({ activity, current, className = "" }: { activity: B
   if (!building && !needsYou) return null;
   const attention = rows.filter((row) => row.state === "needs you" && !row.reason);
   const create = surfaceHref(createRoute.path);
-  return <span className={`build-status ${className}`} aria-label="page build progress">
-    {building > 0 && (current === createRoute ? <span className="build-building" aria-current="page">{building} building</span> : <a className="build-building" href={create}>{building} building</a>)}
-    {needsYou > 0 && <a className="build-needs-you" href={attention.length === 1 ? chatHref(attention[0]!.chat) + approvalIntent : create}>{needsYou} needs you</a>}
+  return <span className={`flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground ${className}`} aria-label="page build progress">
+    {building > 0 && (current === createRoute ? <span aria-current="page">{building} building</span> : <a className="inline-flex min-h-11 items-center hover:underline" href={create}>{building} building</a>)}
+    {needsYou > 0 && <a className="inline-flex min-h-11 items-center text-warning hover:underline" href={attention.length === 1 ? chatHref(attention[0]!.chat) + approvalIntent : create}>{needsYou} needs you</a>}
   </span>;
 }
 
@@ -62,7 +62,7 @@ export function SurfaceNav({ current, sidebar, narrow, restoreDrawerFocus, colla
         {action}
         <div className="create-split flex flex-wrap items-center gap-1 group-data-[collapsible=icon]:justify-center" data-mode={createMode?.enabled ? "on" : undefined}>
           <PlaceLink route={createRoute} current={current} />
-          {activity && <BuildStatus activity={activity} current={current} className="build-status-nav" />}
+          {activity && <BuildStatus activity={activity} current={current} className="w-full border-t" />}
           {createMode && <Button size="xs" variant="outline" type="button" aria-label="toggle create mode for this page" aria-pressed={createMode.enabled}
             aria-busy={createMode.pending || undefined} disabled={!createMode.available || createMode.pending}
             title={createMode.error ?? "create mode for this page"} onClick={() => void createMode.toggle()}>

@@ -393,7 +393,7 @@ try {
       await other.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 10_000 });
       await authPage.getByRole("button", { name: "switch active chat to anthropic:failed" }).click();
       await confirm("anthropic:failed", title);
-      await review.getByText(/another tab had control/).waitFor();
+      await review.getByRole("alert").filter({ hasText: /another tab had control/ }).waitFor();
       await review.getByRole("button", { name: "keep current account" }).click();
       await occupied.waitFor();
       if (await authPage.getByRole("button", { name: "switch active chat to anthropic:failed" }).isEnabled() || switches.length !== 1)
