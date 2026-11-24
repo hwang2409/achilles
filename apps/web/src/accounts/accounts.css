@@ -35,3 +35,7 @@
 .account-window meter::-webkit-meter-suboptimum-value { background: var(--g1-warn); }
 .account-window meter::-moz-meter-bar { background: var(--g1-muted); }
 .account-window meter:-moz-meter-sub-optimum::-moz-meter-bar { background: var(--g1-warn); }
+
+.account-switch-availability { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.account-switch-availability p { margin: 0; }
+.account-switch-receipt:not(:has(time)) { display: none; }

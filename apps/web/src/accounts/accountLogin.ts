@@ -25,7 +25,7 @@ type Login = { target: LoginTarget } & (
 type Popup = Pick<Window, "opener" | "closed" | "close"> & { location: Pick<Location, "replace"> };
 type Attempt = {
   target: LoginTarget; popup: Popup | null; client: ZetaClient | null; timer?: ReturnType<typeof setTimeout>;
-  unsubscribe?: () => void; abort: AbortController; settling?: boolean;
+  unsubscribe?: () => void; borrowed?: boolean; abort: AbortController; settling?: boolean;
 };
 const record = (value: unknown) => value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
 function outcome(wire: unknown): Terminal | { state: "pending" } {
@@ -36,6 +36,13 @@ function outcome(wire: unknown): Terminal | { state: "pending" } {
     return { state, detail: typeof code === "string" && Object.hasOwn(failures, code)
       ? `${failures[code as keyof typeof failures]} (${code})` : failures.login_failed };
   }
+  return { state: "unknown" };
+}
+
+function startFailure(error: unknown): Terminal {
+  const { code, data } = record(error);
+  if (code === -32005 && record(data).code === "login_in_progress") return { state: "contention" };
+  if (code === -32602 || code === -32005 || code === -32008) return { state: "failed", detail: "zeta did not accept the sign-in request." };
   return { state: "unknown" };
 }
 
@@ -88,7 +95,7 @@ export function createAccountLogin(
         if (reread && connection.client === controller) catalog = await readAccounts(controller, undefined, options(attempt));
       } catch { /* The receipt is independent of whether the catalog could be refreshed. */ }
       attempt.abort.abort();
-      await connection.releaseControl();
+      if (attempt.borrowed) await connection.releaseControl();
     }
     if (active !== attempt) return;
     active = null;
@@ -124,11 +131,32 @@ export function createAccountLogin(
   }
   const schedule = (attempt: Attempt) => { attempt.timer = setTimeout(() => void poll(attempt), pollMs); };
 
+  async function dispatchStart(attempt: Attempt) {
+    const { target } = attempt;
+    let result: Terminal | { state: "pending" };
+    try {
+      const wire: unknown = await attempt.client!.request("login_start", target, options(attempt));
+      if (active !== attempt || attempt.settling) return;
+      result = outcome(wire);
+      if (result.state === "pending") {
+        if (!sendToPopup(attempt.popup!, wire)) return await cancelAttempt(attempt, true);
+        // The detached provider tab is no longer ours to close.
+        attempt.popup = null;
+      }
+    } catch (error) {
+      if (active !== attempt || attempt.settling) return;
+      result = startFailure(error);
+    }
+    if (result.state !== "pending") return await settle(attempt, result, result.state !== "unknown");
+    publish({ state: "pending", target });
+    schedule(attempt);
+  }
+
   return {
     snapshot: () => snapshot,
     catalog: () => refreshed,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    async start({ provider, account }: LoginTarget) {
+    async start({ provider, account }: LoginTarget, borrow = true) {
       if (active || (provider !== "claude" && provider !== "codex")) return;
       const target = account === undefined ? { provider } : { provider, account };
       // The catalog supplies named targets; copy only the validated identity to this attempt.
@@ -142,37 +170,18 @@ export function createAccountLogin(
         attempt.popup.opener = null;
       } catch { return await settle(attempt, { state: "blocked" }); }
       publish({ state: "starting", target });
-      const refusal = await connection.takeControl();
+      const refusal = borrow ? await connection.takeControl() : null;
       if (active !== attempt) {
-        if (!refusal && connection.state.phase === "connected" && connection.state.authority === "controller") await connection.releaseControl();
+        if (borrow && !refusal && connection.state.phase === "connected" && connection.state.authority === "controller") await connection.releaseControl();
         return;
       }
       if (refusal) return await settle(attempt, { state: "failed", detail: refusal });
       const client = connection.client;
       if (!client || connection.state.phase !== "connected" || connection.state.authority !== "controller") return await settle(attempt, { state: "unknown" });
       attempt.client = client;
+      attempt.borrowed = borrow;
       attempt.unsubscribe = client.onClose(() => void settle(attempt, { state: "unknown" }, false));
-      let result: Terminal | { state: "pending" };
-      try {
-        const wire: unknown = await client.request("login_start", target.account === undefined ? { provider: target.provider } : { provider: target.provider, account: target.account }, options(attempt));
-        if (active !== attempt || attempt.settling) return;
-        result = outcome(wire);
-        if (result.state === "pending") {
-          if (!sendToPopup(attempt.popup!, wire)) return await cancelAttempt(attempt, true);
-          // The detached provider tab is no longer ours to close.
-          attempt.popup = null;
-        }
-      } catch (error) {
-        if (active !== attempt || attempt.settling) return;
-        const { code, data } = record(error);
-        const reason = record(data).code;
-        if (code === -32005 && reason === "login_in_progress") result = { state: "contention" };
-        else if (code === -32602 || code === -32005 || code === -32008) result = { state: "failed", detail: "zeta did not accept the sign-in request." };
-        else result = { state: "unknown" };
-      }
-      if (result.state !== "pending") return await settle(attempt, result, result.state !== "unknown");
-      publish({ state: "pending", target });
-      schedule(attempt);
+      await dispatchStart(attempt);
     },
     async cancel() { if (active && snapshot?.state === "pending") await cancelAttempt(active); },
     stop() { if (active) clean(active); active = null; },

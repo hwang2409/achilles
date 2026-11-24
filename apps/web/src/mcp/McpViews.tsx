@@ -92,7 +92,6 @@ function ConnectionFields({ row }: { row: McpRow }) {
       <dt>environment</dt><dd>{config.env} environment {config.env === 1 ? "value" : "values"} provided{config.env > 0 && " (redacted)"}</dd>
       <dt>trust</dt><dd>{row.trusted ? "trusted" : "not trusted"}</dd>
       {config.oauth && <>
-        <dt>auth</dt><dd>OAuth configured (sign-in not checked)</dd>
         <dt>client secret</dt><dd>{config.oauth.secretProvided ? "provided (redacted)" : "not provided"}</dd>
       </>}
     </dl>

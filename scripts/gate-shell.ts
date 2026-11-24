@@ -363,6 +363,8 @@ export async function gateAccountsPlace(tab: Page, origin: string) {
   });
   await tab.goto(`${origin}/accounts`);
   await tab.getByRole("heading", { name: "no model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
+  await tab.getByText("no chat is active.", { exact: true }).waitFor({ timeout: 10_000 });
+  if (await tab.getByRole("button", { name: "switch chat", exact: true }).isEnabled()) throw new Error("the idle catalog enabled a chat switch with no active chat");
   const controller = sockets[1];
   if (!controller || roles.join() !== "observer,controller,observer" || JSON.stringify(reads) !== '[{"role":"controller","params":{}}]')
     throw new Error("accounts did not borrow control for exactly one sessionless read");

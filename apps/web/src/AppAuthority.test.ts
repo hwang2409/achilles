@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "agent_run_catalog", "list_sessions", "state_sessions", "state_session"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "mcp_auth_status", "agent_run_catalog", "list_sessions", "state_sessions", "state_session"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
@@ -272,35 +272,120 @@ const approval = (action: "approve" | "deny"): Row => button(`[data-part="approv
 const modify = { ...insert, name: "edit_book", operation: "update" };
 const existingBook = { record_id: "book-id", revision: 1, title: "Old book" };
 
-const accountFixture: Options = {
+const fromAccount = "anthropic:fixture-expired";
+const toAccount = "anthropic:fixture-ready";
+const accountFixture = (requests: { method: string; params: Record<string, unknown> }[], state: { account: string } = { account: fromAccount }): Options => ({
   attached: true,
   joined: { messages: [{ id: "prompt", role: "user", content: [{ type: "text", text: "fixture prompt" }], failed_turn: { code: "auth_error", message: "fixture login failed" } }] },
   rpc: {
-    hello: (params) => params.role === "observer"
-      ? { result: { protocol_version: "1.2", capabilities: { features: params.features } } }
-      : { result: { protocol_version: "1.2", capabilities: { features: params.features, requests: ["account_list", "account_switch", "login_start", "login_status"] } } },
-    account_list: () => ({ result: { revision: "a".repeat(64), data: { accounts: [
-      { account: "anthropic:default", label: "default", current: true, available: true, default: true, detail: null, usage: { freshness: "usage unknown", error: null, snapshot: null } },
-      { account: "anthropic:personal", label: "personal", current: false, available: true, default: false, detail: null, usage: { freshness: "usage unknown", error: null, snapshot: null } },
-    ] } } }),
-    login_start: (params) => ({ result: params.provider === "claude" ? { state: "succeeded" } : { state: "failed" } }),
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: params.role === "observer" ? ["status"] : ["account_list", "account_switch", "login_start", "login_status"] } } }),
+    status: () => ({ result: { session: { session_id: "session", name: "Fixture chat" }, state: "idle" } }),
+    account_list: () => ({ result: { revision: "a".repeat(64), data: { accounts: [fromAccount, toAccount].map(account => ({
+      account, label: account.slice(10), current: state.account === account, available: account === toAccount, default: false, detail: null,
+      usage: { freshness: "usage unknown", error: null, snapshot: null },
+    })) } } }),
+    login_start: params => { requests.push({ method: "login_start", params }); return { result: { state: "succeeded" } }; },
+    account_switch: params => { requests.push({ method: "account_switch", params }); state.account = String(params.account); return { result: { account: state.account, replay: false } }; },
   },
-};
-const recoveryWrite = (id: WriteSurfaceId, request: string): Row => ({ kind: "visible", options: accountFixture, check: async (app, authority, writes, requests) => {
-  const card = select(app, ".transcript .chat-auth-error");
-  const control = select(app, tag(id));
-  expect(disabled(control)).toBe(authority === "observer");
-  await click(control);
-  if (authority === "observer") {
-    expect(card.textContent).toContain("this chat is pinned to its account, which failed to sign in.");
-    expect(card.textContent).toContain("read-only");
-    expect(card.textContent).not.toContain("anthropic:");
-    expect(requests).not.toContain("account_list");
-  } else {
+});
+
+async function proveSwitch(app: RenderResult, writes: string[]) {
+  const dialog = app.getByRole("dialog", { name: "review chat account switch" });
+  const submit = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(dialog.textContent).toContain("Fixture chat");
+  expect(dialog.textContent).toContain(fromAccount);
+  expect(dialog.textContent).toContain("the failed request is not retried");
+  expect(writes).not.toContain("account_switch");
+  expect(disabled(submit)).toBe(true);
+  await change(dialog.querySelector("input")!, toAccount);
+  expect(disabled(submit)).toBe(false);
+  return submit;
+}
+
+const recoveryWrite = (id: WriteSurfaceId, request: string): Row => {
+  const calls: { method: string; params: Record<string, unknown> }[] = [];
+  return { kind: "visible", options: accountFixture(calls), check: async (app, authority, writes, requests) => {
+    const card = select(app, ".transcript .chat-auth-error");
+    expect(card.querySelector('a[href="/accounts"]')).not.toBeNull();
+    const control = select(app, tag(id));
+    expect(disabled(control)).toBe(authority === "observer");
+    if (authority === "observer") {
+      await click(control);
+      expect(card.textContent).toContain("this chat is pinned to its account, which failed to sign in.");
+      if (id !== "auth.new-chat") expect(requests).not.toContain("account_list");
+      return;
+    }
+    if (id === "auth.login") {
+      const originalOpen = window.open;
+      window.open = (() => ({ opener: window, closed: false, close() {} })) as typeof window.open;
+      try {
+        await click(control);
+        const dialog = app.getByRole("dialog", { name: "review browser sign-in" });
+        await click(dialog.querySelector("input")!);
+        await click(dialog.querySelector('button[type="submit"]')!);
+        expect(calls).toContainEqual({ method: "login_start", params: { provider: "claude", account: fromAccount } });
+        expect(card.textContent).toContain("send your message again to retry.");
+      } finally { window.open = originalOpen; }
+    } else if (id === "auth.switch") {
+      await click(control);
+      await click(await proveSwitch(app, writes));
+      expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
+      expect(calls).toEqual([{ method: "account_switch", params: { session_id: "session", account: toAccount } }]);
+    } else await click(control);
     didWrite(writes, request);
-    if (id === "auth.login") expect(card.textContent).toContain("logged in. send your message again");
-  }
-} });
+  } };
+};
+
+const pageSwitch = (): Row => {
+  const options = accountFixture([]);
+  return { kind: "visible", options: { ...options, path: "/accounts", attached: false, observerBanner: false, slot: true }, check: async (app, authority, writes) => {
+    const control = select(app, tag("accounts.switch"));
+    expect(disabled(control)).toBe(authority === "observer");
+    if (authority === "observer") {
+      expect(app.getByText(/another tab had control/, { selector: "#account-switch-reason" })).toBeTruthy();
+      return;
+    }
+    await click(control);
+    await click(await proveSwitch(app, writes));
+    didWrite(writes, "account_switch");
+    expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
+  } };
+};
+
+test("chat account switch busy refusal permits one retry; a dropped reply is settled only by reading", async () => {
+  const sockets: EventTarget[] = [];
+  const state = { account: fromAccount };
+  const options = accountFixture([], state);
+  let attempts = 0;
+  let readsAfterDrop = 0;
+  const read = options.rpc!.account_list!;
+  await withApp("controller", { ...options, sockets, rpc: { ...options.rpc,
+    account_list: (params, requests) => {
+      if (attempts >= 2) readsAfterDrop++;
+      return read(params, requests);
+    },
+    account_switch: params => {
+      if (++attempts === 1) return { error: { code: -32004, message: "fixture busy" } };
+      if (attempts === 2) {
+        state.account = String(params.account);
+        (sockets.at(-1)! as EventTarget & { close(): void }).close();
+      }
+      return {};
+    },
+  } }, async (app, writes) => {
+    await click(select(app, tag("auth.switch")));
+    const submit = await proveSwitch(app, writes);
+    await click(submit);
+    expect(app.getByText(/not changed. zeta is busy/)).toBeTruthy();
+    expect(attempts).toBe(1);
+    await click(submit);
+    expect(await app.findByText(/current account confirmed as anthropic:fixture-ready/, {}, { timeout: 3_000 })).toBeTruthy();
+    expect(readsAfterDrop).toBeGreaterThan(0);
+    expect(attempts).toBe(2);
+    expect(writes).not.toContain("send");
+  });
+});
 
 const browserLogin = (cancel: boolean): Row => {
   const sentinel = "https://signin.invalid/browser-only-fixture";
@@ -338,7 +423,7 @@ const browserLogin = (cancel: boolean): Row => {
         expect(writes).toEqual(["login_start", "login_cancel"]);
         expect(app.getByText(/^signed in at/)).toBeTruthy();
         expect(requests.filter(method => method === "account_list")).toHaveLength(2);
-        expect(requests.at(-1)).toBe("hello");
+        expect(requests.filter(method => method !== "status" && !method.includes(" ")).at(-1)).toBe("hello");
       }
       const contents = [document.documentElement.outerHTML, location.href, history.state,
         ...[localStorage, sessionStorage].map(store => Array.from({ length: store.length }, (_, i) => [store.key(i), store.getItem(store.key(i)!)])),
@@ -397,8 +482,9 @@ function mcpAdd(): Row {
   } };
 }
 
-function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: string): Row {
-  const fixture = { name: "fixture-project", scope: "project", enabled: true, trusted: false, status: "pending trust",
+
+function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test", method: string): Row {
+  const fixture = { name: "fixture-project", scope: "project", enabled: true, trusted: id === "mcp.test", status: id === "mcp.test" ? "configured" : "pending trust",
     auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } };
   const view = (items: object[] = [fixture]) => ({ revision: "a".repeat(64), data: { items } });
   const roles: string[] = [];
@@ -406,7 +492,7 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: stri
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
     mcp_server_list: ({ scope }) => ({ result: view(scope === "user" ? [] : [fixture]) }),
-    [method]: () => ({ result: { ...view(id === "mcp.remove" ? [] : [{ ...fixture, enabled: false, trusted: true }]),
+    [method]: () => id === "mcp.test" ? { result: { data: { status: "ok", tool_count: 1 } } } : ({ result: { ...view(id === "mcp.remove" ? [] : [{ ...fixture, enabled: false, trusted: true }]),
       restart: { serve: false, sessions: [], complete: true } } }),
   } }, check: async (app, authority, writes) => {
     const requestStart = roles.length;
@@ -415,7 +501,8 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: stri
     await click(trigger);
     expect(writes).toEqual([]);
     expect(roles).toHaveLength(requestStart);
-    if (id !== "mcp.enabled") await change(app.getByRole("textbox", { name: "type fixture-project to confirm" }), "fixture-project");
+    if (id === "mcp.test") await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
+    else if (id !== "mcp.enabled") await change(app.getByRole("textbox", { name: "type fixture-project to confirm" }), "fixture-project");
     const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
     expect(confirm.disabled).toBe(false);
     if (id === "mcp.enabled") await click(confirm);
@@ -430,6 +517,94 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: stri
     }
   } };
 }
+
+function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
+  const name = "fixture-oauth";
+  const sentinel = "http://127.0.0.1:31234/launch/browser-only-fixture";
+  const roles: string[] = [];
+  const fixture = { name, scope: "user", enabled: true, trusted: true, status: "configured", auth: "none", tool_count: 0,
+    config: { transport: "streamable-http", url: "<redacted-url>", auth: { type: "oauth" } } };
+  return { kind: "visible", options: { path: `/connections/user/${name}`, observerBanner: false, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: ["mcp_server_list", "mcp_auth_status", ...(params.role === "controller" ? ["mcp_auth_start", "mcp_auth_cancel", "mcp_auth_logout"] : [])] } } }),
+    mcp_server_list: ({ scope }) => {
+      const edited = changed && roles.includes("controller");
+      const revision = (edited && action === "start" ? "b" : "a").repeat(64);
+      const row = edited && action === "logout" ? { ...fixture,
+        config: { ...fixture.config, auth: { type: "oauth", client_secret: "<redacted>" } } } : fixture;
+      return { result: { revision, data: { items: scope === "project" ? [] : [row] } } };
+    },
+    mcp_auth_start: () => ({ result: { data: { state: "pending", authorization_url: sentinel } } }),
+    mcp_auth_status: () => ({ result: { data: { state: "pending" } } }),
+    mcp_auth_cancel: () => ({ result: { data: { state: "cancelled" } } }),
+    mcp_auth_logout: () => ({ result: { data: { state: "unauthorized" } } }),
+  } }, check: async (app, authority, writes) => {
+    const replacements: string[] = [];
+    const popup = { opener: window as Window | null, closed: false, close() { this.closed = true; }, location: {
+      replace(url: string) { expect(popup.opener).toBeNull(); replacements.push(url); },
+    } };
+    const open = spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+    const consoleCalls = ["log", "warn", "error", "debug", "info"].map(method => spyOn(console, method as "log"));
+    try {
+      const startReview = async () => {
+        await click(select(app, tag("mcp.auth-start")));
+        const dialog = app.getByRole("dialog", { name: "review OAuth sign-in" });
+        expect(disabled(dialog.querySelector("button[type=submit]")!)).toBe(true);
+        await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
+        await act(async () => {
+          fireEvent.submit(dialog.querySelector("form")!);
+          expect(open).toHaveBeenCalledTimes(1);
+        });
+      };
+      const initial = roles.length;
+      if (action === "logout") {
+        await click(select(app, tag("mcp.auth-logout")));
+        const dialog = app.getByRole("dialog", { name: "review saved sign-in deletion" });
+        const proof = app.getByRole("textbox", { name: `type ${name} to confirm` });
+        await change(proof, "not-the-name");
+        expect(disabled(dialog.querySelector("button[type=submit]")!)).toBe(true);
+        await change(proof, name);
+        expect(roles).toHaveLength(initial);
+        await act(async () => { fireEvent.submit(dialog.querySelector("form")!); });
+      } else {
+        expect(app.container.querySelector(tag("mcp.auth-cancel"))).toBeNull();
+        await startReview();
+      }
+      if (authority === "observer") {
+        expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+        expect(roles.slice(initial)).toEqual(["controller"]);
+        expect(writes).toEqual([]);
+        expect(replacements).toEqual([]);
+        return;
+      }
+      if (changed) {
+        expect(writes, `${action}: stale review must not send an OAuth write`).toEqual([]);
+        expect(app.getByRole("alert").textContent).toContain("configuration changed elsewhere");
+        expect(roles.slice(initial)).toEqual(["controller", "observer"]);
+        expect(replacements).toEqual([]);
+        if (action === "start") expect(popup.closed).toBe(true);
+        return;
+      }
+      if (action === "cancel") {
+        await click(select(app, tag("mcp.auth-cancel")));
+        const group = app.getByRole("group", { name: /started saving the credential/ });
+        expect(writes).toEqual(["mcp_auth_start"]);
+        await click(group.querySelector(".confirmation-primary")!);
+      }
+      expect(writes).toEqual(action === "cancel" ? ["mcp_auth_start", "mcp_auth_cancel"] : [`mcp_auth_${action}`]);
+      expect(roles.slice(initial)).toEqual(action === "cancel" ? ["controller", "observer", "controller", "observer"] : ["controller", "observer"]);
+      expect(replacements).toEqual(action === "logout" ? [] : [sentinel]);
+      expect(JSON.stringify([document.documentElement.outerHTML, location.href, history.state,
+        ...[localStorage, sessionStorage].map(store => Array.from({ length: store.length }, (_, i) => store.getItem(store.key(i)!))),
+        ...consoleCalls.flatMap(spy => spy.mock.calls)])).not.toContain(sentinel);
+    } finally { open.mockRestore(); consoleCalls.forEach(spy => spy.mockRestore()); }
+  } };
+}
+
+test.each(["start", "logout"] as const)("OAuth %s refuses a stale review after borrowing control", async (action) => {
+  const row = mcpOAuth(action, true);
+  await withApp("controller", row.options ?? {}, (app, writes, requests) => row.check(app, "controller", writes, requests));
+});
 
 function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
   const spawning = id === "agents.spawn";
@@ -552,10 +727,11 @@ const rows: Record<WriteSurfaceId, Row> = {
     if (authority === "controller") didWrite(writes, "POST /api/pages/page/tools/edit_book/invoke");
   } },
 
+  "accounts.switch": pageSwitch(),
   "auth.login": recoveryWrite("auth.login", "login_start"),
   "auth.switch": recoveryWrite("auth.switch", "account_switch"),
   "auth.new-chat": recoveryWrite("auth.new-chat", "new_session"),
-  "composer.account-switch": { kind: "command", options: accountFixture, check: async (app, authority, writes, requests) => {
+  "composer.account-switch": { kind: "command", options: accountFixture([]), check: async (app, authority, writes, requests) => {
     const run = async (text: string) => {
       const field = select(app, '[data-part="composer"] textarea');
       await change(field, text);
@@ -567,10 +743,12 @@ const rows: Record<WriteSurfaceId, Row> = {
       return;
     }
     await run("/accounts");
-    await click(select(app, tag("composer.account-switch")));
-    expect(writes.filter((write) => write === "account_switch")).toHaveLength(1);
-    await run("/accounts anthropic:personal");
-    expect(writes.filter((write) => write === "account_switch")).toHaveLength(2);
+    expect(app.queryByRole("dialog", { name: "review chat account switch" })).toBeNull();
+    expect(writes).not.toContain("account_switch");
+    await run(`/accounts ${toAccount}`);
+    await click(await proveSwitch(app, writes));
+    expect(writes.filter(write => write === "account_switch")).toHaveLength(1);
+    expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
     expect(writes).not.toContain("send");
   } },
   "settings.theme": setting("settings.theme", "theme", ' button[aria-selected="false"]'),
@@ -669,6 +847,10 @@ const rows: Record<WriteSurfaceId, Row> = {
   "mcp.add": mcpAdd(),
   "mcp.enabled": mcpWrite("mcp.enabled", "mcp_server_set_enabled"),
   "mcp.trusted": mcpWrite("mcp.trusted", "mcp_server_set_trusted"),
+  "mcp.test": mcpWrite("mcp.test", "mcp_server_test"),
+  "mcp.auth-start": mcpOAuth("start"),
+  "mcp.auth-cancel": mcpOAuth("cancel"),
+  "mcp.auth-logout": mcpOAuth("logout"),
   "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
     // the settings place browses as an observer; confirming the change borrows control for the one update.

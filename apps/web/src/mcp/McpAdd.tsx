@@ -17,6 +17,8 @@ function readFields(data: FormData, field: string) {
     || keys.some((key) => !key || !bounded(key)) || values.some((value) => !bounded(value))) return null;
   return Object.fromEntries(keys.map((key, index) => [key, values[index]!]));
 }
+type AddBase = Pick<McpAddMutation, "scope" | "name" | "enabled" | "env">;
+
 function readMutation(form: HTMLFormElement): McpAddMutation | string {
   const data = new FormData(form);
   const scope = data.get("scope"), name = data.get("name");
@@ -25,12 +27,17 @@ function readMutation(form: HTMLFormElement): McpAddMutation | string {
   const env = readFields(data, "environment");
   if (!env) return "enter a unique, nonempty key for each environment value. check the field limits below.";
   const base = { scope, name, enabled: data.has("enabled"), env } as const;
-  if (data.get("transport") === "stdio") {
-    const command = String(data.get("command") ?? "");
-    const args = data.getAll("argument").map(String);
-    if (!command || !bounded(command) || args.length > LIMIT || args.some((arg) => !bounded(arg))) return "enter a command and check the argument limits below.";
-    return { ...base, command, args };
-  }
+  return data.get("transport") === "stdio" ? readStdio(data, base) : readHttp(data, base);
+}
+
+function readStdio(data: FormData, base: AddBase) {
+  const command = String(data.get("command") ?? "");
+  const args = data.getAll("argument").map(String);
+  if (!command || !bounded(command) || args.length > LIMIT || args.some((arg) => !bounded(arg))) return "enter a command and check the argument limits below.";
+  return { ...base, command, args };
+}
+
+function readHttp(data: FormData, base: AddBase) {
   const url = String(data.get("url") ?? "");
   const headers = readFields(data, "header"), oauth = data.has("oauth");
   const client_id = String(data.get("client_id") ?? ""), client_secret = String(data.get("client_secret") ?? "");

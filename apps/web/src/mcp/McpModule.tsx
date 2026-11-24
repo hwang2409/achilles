@@ -1,13 +1,15 @@
-import { WRITE_SURFACE } from "../writeSurfaces";
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type RefObject } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
+import { Confirmation, reviewText, type Result, type ReviewText } from "../surface/Confirmation";
+import { WRITE_SURFACE } from "../writeSurfaces";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { canReadMcp, mcpScopes, type McpRow, type McpScope } from "./mcpReads";
 import { ConnectionDetail, ConnectionList, FailedRead, type Failure } from "./McpViews";
 import { McpAdd } from "./McpAdd";
+import { McpAuth, McpPendingElsewhere } from "./McpAuthActions";
 import { McpActions } from "./McpActions";
-import type { McpOwner } from "./mcpOwner";
+import { needsMcpTestTrust, type McpOwner, type McpTestOutcome, type McpTestResult } from "./mcpOwner";
 import "./mcp.css";
 
 const LIST = connectionsRoute.path;
@@ -18,8 +20,8 @@ const detailOf = (path: string) => {
   catch { return null; }
 };
 
-export function McpModule({ client, owner, pathname, connecting, retryConnection }: {
-  client: ZetaClient | null; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
+export function McpModule({ client, observer, owner, pathname, connecting, retryConnection }: {
+  client: ZetaClient | null; observer: boolean; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
 }) {
   const { reads } = owner;
   const snapshot = useSyncExternalStore(reads.subscribe, reads.snapshot);
@@ -33,6 +35,13 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
   const activeScope = useRef<HTMLButtonElement>(null);
   const connected = client !== null;
   const supported = client !== null && canReadMcp(client);
+  useLayoutEffect(() => {
+    const update = () => owner.auth.observe(observer ? client : null, !document.hidden, Boolean(client));
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, [owner, client, observer]);
+  useLayoutEffect(() => () => owner.auth.observe(null, false, false), [owner]);
   useEffect(() => {
     if (!client) return;
     const abort = new AbortController();
@@ -74,6 +83,9 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
 
   const rowRead = detailOpen ? detailList : list;
   const revision = rowRead && "revision" in rowRead ? rowRead.revision : undefined;
+  const reviewScope = row && snapshot?.[row.scope];
+  const reviewRow = reviewScope && "rows" in reviewScope ? reviewScope.rows.find(({ name }) => name === row?.name) : null;
+  const reviewRevision = reviewScope && "revision" in reviewScope ? reviewScope.revision : null;
   const offline = !connected;
   const retained = offline && snapshot && mcpScopes.some((view) => "rows" in snapshot[view]);
   const shadows = (item: McpRow) => {
@@ -96,15 +108,90 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
           {retained && <p className="mcp-offline" role="status">connection lost · showing the last read from disk · retrying automatically</p>}
           {adding && <section className="mcp-add" aria-label="Add a connection"><McpAdd close={() => setAdding(false)} owner={owner} snapshot={snapshot} defaultScope={scope === "project" ? "project" : "user"} online={supported}
             reviewTrust={(name) => { setScope("project"); navigate(`${LIST}/project/${encodeURIComponent(name)}`); }} /></section>}
+          <McpPendingElsewhere owner={owner} row={detailOpen ? row : undefined} online={supported} />
           <div className="mcp-grid" data-detail={detailOpen} data-has-selection={!!row || detailOpen} data-retained={Boolean(retained)}>
             <ConnectionList snapshot={snapshot} scope={scope} selectScope={(view) => { setScope(view); if (detailOpen) navigate(LIST); }}
               addConnection={supported && !adding ? openAdd : undefined} activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
             {(row || detailOpen) && <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
               detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure}>
+              {reviewRow?.config.transport && reviewRevision && <McpTest key={JSON.stringify([reviewRow.scope, reviewRow.name])} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading} />}
+              {reviewRow?.config.oauth && reviewRevision && <McpAuth key={JSON.stringify(["auth", reviewRow.scope, reviewRow.name])} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading} />}
               <McpActions key={`${path}:${scope}`} owner={owner} heading={detailHeading} row={row ?? null} revision={revision} online={supported} />
             </ConnectionDetail>}
           </div>
         </>}
     </div>
   </ModuleFrame>;
+}
+
+const testAction = reviewText("test connection");
+const testTrust = reviewText("trust this project stdio connection before testing it.");
+const testUnknown = reviewText("result unknown. close this review to start a new test. the request was not retried.");
+type TestReceipt = McpTestResult | { status: "unknown" };
+
+function McpTest({ owner, row, revision, online, heading }: {
+  owner: McpOwner; row: McpRow; revision: string; online: boolean; heading: RefObject<HTMLHeadingElement | null>;
+}) {
+  const opener = useRef<HTMLButtonElement>(null);
+  const flight = useRef<string | null>(null);
+  const [review, setReview] = useState<{ id: number; target: McpRow & { revision: string } } | null>(null);
+  const [last, setLast] = useState<TestReceipt | null>(null);
+  const target = { ...row, revision };
+  const needsTrust = needsMcpTestTrust(target);
+  const reviewed = review?.target;
+
+  useLayoutEffect(() => () => { if (flight.current) owner.close(flight.current); }, [owner]);
+  useEffect(() => { if (!online) setLast((prior) => prior?.status === "unknown" ? prior : null); }, [online]);
+
+  async function execute(): Promise<Result<{ status: "committed"; receipt: ReviewText }>> {
+    if (!reviewed) return { status: "failed", reason: "not-applied", message: testUnknown, final: true };
+    const form = owner.open();
+    flight.current = form;
+    let result: McpTestOutcome | undefined;
+    const detach = owner.attachTest(form, (outcome) => { result = outcome; });
+    try { await owner.test(form, reviewed); }
+    finally { detach(); owner.close(form); flight.current = null; }
+    if (result?.status === "tested") {
+      setLast(result.result);
+      return { status: "committed", receipt: reviewText("test finished") };
+    }
+    if (result?.status === "unknown") setLast({ status: "unknown" });
+    return { status: "failed", reason: "not-applied", message: testFailure(result?.status), final: true };
+  }
+
+  return <section className="mcp-test" aria-label="connection test">
+    {needsTrust ? <p>{testTrust}</p> : <button ref={opener} type="button" disabled={!online} data-write-surface={WRITE_SURFACE.mcpTest}
+      onClick={() => setReview((prior) => ({ id: (prior?.id ?? 0) + 1, target }))}>{testAction}</button>}
+    <div role="status">{last && <p data-test-result={last.status}>{testReceipt(last)}</p>}</div>
+    {review && reviewed && <Confirmation key={review.id} level={2} external={{ opener: () => opener.current?.disabled === false ? opener.current : heading.current }}
+      title={reviewText("review connection test")} action={testAction} keep={reviewText("keep without testing")}
+      scope={reviewText(reviewed.scope)} proof={{ kind: "scope" }}
+      fields={[{ label: reviewText("connection"), value: reviewed.name as ReviewText }]}
+      current={reviewText("configuration on disk")} after={reviewText("configuration unchanged")}
+      effect={reviewed.config.transport === "stdio"
+        ? reviewText("zeta starts the configured local child process, initializes it and asks it to list tools. configured credentials may be sent. zeta calls no tools and enforces a time limit, then closes the transport and reaps the child.")
+        : reviewText("zeta makes network requests to the configured HTTP endpoint, initializes it and asks it to list tools. configured credentials may be sent. zeta calls no tools and closes the transport after the test, including on timeout.")}
+      undo={reviewText("the process or network activity cannot be undone. the test uses the current definition on disk.")}
+      execute={execute} checkResult={async () => ({ status: "failed", reason: "not-applied", message: testUnknown, final: true })} />}
+  </section>;
+}
+
+function testReceipt(result: TestReceipt) {
+  if (result.status === "ok") return `${result.toolCount} ${result.toolCount === 1 ? "tool" : "tools"} (last test in this tab)`;
+  if (result.status === "failed") return "failed (last test in this tab)";
+  if (result.status === "untrusted") return `not trusted (last test in this tab) · ${testTrust}`;
+  if (result.status === "skipped-policy") return "skipped by zeta policy (last test in this tab)";
+  return "result unknown (last test in this tab)";
+}
+
+function testFailure(status: string | undefined) {
+  switch (status) {
+    case "refused": return reviewText("test not sent. a chat tab keeps control while it is open; try again after it finishes or closes.");
+    case "unsupported": return reviewText("test not sent. update zeta to test connections here.");
+    case "busy": case "conflict": return reviewText("test not run. zeta or another connection action is busy; open a new review to try again.");
+    case "stale": return reviewText("test not sent. the configuration changed. close this review and review the current definition before testing.");
+    case "unavailable": return reviewText("zeta could not verify the current definition. read the configuration again before testing.");
+    case "invalid": return reviewText("zeta could not test the current definition. read the configuration again before testing.");
+    default: return testUnknown;
+  }
 }

@@ -1,7 +1,8 @@
 import type { ZetaClient } from "@fulcrum/zeta";
 import { createWriteForms } from "../writeForms";
 import { supportsRequest } from "../zeta";
-import { createMcpReads, projectMcpSnapshot, type McpRow } from "./mcpReads";
+import { createMcpAuth, type AuthAttempt, type AuthOutcome } from "./mcpAuth";
+import { createMcpReads, projectMcpSnapshot, readMcpScope, type McpRow } from "./mcpReads";
 
 export const mcpMethods = { add: "mcp_server_add", enabled: "mcp_server_set_enabled", trusted: "mcp_server_set_trusted", remove: "mcp_server_remove" } as const;
 export type McpAction = keyof typeof mcpMethods;
@@ -28,6 +29,27 @@ type Restart = { sessions: string[]; complete: boolean };
 export type McpOutcome =
   | { status: "committed"; restart: Restart | null }
   | { status: "stale" | "busy" | "unavailable" | "invalid" | "refused" | "unsupported" | "conflict" | "changed" | "cancelled" | "unknown" };
+export const mcpTestMethod = "mcp_server_test";
+export type ReviewedMcpTarget = Pick<McpRow, "name" | "scope" | "trusted" | "config"> & { revision: string };
+export type McpTestResult = { status: "ok" | "failed" | "untrusted" | "skipped-policy"; toolCount: number };
+type TestAttempt = { action: "test"; target: ReviewedMcpTarget };
+type TestReply = { status: "tested"; result: McpTestResult };
+export type McpTestOutcome = TestReply | McpOutcome;
+
+export function needsMcpTestTrust({ scope, config, trusted }: ReviewedMcpTarget) {
+  return scope === "project" && config.transport === "stdio" && !trusted;
+}
+
+function projectTest(value: unknown): TestReply | null {
+  const data = (value as { data?: { status?: unknown; tool_count?: unknown } } | null)?.data;
+  const status = data?.status;
+  const toolCount = data?.tool_count;
+  if (status !== "ok" && status !== "failed" && status !== "untrusted" && status !== "skipped-policy") return null;
+  if (typeof toolCount !== "number" || !Number.isSafeInteger(toolCount) || toolCount < 0) return null;
+  return { status: "tested", result: { status, toolCount } };
+}
+
+const TEST_FAILED = { status: "tested", result: { status: "failed", toolCount: 0 } } as const;
 const UNKNOWN = { status: "unknown" } as const;
 const CANCELLED = { status: "cancelled" } as const;
 const BACKOFF = [500, 1_000, 2_000];
@@ -75,9 +97,34 @@ function matchesDraft(attempt: McpAddAttempt, mutation: McpAddMutation) {
     && sameConfig(projectAdd(mutation), attempt.config);
 }
 
+function mutationFor(attempt: Attempt, take?: TakeMutation) {
+  const { action, scope, name } = attempt;
+  if (action === "add") {
+    const draft = take?.();
+    return draft && matchesDraft(attempt, draft) ? draft : null;
+  }
+  if (action === "trusted") return { name, trusted: attempt.value };
+  if (action === "enabled") return { name, scope, enabled: attempt.value };
+  return { name, scope };
+}
+
+async function requestWrite(client: ZetaClient, method: typeof mcpMethods[McpAction], revision: string,
+  mutation: Record<string, unknown>): Promise<McpOutcome | { result: unknown }> {
+  try {
+    // Do not abort a sent write: closing the review does not undo it.
+    return { result: await client.request(method, { revision, mutation }, { timeoutMs: 5_000 }) };
+  } catch (error) {
+    const failure = rpcFailure(error);
+    if (method === mcpMethods.add && failure?.status === "busy"
+      && (error as { data?: { reason?: unknown } }).data?.reason !== "operation_busy") return UNKNOWN;
+    return failure ?? UNKNOWN;
+  }
+}
+
 /** One global flight: the revision spans user, project, and trust. A new socket is only used to read, never to retry a write. */
-export function createMcpOwner({ live, acquire, release, supports = supportsRequest, canRead, wait = waitFor }: {
+export function createMcpOwner({ live, acquire, release, supports = supportsRequest, canRead, wait = waitFor, liveObserver = live }: {
   live: () => ZetaClient | null;
+  liveObserver?: () => ZetaClient | null;
   acquire: () => Promise<ZetaClient | null>;
   release: () => Promise<void>;
   supports?: typeof supportsRequest;
@@ -85,7 +132,7 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
   wait?: typeof waitFor;
 }) {
   const reads = createMcpReads(canRead);
-  const { run, ...forms } = createWriteForms<McpOutcome, Attempt>({ inProgress: { status: "conflict" }, unexpected: UNKNOWN });
+  const { run, ...forms } = createWriteForms<McpTestOutcome | AuthOutcome, Attempt | TestAttempt | AuthAttempt>({ inProgress: { status: "conflict" }, unexpected: UNKNOWN });
   const outcomes = new WeakMap<Attempt, McpOutcome>();
   const refresh = (signal?: AbortSignal) => {
     const client = live();
@@ -99,14 +146,12 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     return concrete.revision === attempt.revision ? UNKNOWN : { status: "changed" };
   }
   async function send(client: ZetaClient, attempt: Attempt, signal: AbortSignal, take?: TakeMutation): Promise<McpOutcome> {
-    const { action, name, scope, revision } = attempt;
+    const { action, scope, revision } = attempt;
     if (action === "trusted" && scope !== "project") return { status: "invalid" };
     const method = mcpMethods[action];
     if (!supports(client, method)) return { status: "unsupported" };
-    const add = action === "add" ? take?.() : null;
-    if (action === "add" && (!add || !matchesDraft(attempt, add))) return { status: "invalid" };
-    const mutation = add ?? (action === "trusted" ? { name, trusted: attempt.value }
-      : action === "enabled" ? { name, scope, enabled: attempt.value } : { name, scope });
+    const mutation = mutationFor(attempt, take);
+    if (!mutation) return { status: "invalid" };
     const response = await write(client, method, revision, mutation, signal);
     if ("status" in response) return response;
     const next = projectMcpSnapshot(response.result, scope);
@@ -120,29 +165,60 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     for (let retry = 0; ; retry++) {
       if (signal.aborted) return CANCELLED;
       if (live() !== client) return { status: "refused" };
-      try {
-        // Do not abort a sent write: closing the review does not undo it.
-        return { result: await client.request(method, { revision, mutation }, { timeoutMs: 5_000 }) };
-      } catch (error) {
-        const failure = rpcFailure(error);
-        if (method === mcpMethods.add && failure?.status === "busy"
-          && (error as { data?: { reason?: unknown } }).data?.reason !== "operation_busy") return UNKNOWN;
-        if (!failure) return UNKNOWN;
-        if (failure.status !== "busy" || retry === BACKOFF.length) return failure;
-        if (signal.aborted) return CANCELLED;
-        await wait(BACKOFF[retry]!, signal);
-      }
+      const response = await requestWrite(client, method, revision, mutation);
+      if (!("status" in response) || response.status !== "busy" || retry === BACKOFF.length) return response;
+      if (signal.aborted) return CANCELLED;
+      await wait(BACKOFF[retry]!, signal);
     }
   }
-  async function execute(attempt: Attempt, signal: AbortSignal, take?: TakeMutation): Promise<McpOutcome> {
-    let client: ZetaClient | null = null;
-    let outcome: McpOutcome = { status: "refused" };
+  async function withAcquiredControl<T>(signal: AbortSignal, perform: (client: ZetaClient) => Promise<T>): Promise<T | McpOutcome> {
+    const client = await acquire();
+    if (!client) return { status: "refused" };
+    try { return signal.aborted ? CANCELLED : await perform(client); }
+    finally { await release().catch(() => {}); }
+  }
+  async function confirmCurrent(client: ZetaClient, target: ReviewedMcpTarget, signal: AbortSignal): Promise<McpOutcome | null> {
+    if (live() !== client) return { status: "refused" };
+    const current = await readMcpScope(client, target.scope, signal);
+    if (signal.aborted) return CANCELLED;
+    if (live() !== client || !("rows" in current)) return { status: "unavailable" };
+    const row = current.rows.find(({ name }) => name === target.name);
+    if (current.revision !== target.revision || !row || row.trusted !== target.trusted || !sameConfig(row.config, target.config)) return { status: "stale" };
+    // These RPCs do not accept revisions. This check narrows but cannot close the gap.
+    return null;
+  }
+  const auth = createMcpAuth({ supports, failure: rpcFailure, liveObserver,
+    withControl: (signal, send, attempt) => withAcquiredControl(signal, async (client) => {
+      const failure = attempt.action === "cancel" ? null : await confirmCurrent(client, attempt, signal);
+      return failure ?? send(client);
+    }),
+  });
+  async function confirmTest(client: ZetaClient, target: ReviewedMcpTarget, signal: AbortSignal): Promise<McpTestOutcome> {
+    if (live() !== client) return { status: "refused" };
+    if (!supports(client, mcpTestMethod)) return { status: "unsupported" };
+    const failure = await confirmCurrent(client, target, signal);
+    return failure ?? sendTest(client, target, signal);
+  }
+  async function sendTest(client: ZetaClient, { name, scope }: ReviewedMcpTarget, signal: AbortSignal): Promise<McpTestOutcome> {
     try {
-      client = await acquire();
-      if (client) outcome = signal.aborted ? CANCELLED : await send(client, attempt, signal, take);
-    } finally {
-      if (client) await release().catch(() => {});
+      // Abort only stops waiting locally. Zeta owns initialize/list and transport cleanup.
+      const result = await client.request(mcpTestMethod, { name, scope }, { signal });
+      return live() === client ? projectTest(result) ?? UNKNOWN : UNKNOWN;
+    } catch (error) {
+      if (live() !== client) return UNKNOWN;
+      // Zeta returns its closed internal-error code when the transport fails before a receipt.
+      if ((error as { code?: unknown } | null)?.code === -32000) return TEST_FAILED;
+      return rpcFailure(error) ?? UNKNOWN;
     }
+  }
+  const test = (form: string, target: ReviewedMcpTarget) => run(form, "mcp", JSON.stringify(target), { action: "test", target }, async (signal) => {
+    if (needsMcpTestTrust(target)) return { status: "tested", result: { status: "untrusted", toolCount: 0 } };
+    const outcome = await withAcquiredControl(signal, (client) => confirmTest(client, target, signal));
+    if (outcome.status === "stale") await refresh(signal);
+    return outcome;
+  });
+  async function execute(attempt: Attempt, signal: AbortSignal, take?: TakeMutation): Promise<McpOutcome> {
+    let outcome = await withAcquiredControl(signal, (client) => send(client, attempt, signal, take));
     if (outcome.status === "unknown") outcome = await settle(attempt, signal);
     else if (["committed", "stale", "unavailable"].includes(outcome.status)) await refresh(signal);
     return outcome;
@@ -154,7 +230,22 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     outcomes.set(attempt, outcome);
     return outcome;
   });
-  return { reads, ...forms, execute: (form: string, attempt: McpAttempt) => submit(form, attempt, false),
+  return { reads, ...forms, test, auth,
+    authAction: (form: string, attempt: AuthAttempt, check: boolean, deliver: (value: AuthOutcome) => void) => {
+      forms.attach(form, (outcome) => { if (outcome.status !== "tested") deliver(outcome); });
+      return run(form, "mcp", JSON.stringify(attempt), attempt, async (signal) => {
+        const outcome = await auth.run(attempt, check, signal);
+        if (outcome.status === "stale") await refresh(signal);
+        return outcome;
+      });
+    },
+    attach: (form: string, deliver: (outcome: McpOutcome) => void) => forms.attach(form, (outcome) => {
+      if (outcome.status !== "tested" && outcome.status !== "auth" && outcome.status !== "popup-blocked") deliver(outcome);
+    }),
+    attachTest: (form: string, deliver: (outcome: McpTestOutcome) => void) => forms.attach(form, (outcome) => {
+      if (outcome.status !== "auth" && outcome.status !== "popup-blocked") deliver(outcome);
+    }),
+    execute: (form: string, attempt: McpAttempt) => submit(form, attempt, false),
     add: (form: string, attempt: McpAddAttempt, take: TakeMutation) => submit(form, attempt, false, take),
     check: (form: string, attempt: Attempt) => submit(form, attempt, true) };
 }

@@ -5,6 +5,9 @@ import { ACCOUNT_LIST_IDLE_FEATURE, AccountReadError, NoAnswer, readAccounts, su
 import { Confirmation, reviewText, type ReviewText } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { loginIdentity, type createAccountLogin, type LoginTarget } from "./accountLogin";
+import { AccountSwitchReceipt } from "./AccountSwitchReview";
+import { AccountLoginStatus } from "./AccountLoginStatus";
+import { usePageAccountSwitch, type SwitchAction } from "./usePageAccountSwitch";
 import "./accounts.css";
 
 type Props = {
@@ -15,13 +18,12 @@ type Props = {
 };
 
 // The page's connection-owned status is the receipt for both operations.
-const cancelledReview = { status: "committed", value: reviewText("checked"), receipt: reviewText("sign-in result checked") } as const;
 const startedReview = { status: "committed", receipt: reviewText("sign-in attempt checked") } as const;
 const resetTime = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hourCycle: "h23" });
 const percent = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
 const windowLabel = (minutes: number) => minutes % 1440 === 0 ? `${minutes / 1440}d` : minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
 
-function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void }) {
+function AccountRows({ accounts, stale, signIn, switchAction }: { accounts: Account[]; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void; switchAction: SwitchAction }) {
   return <>{accounts.some(({ usage }) => usage?.freshness === "stale") && <p className="account-stale">Some usage data may be out of date.</p>}<ul className="account-rows" aria-label={stale ? "last loaded accounts" : "model accounts"} data-stale={stale}>
     {accounts.map(({ account, label, available, current, default: isDefault, usage }) => <li key={account} data-default={isDefault} data-available={available}>
       <div className="account-identity">
@@ -41,6 +43,9 @@ function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: 
         </div>)}
         {usage?.refreshFailed && <p className="account-availability" data-failed="true">last usage refresh failed</p>}
       </div>
+      {available && !current && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountPageSwitch}
+        aria-label={`switch active chat to ${account}`} disabled={!!switchAction.reason} aria-describedby={switchAction.reason ? "account-switch-reason" : undefined}
+        onClick={event => switchAction.open(account, event.currentTarget)}>switch chat</button>}
       {!available && signIn && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
         aria-label={`sign in again to ${account}`} onClick={event => signIn({ provider: account.startsWith("anthropic:") ? "claude" : "codex", account }, event.currentTarget)}>sign in again</button>}
     </li>)}
@@ -64,6 +69,10 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const rows = (refreshed?.value.accounts ?? last?.accounts) ?? [];
   const fresh = !!client && (refreshed ? refreshed.client === client : last?.client === client);
   const canSignIn = fresh && !!supported && !loading && !failure && !active;
+  const switchAction = usePageAccountSwitch(client, rows, canSignIn, accounts => {
+    setReadAfter(latestCatalog);
+    setLast({ client: connection.client, accounts });
+  });
   const attempted = useRef(false);
   const inFlight = useRef(false);
   const show = async (focus: boolean) => {
@@ -72,9 +81,14 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
     if (focus) heading.current?.focus();
     setLoading(true);
     setFailure(null);
+    switchAction.reset();
     try {
-      const result = await connection.withControl((controller) => readAccounts(controller));
-      if ("refused" in result) setFailure(result.refused);
+      const result = await connection.withControl(async controller => {
+        const result = await readAccounts(controller);
+        await switchAction.refresh(controller);
+        return result;
+      });
+      if ("refused" in result) { setFailure(result.refused); switchAction.refuse(result.refused); }
       else {
         setReadAfter(latestCatalog);
         setLast({ client: connection.client, accounts: result.value.accounts });
@@ -99,43 +113,17 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
         : !client ? (connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
           : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />)
         : !supported ? <ModuleState kind="unsupported" title="update zeta to manage accounts here" detail="on this version, use /accounts inside an active chat." />
-        : failure ? <ModuleState kind="failed" title="could not load accounts" detail={failure} action={showAction} />
+        : failure ? <ModuleState kind="failed" title="could not load accounts" detail={switchAction.refusal ? undefined : failure} action={showAction} />
         : !fresh ? <ModuleState kind="loading" title="loading accounts…" />
         : !rows.length && <ModuleState kind="empty" title="no model accounts yet" detail="sign in to a model provider to start." />}
-      {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} />}
-      {attempt && <section className="account-login" data-state={attempt.state} aria-label="browser sign-in">
-        <div role="status">
-          <h3>{loginIdentity(attempt.target)}</h3>
-          <p>{attempt.state === "starting" ? "starting browser sign-in…"
-            : attempt.state === "pending" ? "waiting for your browser"
-            : attempt.state === "cancelling" ? "checking whether sign-in can be cancelled…"
-            : attempt.state === "settling" ? "checking the account catalog…"
-            : attempt.state === "succeeded" ? "signed in"
-            : attempt.state === "cancelled" ? "sign-in cancelled"
-            : attempt.state === "unknown" ? "sign-in result unknown"
-            : attempt.state === "idle" ? "zeta no longer has a sign-in to check"
-            : attempt.state === "blocked" ? "could not open the sign-in tab"
-            : attempt.state === "contention" ? "a sign-in for this account is already pending"
-            : "sign-in failed"}
-            {receipt?.state === "succeeded" && <> at <time dateTime={receipt.at.toISOString()}>{resetTime.format(receipt.at)}</time></>}
-          </p>
-          {attempt.state === "pending" && <p>sign-in started. finish in the tab that opened. this page updates automatically. reloading this page ends an uncommitted sign-in.</p>}
-          {attempt.state === "unknown" && <p>check the account catalog before trying again. zeta ends an uncommitted sign-in when its connection closes.</p>}
-          {attempt.state === "blocked" && <p>allow pop-ups for achilles, then try again.</p>}
-          {attempt.state === "failed" && <p>{attempt.detail}</p>}
-          {receipt?.state === "succeeded" && <p>{fresh && rows.some(row => row.account === loginIdentity(attempt.target) && row.available)
-            ? "the catalog shows this account as available for new chats."
-            : "check the catalog to see which accounts are available for new chats."}</p>}
-        </div>
-        {(attempt.state === "pending" || attempt.state === "cancelling") && <Confirmation level={1}
-          surface={WRITE_SURFACE.accountLoginCancel} label={reviewText("browser sign-in")} value={reviewText("pending")}
-          action={reviewText("cancel sign-in")} keep={reviewText("keep signing in")}
-          effect={reviewText("cancel this pending browser sign-in? a credential commit already in progress may still finish.")}
-          execute={async () => { await login.cancel(); return cancelledReview; }} checkResult={async () => cancelledReview} onCommitted={() => {}} />}
-        {canSignIn && receipt && ["failed", "blocked", "idle", "contention"].includes(receipt.state)
-          && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
-            onClick={event => signIn(receipt.target, event.currentTarget)}>try again</button>}
-      </section>}
+      {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} switchAction={switchAction} />}
+      <AccountSwitchReceipt />
+      {switchAction.reason && supported && <div className="account-switch-availability">
+        {!rows.some(row => row.available && !row.current) && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountPageSwitch} disabled aria-describedby="account-switch-reason">switch chat</button>}
+        <p id="account-switch-reason">{switchAction.reason}</p>{switchAction.refusal && !failure && <button className="account-action" type="button" onClick={() => void show(true)}>try again</button>}
+      </div>}
+      {attempt && <AccountLoginStatus attempt={attempt} login={login} canSignIn={canSignIn} signIn={signIn}
+        available={fresh && rows.some(row => row.account === loginIdentity(attempt.target) && row.available)} />}
       {canSignIn && !rows.length && <div className="account-actions">
         <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
           onClick={event => signIn({ provider: "claude" }, event.currentTarget)}>sign in to claude</button>
