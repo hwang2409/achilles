@@ -8,7 +8,7 @@
   --g1-diff-removed: #AD0707;
   --g1-surface: var(--g1-bg-subtle);
   --g1-selected: color-mix(in srgb, var(--g1-fg) 8%, transparent);
-  --g1-hover: color-mix(in srgb, var(--g1-fg) 5%, transparent);
+  --g1-hover: color-mix(in srgb, var(--g1-fg) 3%, transparent);
   --g1-rule: var(--g1-border);
   --g1-border: #E5E5E5;
   --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg)); /* 3:1 on the surface as well as the canvas */
@@ -78,7 +78,7 @@
   --g1-diff-removed: #C74E39;
   --g1-surface: var(--g1-bg-subtle);
   --g1-selected: color-mix(in srgb, var(--g1-fg) 10%, transparent);
-  --g1-hover: color-mix(in srgb, var(--g1-fg) 8%, transparent);
+  --g1-hover: color-mix(in srgb, var(--g1-fg) 4%, transparent);
   --g1-rule: var(--g1-border);
   --g1-border: rgb(255 255 255 / .07);
   --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg));
@@ -109,7 +109,7 @@
     --g1-diff-removed: #C74E39;
     --g1-surface: var(--g1-bg-subtle);
     --g1-selected: color-mix(in srgb, var(--g1-fg) 10%, transparent);
-    --g1-hover: color-mix(in srgb, var(--g1-fg) 8%, transparent);
+    --g1-hover: color-mix(in srgb, var(--g1-fg) 4%, transparent);
     --g1-rule: var(--g1-border);
     --g1-border: rgb(255 255 255 / .07);
     --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg));
