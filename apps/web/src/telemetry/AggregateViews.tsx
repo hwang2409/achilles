@@ -76,7 +76,7 @@ function Spark({ points }: { points: ModelSeriesPoint[] | undefined }) {
 }
 
 const latencyTitle = "estimated from zeta’s hourly latency histograms";
-function Latency({ value, firstToken }: { value: number | null; firstToken?: boolean }) {
+function Latency({ value, firstToken }: { value: number | null | undefined; firstToken?: boolean }) {
   return <TooltipProvider><Tooltip>
     <TooltipTrigger asChild><span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-4">{formatLatency(value)}</span></TooltipTrigger>
     <TooltipContent>{firstToken && "time to first token · "}{latencyTitle}</TooltipContent>
