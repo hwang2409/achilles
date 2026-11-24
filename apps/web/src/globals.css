@@ -533,7 +533,7 @@
 [data-vim-composer] .cm-content::before { font-family: var(--achilles-ui-font, var(--font-sans)); }
 [data-chat-composer] [data-part="composer-bar"] { gap: 8px; min-height: 36px; padding: 6px 8px 8px 14px; }
 [data-chat-composer] [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 12px; line-height: 16px; }
-[data-chat-composer] [data-part="composer-hint"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+[data-chat-composer] [data-part="composer-hint"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; font-size: calc(var(--achilles-ui-size, 14px) - 1px); }
 [data-page-chat-docked] [data-chat-composer] { width: calc(100% - 32px); margin-bottom: 16px; }
 @media (max-width: 760px), (max-height: 500px) {
   [data-chat-transcript] [data-part="timeline"] { padding: 14px 12px 8px; }
