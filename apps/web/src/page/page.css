@@ -20,14 +20,14 @@
 }
 .metric-block { min-width: 0; display: flex; align-items: flex-start; gap: 10px; min-height: 86px; padding: 14px var(--metric-pad, 16px); background: var(--fulcrum-surface); box-shadow: inset -1px 0 var(--fulcrum-border), inset 0 -1px var(--fulcrum-border); }
 .metric-block > div { min-width: 0; padding-inline-end: var(--metric-inner-pad, 6px); display: grid; gap: 2px; }
-.metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: inherit; line-height: 16px; overflow-wrap: anywhere; }
+.metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
 .metric-value-line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
-.metric-block strong { min-width: 0; max-width: 100%; font-size: var(--metric-value-size, var(--g1-type-title)); line-height: calc(1em + 6px); font-variant-numeric: tabular-nums; }
+.metric-block strong { min-width: 0; max-width: 100%; font-size: var(--metric-value-size, 28px); line-height: calc(1em + 6px); font-variant-numeric: tabular-nums; }
 .metric-block strong:not(.metric-value-number) { text-wrap: balance; }
 .metric-block strong.metric-value-number { white-space: nowrap; }
 .metric-word { display: inline-block; max-width: 100%; vertical-align: top; overflow-wrap: anywhere; }
 .metric-measure { position: absolute; visibility: hidden; white-space: nowrap; inline-size: max-content; }
-.metric-block small, .metric-delta { min-width: 0; overflow-wrap: anywhere; color: var(--fulcrum-muted); font-size: inherit; line-height: 16px; }
+.metric-block small, .metric-delta { min-width: 0; overflow-wrap: anywhere; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
 .metric-warn { color: var(--fulcrum-warn); }
 .record-mark { display: inline-block; flex: 0 0 auto; width: var(--g1-status-mark); height: var(--g1-status-mark); margin: 5px 2px 0 0; outline: 1px solid var(--fulcrum-muted); outline-offset: -1px; vertical-align: 1px; }
 .record-mark-reading, .record-mark-in-progress { background: linear-gradient(90deg, var(--fulcrum-accent) 50%, transparent 50%); outline-color: var(--fulcrum-accent); }

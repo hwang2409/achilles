@@ -3,7 +3,7 @@
   --fulcrum-measure: var(--g1-content-max);
 }
 [data-part="message"], [data-part="item"][data-kind="user"] {
-  font-size: inherit;
+  font-size: var(--g1-type-chat);
   line-height: var(--g1-leading-chat);
 }
 [data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
