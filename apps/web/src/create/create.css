@@ -1,11 +1,10 @@
 .create-split { display: flex; min-height: var(--g1-nav-row-height); }
 .create-split > .place-link { flex: 1; padding-inline: var(--g1-space-2); min-height: 100%; }
-.create-split button { border: 0; color: var(--fulcrum-muted); font-size: 11px; white-space: nowrap; min-width: 88px; padding-inline: 6px; }
+.create-split button { border: 0; color: var(--fulcrum-muted); font-size: 11px; white-space: nowrap; min-width: 0; padding-inline: var(--g1-space-2); }
 .create-split button[aria-pressed="true"] { color: var(--fulcrum-accent); }
-.create-heading { min-height: 56px; flex: none; border-bottom: 1px solid var(--fulcrum-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; }
-.create-heading a { border: 1px solid var(--fulcrum-border); padding: 8px 12px; }
-.create-heading a, .create-landing a { color: inherit; text-decoration: none; }
-.create-heading a:hover, .create-landing a:hover { color: var(--fulcrum-accent); }
+.create-heading { min-height: 56px; flex: none; border-bottom: 1px solid var(--fulcrum-border); display: flex; align-items: center; padding: 0 var(--g1-space-7); font-size: var(--g1-type-ui); }
+.create-landing a { color: inherit; text-decoration: none; }
+.create-landing a:hover { color: var(--fulcrum-accent); }
 .create-scroll { min-height: 0; overflow: auto; flex: 1; }
 .create-landing { max-width: 928px; margin: 0 auto; padding: var(--g1-page-padding); font-size: 14px; }
 .create-landing h1 { margin: 0 0 8px; font-size: var(--g1-type-page-title); letter-spacing: var(--g1-tracking-page-title); font-weight: var(--g1-weight-title); line-height: 1.25; text-wrap: balance; }
@@ -47,7 +46,6 @@
   .create-split button { min-width: 44px; }
   .create-split button span { display: none; }
   .create-heading { min-height: 48px; padding-inline: 16px; }
-  .create-heading a { display: flex; align-items: center; }
   .create-landing { padding: var(--g1-space-4); }
   .create-landing textarea { font-size: 16px; }
 }
@@ -65,5 +63,5 @@
 }
 
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
-  .create-landing button, .create-heading a, .build-receipt :is(.build-open, button), .build-status a { min-width: 44px; min-height: 44px; }
+  .create-landing button, .build-receipt :is(.build-open, button), .build-status a { min-width: 44px; min-height: 44px; }
 }

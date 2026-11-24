@@ -17,12 +17,14 @@ button, input, textarea, select { border-radius: var(--g1-radius-control); }
 :where(button, .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }
 :where(.ui-icon-button) { display: inline-grid; place-items: center; min-width: var(--g1-icon-height); min-height: var(--g1-icon-height); padding: 0; }
 :is(.primary, .ui-button-primary) { background: var(--g1-primary); color: var(--g1-primary-text); }
+/* a secondary action reads as a button at rest, with one quiet hairline */
+:where(.ui-button:not(.ui-button-primary, .page-chat-switcher)) { border-color: var(--g1-border); padding-inline: var(--g1-space-3); }
 :where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):active { background: var(--g1-selected); color: var(--g1-fg); }
 :where(.ui-card, [data-part="composer"]) { border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); background: var(--g1-panel); }
 :where(.ui-empty) { padding: var(--g1-space-4) 0; }
 :where(.ui-empty) p { margin: var(--g1-space-2) 0; color: var(--g1-muted); text-wrap: pretty; }
 :where(.ui-meta, .ui-status) { color: var(--g1-muted); font-size: var(--g1-type-meta); font-variant-numeric: tabular-nums; }
-:where(.ui-page-header) h1 { font-size: var(--g1-type-page-title); font-weight: var(--g1-weight-title); line-height: 32px; text-wrap: balance; }
+:where(.ui-page-header) h1 { font-size: var(--g1-type-ui); font-weight: var(--g1-weight-title); line-height: 20px; }
 @media (max-width: 760px), (pointer: coarse) { :where(.ui-button, .ui-icon-button) { min-height: var(--g1-touch-height); } :where(.ui-icon-button) { min-width: var(--g1-touch-height); } }
 :where(input:not([type="checkbox"], [type="radio"]), textarea, select) {
   background: var(--g1-bg);
@@ -210,4 +212,26 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
     border-top: 1px solid var(--fulcrum-border);
     background: var(--fulcrum-bg);
   }
+}
+
+/* Motion: short, interruptible feedback on every control. Transitions only touch paint and transform, so nothing reflows. */
+:root { --g1-ease: cubic-bezier(.2, 0, 0, 1); --g1-fast: 120ms; --g1-base: 160ms; }
+:where(a, button, summary, input, textarea, select, [role="button"], [role="tab"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="switch"], [data-part="composer"]) {
+  transition-property: background-color, border-color, color, box-shadow, opacity, transform, outline-color;
+  transition-duration: var(--g1-base);
+  transition-timing-function: var(--g1-ease);
+}
+/* press: compact controls shrink a little; full-width rows only darken */
+:where(button, .ui-button, .ui-icon-button):where(:not(:disabled, [aria-disabled="true"], .collapse-button, .new-chat, [role="option"], [role="menuitem"], [role="menuitemradio"], .chat-starters button)):active { transform: scale(.96); transition-duration: var(--g1-fast); }
+:where(a, button, summary):focus-visible { transition-duration: 0s; }
+@keyframes g1-fade { from { opacity: 0; } }
+@keyframes g1-pop { from { opacity: 0; transform: scale(.98); } }
+@keyframes g1-drop { from { opacity: 0; transform: translateY(-4px); } }
+dialog[open] { animation: g1-pop var(--g1-base) var(--g1-ease); }
+dialog[open]::backdrop { animation: g1-fade var(--g1-base) var(--g1-ease); }
+:is(.header-menu, #page-chat-choices, #page-chat-modes, .enum-listbox [role="listbox"]) { animation: g1-drop var(--g1-fast) var(--g1-ease); }
+/* fast loads never flash a skeleton: it fades in only after 300 ms */
+:is(.module-skeleton, .sidebar-skeleton, .search-skeleton) { animation: g1-fade var(--g1-base) var(--g1-ease) 300ms both; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after, ::backdrop { transition-duration: 0s !important; animation-duration: 0s !important; animation-delay: 0s !important; }
 }

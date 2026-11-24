@@ -12,7 +12,7 @@ type Props = {
 
 export function PagesLanding({ catalog: { items, next, loading, error }, reload, more }: Props) {
   const titles = new Map(items?.map(({ route, title }) => [route, title]));
-  return <ModuleFrame title="Pages" subtitle="Open a page you built with Zeta.">
+  return <ModuleFrame title="Pages">
     <div className="pages-landing">
       {error ? <ModuleState kind="failed" title="the page catalog did not load" action={{ label: "retry", run: reload }} />
         : items === null ? <ModuleState kind="loading" title="reading pages…" />

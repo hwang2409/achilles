@@ -23,12 +23,11 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
     if (build.error && (document.activeElement === submit.current || document.activeElement === document.body)) prompt.current?.focus();
   }, [build.error]);
   return <>
-    <header className="create-heading"><strong>create</strong><a href={surfaceHref("/pages")}>all pages</a></header>
+    <header className="create-heading"><strong>Create</strong></header>
     <ShellDockSlot />
     <div className="create-scroll">
       <div className="create-landing">
         <h1>what should we build?</h1>
-        <p>describe a page in plain words. achilles opens a new chat in create mode and keeps the result in pages. navigation does not hide progress.</p>
         <form onSubmit={(event) => { event.preventDefault(); void build.start(); }} aria-busy={build.pending}>
           <textarea ref={prompt} aria-label="describe your page" aria-describedby="create-build-status" value={build.draft}
             readOnly={build.pending || build.locked} placeholder="a page to track…" onChange={(event) => build.setDraft(event.target.value)} />

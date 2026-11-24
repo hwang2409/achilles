@@ -10,9 +10,9 @@
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   padding: var(--g1-space-2) var(--g1-space-3);
-  border: var(--g1-border-width) solid var(--g1-border);
-  border-radius: var(--g1-radius-control);
-  background: var(--g1-panel);
+  border: var(--g1-border-width) solid transparent;
+  border-radius: var(--g1-radius-container);
+  background: var(--g1-bg-subtle);
   font-weight: 400;
   overflow-wrap: anywhere;
 }
@@ -42,6 +42,10 @@
   column-gap: var(--g1-space-2);
   background: var(--g1-bg-subtle);
 }
+summary[data-part="tool-header"] { cursor: pointer; transition: background-color var(--g1-base) var(--g1-ease); }
+summary[data-part="tool-header"]:hover { background: var(--g1-hover); }
+/* the body fades in on open; height is left to the virtual list, which measures rows */
+[data-part="tool"][open] > :not(summary) { animation: g1-fade var(--g1-base) var(--g1-ease); }
 [data-part="tool"][data-state="streaming"] > [data-part="tool-header"] { background: var(--g1-accent-tint); }
 [data-part="approval"] > [data-part="tool-header"] { background: color-mix(in srgb, var(--g1-warn-fill) 6%, var(--g1-bg)); }
 [data-part="tool-name"] { color: var(--g1-fg); }

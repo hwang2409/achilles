@@ -100,7 +100,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
   const owned = new Set(chats.map((chat) => chat.session_id));
   return <section className="module-frame sessions-frame">
     <header className="sessions-head ui-page-header">
-      <div><h1>Sessions</h1><p className="ui-meta">Browse Zeta sessions on this computer.</p></div>
+      <h1>Sessions</h1>
       <button type="button" className="sessions-new ui-button" onClick={newChat} disabled={!client}>New chat</button>
     </header>
     <ShellDockSlot />

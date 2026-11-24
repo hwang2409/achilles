@@ -50,7 +50,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
   return <aside ref={sidebar} id="surface-sidebar" className="sidebar" aria-label={narrow ? "navigation menu" : "sidebar"} role={narrow && drawer ? "dialog" : undefined} aria-modal={narrow && drawer || undefined} aria-hidden={narrow && !drawer ? true : undefined} inert={narrow && !drawer || undefined}>
     <div className="brand-row">
       <span className="brand-mark" aria-hidden="true" /><strong>achilles</strong>
-      <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected}>Zeta</span>
+      <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected} role="img" />
       {narrow && <button className="drawer-close" aria-label="close navigation" onClick={onClose}>×</button>}
     </div>
     <div className="sidebar-scroll">
@@ -62,7 +62,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
           {createMode && <button type="button" aria-label="toggle create mode for this page" aria-pressed={createMode.enabled}
             aria-busy={createMode.pending || undefined} disabled={!createMode.available || createMode.pending}
             title={createMode.error ?? "create mode for this page"} onClick={() => void createMode.toggle()}>
-            {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}<span aria-hidden="true"> {createMode.error ? "!" : "· this page"}</span>
+            {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}{createMode.error && <span aria-hidden="true"> !</span>}
           </button>}
         </div>
       </div>

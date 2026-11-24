@@ -106,7 +106,7 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
     void show(false);
   });
   const showAction = { label: "Try again", run: () => void show(true) };
-  return <ModuleFrame title="Accounts" subtitle="View model accounts and usage. Credentials stay with Zeta.">
+  return <ModuleFrame title="Accounts">
     <div className="accounts-place">
       <h2 ref={heading} tabIndex={-1}>model accounts</h2>
       {active ? null : loading ? <ModuleState kind="loading" title="loading accounts…" />

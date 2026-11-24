@@ -140,7 +140,6 @@ export function AgentsModule({ client, connecting, retry, send, controls }: { cl
           </div>
           <div className="agents-lane-note">
             {sourceNote[report.source] && <p role="status">{sourceNote[report.source]}</p>}
-            <p>lanes group runs by their top-level session. zeta does not store lanes.</p>
             <p>{shown.length} {report.complete ? "runs in view" : "loaded results"}{report.omitted ? ` · ${report.omitted} malformed ${report.omitted === 1 ? "row" : "rows"} omitted` : ""}</p>
           </div>
           {!lanes.length && <ModuleState kind="empty" title={matches || report.filters.status || report.filters.root || !report.complete || report.omitted ? "no agent runs in this view" : "no agent runs yet"} />}
