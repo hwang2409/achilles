@@ -98,7 +98,7 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
     project={project} retry={retryRead} reading={reading} offline={offline} />;
 
   const openAdd = () => setAdding(true);
-  return <ModuleFrame title="Connections" actions={snapshot && !adding && <button type="button" className="ui-button ui-button-primary" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!supported} onClick={openAdd}>Add connection</button>}>
+  return <ModuleFrame title="Connections" actions={snapshot && !adding && <button type="button" className="ui-button" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!supported} onClick={openAdd}>Add connection</button>}>
     <div className="mcp-place">
       {client && !supported ? <ModuleState kind="unsupported" title="needs a newer zeta" detail="update zeta to manage MCP connections here" />
         : offline && !retained ? connecting ? <ModuleState kind="loading" title="connecting to zeta…" />

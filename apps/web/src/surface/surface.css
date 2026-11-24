@@ -14,7 +14,8 @@
 .surface-search .chat-search { background: transparent; border-color: transparent; min-height: var(--g1-nav-row-height); display: flex; align-items: center; padding-inline: var(--g1-space-2) 44px; border: 0; font-size: inherit; }
 .surface-search .chat-search > :is(span, kbd) { display: none; }
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; }
-.surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0; color: var(--fulcrum-muted); border-color: transparent; }
+/* the hint ends at the row padding, where "off" and the rename pencil end */
+.surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center end; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0 var(--g1-space-2); color: var(--fulcrum-muted); border-color: transparent; }
 .surface-search .palette-button > span { display: none; }
 .place-nav { flex: none; margin: var(--g1-space-3) var(--g1-sidebar-padding); }
 .chat-group h2 { font-size: inherit; font-weight: 600; color: var(--g1-muted); }
@@ -36,7 +37,8 @@
 .collapse-label::first-letter { text-transform: uppercase; }
 
 .module-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.module-frame > header { min-height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--g1-space-2); border-bottom: 1px solid var(--g1-border); padding: var(--g1-space-2) var(--g1-page-gutter); }
+/* no block padding: a 40px action fits the 56px bar, so every route header is the same height */
+.module-frame > header { min-height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--g1-space-2); border-bottom: 1px solid var(--g1-border); padding: 0 var(--g1-page-gutter); }
 .module-frame > header > div { display: flex; align-items: baseline; gap: var(--g1-space-3); min-width: 0; }
 .module-frame > header :is(h1, .ui-meta) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .module-frame > header :is(h1, p) { margin: 0; }
@@ -61,14 +63,14 @@
 @media (min-width: 761px) and (min-height: 501px) {
   .surface-search { position: sticky; top: 0; z-index: 3; }
   .sidebar-scroll { scroll-padding-top: 36px; }
-  .sidebar-collapsed .create-split .place-link span { display: block; font-size: var(--g1-type-kbd); }
   .sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
   .sidebar-collapsed .sidebar-scroll { scrollbar-width: none; }
   .sidebar-collapsed .sidebar :is(.brand-row strong, .surface-connection, .new-chat b, .surface-search .chat-search, .search-skeleton, .place-link span, .place-link small, .chat-list, .collapse-label) { display: none; }
   .sidebar-collapsed :is(.surface-actions, .surface-search, .place-nav) { margin-inline: 6px; }
   .sidebar-collapsed :is(.place-link, .surface-actions > .place-link, .new-chat) { justify-content: center; min-height: 42px; padding: 0; }
-  .sidebar-collapsed .surface-search .palette-button { position: static; min-width: 0; }
-  .sidebar-collapsed .surface-search .palette-button > span { display: inline; }
+  .sidebar-collapsed .surface-search .palette-button { position: static; min-width: 0; height: auto; min-height: 42px; place-items: center; padding: 0; }
+  .sidebar-collapsed .surface-search .palette-button > span { display: flex; }
+  .sidebar-collapsed :is(.new-chat, .palette-button) svg { color: var(--fulcrum-muted); }
   .sidebar-collapsed .surface-search .palette-button > kbd { display: none; }
   .sidebar-collapsed .collapse-button { justify-content: center; padding: 0; }
 }

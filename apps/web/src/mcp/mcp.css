@@ -32,7 +32,7 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-grid[data-retained="true"] :is(.mcp-row strong, .mcp-detail h2, .mcp-detail dd) { color: var(--fulcrum-muted); }
 
 .mcp-failure-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }
-.mcp-failure-actions button { min-height: 44px; padding-inline: 12px; }
+.mcp-failure-actions button { min-height: var(--g1-control-height); padding-inline: 12px; }
 @media (max-width: 960px) {
   .mcp-context { padding-inline: 16px; }
   .mcp-grid { display: block; }
@@ -50,7 +50,8 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-add-form p { margin: 0; color: var(--g1-muted); text-wrap: pretty; overflow-wrap: anywhere; }
 .mcp-add-form [role="alert"] { color: var(--g1-danger); }
 .mcp-add-field { display: grid; gap: var(--g1-space-1); min-width: 0; color: var(--g1-fg-2); font-weight: 500; }
-.mcp-add-field :is(input, select) { min-width: 0; min-height: 44px; width: 100%; padding-inline: var(--g1-space-3); color: var(--g1-fg); font-weight: 400; }
+.mcp-add-field :is(input, select) { min-width: 0; min-height: var(--g1-control-height); width: 100%; padding-inline: var(--g1-space-3); color: var(--g1-fg); font-weight: 400; }
+.mcp-add-field select { padding-inline-end: 32px; }
 .mcp-add-field input { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 .mcp-add-entry { display: grid; gap: var(--g1-space-2) var(--g1-space-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
 .mcp-add-entries { min-inline-size: 0; display: grid; gap: var(--g1-space-3); margin: 0; padding: var(--g1-space-3); border: var(--g1-border-width) solid var(--g1-border); background: var(--g1-bg-subtle); }
@@ -58,7 +59,7 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-add-form > label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: var(--g1-space-2); min-height: 44px; width: fit-content; cursor: pointer; }
 .mcp-add-form input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--g1-accent); }
 .mcp-add-buttons { display: flex; flex-wrap: wrap; gap: var(--g1-space-2); }
-.mcp-add button { min-height: 44px; padding-inline: var(--g1-space-3); }
+.mcp-add button { min-height: var(--g1-control-height); padding-inline: var(--g1-space-3); }
 .mcp-add :is(button, input, select):focus-visible { outline-offset: 2px; }
 .mcp-add-limits { font-size: inherit; }
 
@@ -66,18 +67,23 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-detail-head > :empty { display: none; }
 .mcp-actions { display: flex; flex-wrap: wrap; gap: var(--g1-space-2); align-items: start; }
 .mcp-actions .confirmation-row { padding: 0; border: 0; }
-.mcp-actions .confirmation-row button { min-height: var(--g1-touch-height); padding-inline: var(--g1-space-2); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
+.mcp-actions .confirmation-row button { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
 .mcp-review-actions { margin-block-start: 0; }
 .mcp-remove { color: var(--g1-danger); text-transform: capitalize; }
 .mcp-detail .module-state { padding-inline: 0; }
 
 .mcp-test { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--g1-space-2) var(--g1-space-4); margin-block: 0 var(--g1-space-5); }
-.mcp-test button { min-height: 44px; padding-inline: var(--g1-space-3); }
+.mcp-test button { min-height: var(--g1-control-height); padding-inline: var(--g1-space-3); }
 .mcp-test p { margin: 0; font-variant-numeric: tabular-nums; }
 .mcp-test [data-test-result]:not([data-test-result="ok"]) { color: var(--g1-warn); }
 .mcp-auth { display: grid; gap: 8px; margin-block: 16px; padding-block: 12px; border-block: 1px solid var(--g1-rule); }
 .mcp-auth p { margin: 0; text-wrap: pretty; }
 .mcp-auth-buttons, .mcp-auth-global { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.mcp-auth button, .mcp-auth-global button { min-height: 44px; padding-inline: 12px; }
+.mcp-auth button, .mcp-auth-global button { min-height: var(--g1-control-height); padding-inline: 12px; }
 .mcp-auth-global { padding: 8px 16px; border-bottom: 1px solid var(--g1-rule); }
 .mcp-auth [data-auth-state]:is([data-auth-state="failed"], [data-auth-state="unknown"]) { color: var(--g1-warn); }
+
+/* desktop controls share the 40px control height; touch keeps 44px targets */
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .mcp-failure-actions button, .mcp-add-field :is(input, select), .mcp-add button, .mcp-actions .confirmation-row button, .mcp-test button, .mcp-auth button, .mcp-auth-global button { min-height: 44px; }
+}

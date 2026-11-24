@@ -92,8 +92,12 @@
 .agents-spawn-form label { display: grid; gap: var(--g1-space-1); width: 100%; }
 .agents-spawn-form :is(select, textarea) { width: 100%; padding-block: var(--g1-space-2); }
 .agents-spawn-form textarea { resize: vertical; }
-.agents-spawn-form :is(select, textarea), .agents-frame :is(.agents-spawn, .agents-cancel) button { min-height: 44px; border-radius: var(--g1-radius-control); }
+.agents-spawn-form :is(select, textarea), .agents-frame :is(.agents-spawn, .agents-cancel) button { min-height: var(--g1-control-height); border-radius: var(--g1-radius-control); }
 
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .agents-spawn-form :is(select, textarea), .agents-frame :is(.agents-spawn, .agents-cancel) button { min-height: 44px; }
   .agents-filters :is(input, select), .agents-frame :is(.agents-catalog, .agents-detail-scroll) button:not(.agents-timeline *), .agents-back { min-width: 44px; min-height: 44px; }
 }
+.agents-frame select { padding-inline-end: 32px; }
+/* refresh is a quiet text action, as on Sessions and Library */
+.agents-frame .agents-catalog .agents-filters button { border-color: transparent; }

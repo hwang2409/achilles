@@ -53,7 +53,7 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
   if (!supportsFeature(client, TELEMETRY_FEATURE)) {
     const stateFeature = "state_read_v1";
     return (
-      <><ShellDockSlot /><div className="telemetry-placeholder">
+      <section className="module-frame">{HEADER}<ShellDockSlot /><div className="telemetry-placeholder">
         <section className="telemetry-notice">
           <p className="telemetry-eyebrow" role="status">telemetry · needs a newer zeta</p>
           <h1>this zeta can't show telemetry yet</h1>
@@ -74,7 +74,7 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
             <a href="/">back to chats</a>
           </div>
         </section>
-      </div></>
+      </div></section>
     );
   }
   const detail = sessionOf(path);
@@ -161,11 +161,15 @@ function Tools({ status, refreshing, range, chooseRange, refresh }: { status?: T
 }
 
 /** Only the interior: the achilles shell draws the sidebar, top bar, and route title around it. */
+// the same page header as every other route; the read-only notice sits under it
+const HEADER = <header className="ui-page-header"><h1>Telemetry</h1></header>;
+
 function Frame({ tools, tabs, children, detail }: { tools?: ReactNode; tabs?: ReactNode; children: ReactNode; detail?: boolean }) {
   return (
-    <div className={detail ? "telemetry-module tm-detail-frame" : "telemetry-module"}>
-      {tabs && <div className="tm-tabs-row">{tabs}{tools}</div>}
+    <div className={detail ? "module-frame telemetry-module tm-detail-frame" : "module-frame telemetry-module"}>
+      {HEADER}
       <ShellDockSlot />
+      {tabs && <div className="tm-tabs-row">{tabs}{tools}</div>}
       <main className="tm-main">{children}</main>
     </div>
   );
@@ -222,7 +226,6 @@ function TelemetryOff({ openSettings }: { openSettings?: () => void }) {
   return (
     <Frame>
       <section className="tm-intro">
-        <header className="ui-page-header"><h1>Telemetry</h1></header>
         <div className="tm-records">
           <div><h2>Records</h2><ul><li>durations and status</li><li>model, provider, tokens</li><li>tool names and sizes</li><li>error types</li></ul></div>
           <div><h2>Never records</h2><ul><li>prompts or replies</li><li>reasoning</li><li>tool arguments or results</li><li>error messages, env values</li></ul></div>

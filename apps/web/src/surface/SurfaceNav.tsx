@@ -9,10 +9,14 @@ const groups = [...new Set(surfaceRoutes.flatMap((route) => route.group ?? []))]
 
 type PlaceCount = { waiting?: number };
 
-function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: SurfaceRoute; count?: PlaceCount }) {
+/** One rail icon style: the collapsed sidebar shows only these, so every rail item draws the same 16px stroke. */
+export const NavIcon = ({ d }: { d: string }) => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={d} /></svg>;
+
+// the tooltip names the place only in the collapsed rail, where the label is hidden
+function PlaceLink({ route, current, count, collapsed }: { route: SurfaceRoute; current: SurfaceRoute; count?: PlaceCount; collapsed: boolean }) {
   const waiting = count?.waiting || undefined;
-  return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={route.label}>
-    {route !== createRoute && <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={route.icon} /></svg>}
+  return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={collapsed ? route.label : undefined}>
+    <NavIcon d={route.icon} />
     <span>{route.label}</span>
     {waiting && <small aria-hidden="true" className="waiting-count">{waiting}</small>}
   </a>;
@@ -56,7 +60,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       <div className="surface-actions">
         {action}
         <div className="create-split" data-mode={createMode?.enabled ? "on" : undefined}>
-          <PlaceLink route={createRoute} current={current} />
+          <PlaceLink route={createRoute} current={current} collapsed={collapsed} />
           {activity && <BuildStatus activity={activity} current={current} className="build-status-nav" />}
           {createMode && <button type="button" aria-label="toggle create mode for this page" aria-pressed={createMode.enabled}
             aria-busy={createMode.pending || undefined} disabled={!createMode.available || createMode.pending}
@@ -67,12 +71,12 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       </div>
       <div className="surface-search">
         {search}
-        <button className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><span aria-hidden="true">⌕</span><kbd>{modKey("K")}</kbd></button>
+        <button className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><span aria-hidden="true"><NavIcon d="M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l3.5 3.5" /></span><kbd>{modKey("K")}</kbd></button>
       </div>
       <div className="sidebar-destinations">
         <nav className="place-nav" aria-label="places">
           {groups.map((group) => <section aria-label={group} key={group}>
-            {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} count={counts[route.id]} />)}
+            {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} count={counts[route.id]} collapsed={collapsed} />)}
           </section>)}
         </nav>
         {recent}

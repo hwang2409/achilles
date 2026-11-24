@@ -25,7 +25,7 @@
 .sidebar .new-chat { justify-content: flex-start; border: 0; color: var(--g1-fg); background: transparent; }
 .new-chat:where(:not(:disabled, [aria-disabled="true"]):hover) { background: var(--g1-hover); }
 .sidebar .new-chat > span { display: none; }
-.sidebar-collapsed .sidebar .new-chat > span { display: inline; }
+.sidebar-collapsed .sidebar .new-chat > span { display: flex; }
 .sidebar .new-chat:focus-visible { outline-offset: 2px; }
 .chat-search { border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); }
 .chat-search > span { color: var(--fulcrum-muted); font-size: 20px; }
@@ -66,14 +66,16 @@
 
 .chat-header { container-type: inline-size; height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--g1-page-gutter); border-bottom: 1px solid var(--g1-border); }
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
-.chat-heading span { order: 0; flex: 0 0 auto; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.chat-heading span { order: 0; flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own
    allocated box (narrow viewport + sidebar + chat-actions leave .chat-heading under 160px) and
    visually overlap .chat-actions; ellipsis alone keeps the title readable at whatever room remains. */
 .chat-heading strong { order: 1; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; font-weight: 600; }
 .chat-actions { display: flex; align-items: center; gap: 12px; white-space: nowrap; font-size: inherit; }
-.chat-actions button { min-height: var(--g1-icon-height); color: var(--g1-muted); font-size: inherit; }
-.approval-mode { color: var(--fulcrum-muted); font-size: inherit; white-space: nowrap; }
+/* actions read as buttons (body text, hover fill); the approval mode is muted status text with the same side padding, so the gaps match */
+.chat-actions button { min-height: var(--g1-icon-height); color: var(--g1-fg); font-size: inherit; }
+.chat-actions > button[aria-pressed] { min-width: calc(10ch + 2 * var(--g1-space-2)); }
+.approval-mode { padding-inline: var(--g1-space-2); color: var(--fulcrum-muted); font-size: inherit; white-space: nowrap; }
 .run-state, .page-chat-status { color: var(--fulcrum-muted); font-size: inherit; white-space: nowrap; }
 
 .chat-heading strong[role="button"] { cursor: text; border-radius: 2px; line-height: 40px; }
