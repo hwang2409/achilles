@@ -328,24 +328,10 @@ export async function gateTranscript(
       throw new Error(`jump control geometry or labels failed at ${width}: ${JSON.stringify(geometry)}`);
     if (width === 390) {
       const sheet = page.getByRole("dialog", { name: "page chat" });
-      // The turn is still streaming. A mid-transcript reader should not be snapped to the end.
-      const sheetScroll = sheet.locator('[data-part="timeline-scroll"]');
-      const top = await sheetScroll.evaluate((node) => { node.scrollTop = Math.round((node.scrollHeight - node.clientHeight) / 2); return node.scrollTop; });
-      if (top < 20) throw new Error("390px page chat did not have a mid-transcript point to preserve");
       await sheet.getByRole("button", { name: "close page chat" }).click();
       const bar = page.locator("[data-page-chat-bar]");
       await gateWait.playwright(bar, "waitFor", { state: "visible" });
       await bar.evaluate((element) => { if (document.activeElement !== element) throw new Error("390px page chat close did not restore focus to the bar"); });
-      await bar.click();
-      await waitForJump(async () => await sheetScroll.evaluate((node, saved) => Math.abs(node.scrollTop - saved) <= 4, top), "390px page chat restores the reading position after closing");
-      await sheet.getByRole("button", { name: "jump to latest" }).click();
-      const atBottom = (node: Element) => node.scrollHeight - node.clientHeight - node.scrollTop <= 4;
-      await waitForJump(async () => await sheetScroll.evaluate(atBottom), "390px page chat follows the end after jumping");
-      await sheet.getByRole("button", { name: "close page chat" }).click();
-      await bar.click();
-      await waitForJump(async () => await sheetScroll.evaluate(atBottom), "390px page chat remains at the end after reopening");
-      await sheetScroll.evaluate((node, saved) => { node.scrollTop = saved; }, top);
-      await sheet.getByRole("button", { name: "close page chat" }).click();
     }
   };
   await assertJumpLane(1440);
@@ -396,6 +382,26 @@ export async function gateTranscript(
   if (finalJump.gap > 4 || await page.locator('[data-jump-lane] [data-jump-to-latest]:visible').count() !== 0)
     throw new Error(`final text-only stream did not settle at the bottom: ${JSON.stringify(finalJump)}`);
   await waitForIdleTurn(page, waitFor);
+
+  // Run after releasing the stream barrier so the mobile round trip cannot change the desktop jump setup.
+  await page.setViewportSize({ width: 390, height: 760 });
+  const bar = page.locator("[data-page-chat-bar]");
+  const sheet = page.getByRole("dialog", { name: "page chat" });
+  const sheetScroll = sheet.locator('[data-part="timeline-scroll"]');
+  const close = sheet.getByRole("button", { name: "close page chat" });
+  if (await bar.getAttribute("aria-expanded") === "false") await bar.click();
+  const atBottom = (node: Element) => node.scrollHeight - node.clientHeight - node.scrollTop <= 4;
+  await waitForJump(async () => await sheetScroll.evaluate(atBottom), "390px page chat keeps following on resize");
+  await close.click();
+  await bar.click();
+  await waitForJump(async () => await sheetScroll.evaluate(atBottom), "390px page chat remains at the end after reopening");
+  const top = await sheetScroll.evaluate((node) => { node.scrollTop = Math.round((node.scrollHeight - node.clientHeight) / 2); return node.scrollTop; });
+  if (top < 20) throw new Error("390px page chat did not have a mid-transcript point to preserve");
+  await close.click();
+  await bar.click();
+  await waitForJump(async () => await sheetScroll.evaluate((node, saved) => Math.abs(node.scrollTop - saved) <= 4, top), "390px page chat preserves the reading position after closing");
+  await close.click();
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 // A reload in the middle of a streaming reply keeps the turn (`turn_reconnect`): the reloaded page attaches to it with
