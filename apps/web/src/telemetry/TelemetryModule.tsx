@@ -72,8 +72,8 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
             <li>restart <code>zeta serve</code> · achilles connects again by itself</li>
           </ol>
           <div data-telemetry-unavailable-actions className="sticky bottom-0 -mx-4 flex flex-wrap items-center gap-2 border-t bg-background px-4 py-2 sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0">
-            <Button variant="outline" className="min-h-11" type="button" onClick={() => location.reload()}>check again</Button>
-            <Button asChild variant="outline" className="min-h-11"><a href="/">back to chats</a></Button>
+            <Button variant="outline" className="min-h-[44px]" type="button" onClick={() => location.reload()}>check again</Button>
+            <Button asChild variant="outline" className="min-h-[44px]"><a href="/">back to chats</a></Button>
           </div>
         </Card>
       </div></>
