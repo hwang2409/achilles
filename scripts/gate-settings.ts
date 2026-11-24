@@ -21,7 +21,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
         ansi: style.getPropertyValue("--fulcrum-ansi-blue").trim(),
       };
     });
-    const background = scheme === "light" ? "rgb(255, 255, 255)" : "rgb(11, 11, 13)";
+    const background = scheme === "light" ? "rgb(255, 255, 255)" : "rgb(17, 17, 17)";
     if (appearance.scheme !== scheme || appearance.background !== background || !appearance.syntax || !appearance.ansi)
       throw new Error(`wrong ${scheme} appearance: ${JSON.stringify(appearance)}`);
   };
