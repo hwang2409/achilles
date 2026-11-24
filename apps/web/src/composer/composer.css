@@ -51,9 +51,8 @@
 /* forced colors drop the icon's fill, so it takes the button text color */
 @media (forced-colors: active) {
   .main-pane [data-part="composer"] :is([data-part="composer-submit"], [data-part="composer-stop"])::before { forced-color-adjust: none; background: ButtonText; }
+  .main-pane [data-part="composer"] [data-part="composer-submit"]:is(:disabled, [aria-disabled="true"])::before { background: GrayText; }
 }
-/* the in-flight row already says "next step" (or "sending"), so the status line keeps that word for assistive tech only */
-.main-pane [data-part="composer"]:has([data-part="composer-queued"][data-sending]) [data-part="composer-message"] { clip-path: inset(50%); }
 .main-pane [data-part="composer-reason"] { margin: 0; padding: 4px 8px; color: var(--fulcrum-muted); }
 
 @media (max-width: 639px) {

@@ -27,7 +27,7 @@
   padding: 10px 16px;
 }
 .confirmation-dialog header { justify-content: space-between; border-bottom: 1px solid var(--g1-rule); }
-.confirmation-heading-actions { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; display: flex; align-items: center; gap: 8px; color: var(--g1-muted); }
+.confirmation-heading-actions { font-size: inherit; display: flex; align-items: center; gap: 8px; color: var(--g1-muted); }
 .confirmation-dialog h2 { margin: 0; font-size: var(--g1-type-title); text-wrap: balance; }
 /* the close control has no edge, like the settings and shortcuts `esc`; it is muted until hovered */
 .confirmation-dialog .confirmation-close { flex: none; border-color: transparent; color: var(--g1-muted); font-size: inherit; }
@@ -42,7 +42,6 @@
   border-bottom: 1px solid var(--g1-rule);
 }
 .confirmation-body dt, .confirmation-current { color: var(--g1-muted); }
-.confirmation-body dt { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; }
 .confirmation-body dd { margin: 0; }
 .confirmation-dialog[data-proof="name"] .confirmation-body dl > div:last-child dd { color: var(--g1-warn); }
 .confirmation-proof { flex: none; min-height: calc(1lh + 8px); overflow-y: auto; padding: 0 16px 8px; }
