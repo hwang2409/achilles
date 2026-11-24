@@ -26,6 +26,7 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
   const { reads } = owner;
   const snapshot = useSyncExternalStore(reads.subscribe, reads.snapshot);
   const [path, setPath] = useState(pathname);
+  const [adding, setAdding] = useState(false);
   const [scope, setScope] = useState<McpScope>(() => detailOf(pathname)?.scope ?? "effective");
   const [retry, setRetry] = useState(0);
   const [reading, setReading] = useState(false);
@@ -96,27 +97,27 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
   const failure = (failure: Failure, project: boolean) => <FailedRead key={`${scope}:${failure.reason}`} failure={failure}
     project={project} retry={retryRead} reading={reading} offline={offline} />;
 
-  return <ModuleFrame title="mcp connections">
+  const openAdd = () => setAdding(true);
+  return <ModuleFrame title="Connections" subtitle="Manage connections for new sessions and the current project." actions={snapshot && !adding && <button type="button" className="ui-button ui-button-primary" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!supported} onClick={openAdd}>Add connection</button>}>
     <div className="mcp-place">
-      <p className="mcp-context">configuration for new sessions · user + zeta’s current project</p>
-      {client && !supported ? <ModuleState kind="unsupported" title="needs a newer zeta" detail="update zeta to manage mcp connections here" />
+      {client && !supported ? <ModuleState kind="unsupported" title="needs a newer zeta" detail="update zeta to manage MCP connections here" />
         : offline && !retained ? connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
           : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: retryConnection }} />
-        : !snapshot ? <ModuleState kind="loading" title="reading mcp configuration…" />
+        : !snapshot ? <ModuleState kind="loading" title="Reading MCP configuration…" />
         : <>
           {retained && <p className="mcp-offline" role="status">connection lost · showing the last read from disk · retrying automatically</p>}
-          <McpAdd owner={owner} snapshot={snapshot} defaultScope={scope === "project" ? "project" : "user"} online={supported}
-            reviewTrust={(name) => { setScope("project"); navigate(`${LIST}/project/${encodeURIComponent(name)}`); }} />
+          {adding && <section className="mcp-add" aria-label="Add a connection"><McpAdd close={() => setAdding(false)} owner={owner} snapshot={snapshot} defaultScope={scope === "project" ? "project" : "user"} online={supported}
+            reviewTrust={(name) => { setScope("project"); navigate(`${LIST}/project/${encodeURIComponent(name)}`); }} /></section>}
           <McpPendingElsewhere owner={owner} row={detailOpen ? row : undefined} online={supported} />
-          <div className="mcp-grid" data-detail={detailOpen} data-retained={Boolean(retained)}>
+          <div className="mcp-grid" data-detail={detailOpen} data-has-selection={!!row || detailOpen} data-retained={Boolean(retained)}>
             <ConnectionList snapshot={snapshot} scope={scope} selectScope={(view) => { setScope(view); if (detailOpen) navigate(LIST); }}
-              activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
-            <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
+              addConnection={supported && !adding ? openAdd : undefined} activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
+            {(row || detailOpen) && <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
               detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure}>
               {reviewRow?.config.transport && reviewRevision && <McpTest key={JSON.stringify([reviewRow.scope, reviewRow.name])} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading} />}
               {reviewRow?.config.oauth && reviewRevision && <McpAuth key={JSON.stringify(["auth", reviewRow.scope, reviewRow.name])} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading} />}
               <McpActions key={`${path}:${scope}`} owner={owner} heading={detailHeading} row={row ?? null} revision={revision} online={supported} />
-            </ConnectionDetail>
+            </ConnectionDetail>}
           </div>
         </>}
     </div>

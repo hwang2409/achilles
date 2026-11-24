@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canAcceptMemory, projectInbox, projectKindText, projectMemory, projectMemoryRevision, projectMessage, projectProjects } from "./reads";
+import { canAcceptMemory, projectInbox, projectKindText, projectMemory, projectMemoryEntry, projectMemoryRevision, projectMessage, projectProjects } from "./reads";
 
 // Synthetic zeta replies with extra fields the projection must drop.
 const project = { project_id: "p_fixture", name: "cards", path: "/fixture/cards", session_count: 2, memory_count: 3, inbox: { new: 1, claimed: 0, done: 4, extra: 1 }, updated_ns: 1, extra: "x" };
@@ -53,4 +53,10 @@ test.each([
   const [row] = projectMemory(page([{ ...memory, accepted }]))!.rows;
   expect(row?.accepted).toBe(projected);
   expect(canAcceptMemory(row!)).toBe(eligible);
+});
+
+test("full memory entry only accepts the requested entry", () => {
+  const reply = { memory: { memory_id: "entry" }, body: "# Note\n\nUse `code`.", truncated: false };
+  expect(projectMemoryEntry(reply, "entry")).toEqual({ text: reply.body, truncated: false });
+  expect(projectMemoryEntry(reply, "other")).toBeNull();
 });

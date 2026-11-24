@@ -60,9 +60,7 @@ function fitMetricStrip(strip: HTMLElement) {
     }
     strip.style.setProperty("--metric-value-size", `${low}px`);
   }
-  for (const measure of measures) {
-    const { token, preceding, word, probe } = measure;
-    token.toggleAttribute("data-metric-breakable", token.classList.contains("metric-word") && !fits(measure));
+  for (const { preceding, word, probe } of measures) {
     if (preceding) probe.textContent = `${preceding} ${word}`;
   }
   const track = Math.max(...measures.map(({ insets, probe }) => insets + probe.getBoundingClientRect().width));

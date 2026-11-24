@@ -6,20 +6,17 @@ export async function waitForIdleTurn(
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
 ) {
   const composer = page.locator('[data-part="composer"]');
-  const runState = page.locator(".run-state");
   await waitFor(
     async () =>
       (await composer.getAttribute("data-state")) === "idle" &&
       (await composer.locator('[data-part="composer-submit"]').innerText()) === "send" &&
-      (await composer.locator('[data-part="composer-stop"]').count()) === 0 &&
-      (await runState.innerText()) === "idle",
+      (await composer.locator('[data-part="composer-stop"]').count()) === 0,
     "idle transcript turn",
   ).catch(async (error) => {
     throw new Error(`${error}\ntranscript turn state: ${JSON.stringify({
       composer: await composer.getAttribute("data-state"),
       submit: await composer.locator('[data-part="composer-submit"]').innerText().catch(() => null),
       stop: await composer.locator('[data-part="composer-stop"]').count(),
-      transcript: await runState.innerText().catch(() => null),
     })}`);
   });
 }
@@ -87,12 +84,14 @@ export async function gateTranscript(
     const transcript = getComputedStyle(document.querySelector(".transcript")!);
     const prose = getComputedStyle(document.querySelector('.transcript [data-part="message"][data-format="markdown"]')!);
     const code = getComputedStyle(document.querySelector(".transcript pre code")!);
+    const timeline = document.querySelector('.transcript [data-part="timeline"]')!;
     return {
       font: transcript.fontFamily,
       proseFont: prose.fontFamily,
       proseSize: prose.fontSize,
       proseLineHeight: prose.lineHeight,
-      rowMaxWidth: getComputedStyle(document.querySelector('.transcript [data-part="timeline"] > [data-virtual-id]')!).maxWidth,
+      rowWidth: timeline.querySelector("[data-virtual-id]")!.getBoundingClientRect().width,
+      expectedWidth: document.querySelector('[data-part="composer"]')!.getBoundingClientRect().width,
       size: transcript.fontSize,
       lineHeight: transcript.lineHeight,
       codeFont: code.fontFamily,
@@ -101,7 +100,7 @@ export async function gateTranscript(
   if (
     !typography.font.includes("IBM Plex Sans") || !typography.proseFont.includes("IBM Plex Sans") || typography.size !== "16px" ||
     typography.lineHeight !== "21.6px" || !typography.codeFont.includes("IBM Plex Mono") ||
-    typography.proseSize !== "15px" || typography.proseLineHeight !== "24px" || typography.rowMaxWidth !== "720px"
+    typography.proseSize !== "15px" || typography.proseLineHeight !== "24px" || Math.abs(typography.rowWidth - typography.expectedWidth) > 1
   )
     throw new Error(`transcript did not apply configured typography: ${JSON.stringify(typography)}`);
   await capture("markdown-rendered-1440x900.png");
@@ -420,11 +419,10 @@ export async function gateReloadMidTurn(
     if (attached?.result?.attached !== "live_turn") throw new Error(`reload did not attach to the kept turn: ${JSON.stringify(attached?.error ?? attached?.result ?? null)}`);
     // the kept turn is still streaming (line 079 lands seconds later): the page shows it running, steerable, and stoppable
     const composer = page.locator('[data-part="composer"]');
-    const runState = page.locator(".run-state");
     const turnEnded = async () => (await messages.filter({ hasText: "reload line 079" }).count()) > 0;
-    const runningWithStop = async () => (await runState.innerText()) === "running" && (await composer.getAttribute("data-state")) === "steerable" && (await composer.locator('[data-part="composer-stop"]').count()) === 1;
+    const runningWithStop = async () => (await composer.getAttribute("data-state")) === "steerable" && (await composer.locator('[data-part="composer-stop"]').count()) === 1;
     await waitFor(async () => !(await turnEnded()) && await runningWithStop(), "kept turn shown running with a stop control after reload").catch(async (error) => {
-      throw new Error(`${error}\nafter reload: ${JSON.stringify({ runState: await runState.innerText(), composer: await composer.getAttribute("data-state"), stop: await composer.locator('[data-part="composer-stop"]').count(), ended: await turnEnded() })}`);
+      throw new Error(`${error}\nafter reload: ${JSON.stringify({ composer: await composer.getAttribute("data-state"), stop: await composer.locator('[data-part="composer-stop"]').count(), ended: await turnEnded() })}`);
     });
     // the reply streams on the reloaded page: a later line shows before the turn ends, not only at its final commit.
     // the text streamed before the reload shows with it, once (`in_flight_replay`); one read of the reply messages

@@ -5,9 +5,9 @@ import "./surface.css";
 export const ShellDock = createContext<ReactNode>(null);
 export const ShellDockSlot = () => <>{useContext(ShellDock)}</>;
 
-export function ModuleFrame({ title, children }: { title: string; children: ReactNode }) {
+export function ModuleFrame({ title, subtitle, actions, children }: { title: string; subtitle?: string; actions?: ReactNode; children: ReactNode }) {
   return <section className="module-frame">
-    <header><h1 title={title}>{title}</h1></header>
+    <header className="ui-page-header"><div><h1 title={title}>{title}</h1>{subtitle && <p className="ui-meta">{subtitle}</p>}</div>{actions}</header>
     <ShellDockSlot />
     <div className="module-body">{children}</div>
   </section>;
@@ -21,12 +21,12 @@ type StateProps = {
 };
 
 export function ModuleState({ kind, title, detail, action }: StateProps) {
-  return <div className="module-state" data-state={kind}>
+  return <div className="module-state ui-empty" data-state={kind}>
     <div className="module-state-copy" role={kind === "failed" || kind === "offline" ? "alert" : "status"}>
       <h2>{title}</h2>
       {detail && <p>{detail}</p>}
     </div>
     {kind === "loading" && <div className="module-skeleton" aria-hidden="true"><i /><i /><i /></div>}
-    {action && <button type="button" className="primary" onClick={action.run}>{action.label}</button>}
+    {action && <button type="button" className="ui-button" onClick={action.run}>{action.label}</button>}
   </div>;
 }

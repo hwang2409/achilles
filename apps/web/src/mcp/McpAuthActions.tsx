@@ -8,7 +8,7 @@ import type { McpRow } from "./mcpReads";
 
 const actions = { start: reviewText("sign in"), cancel: reviewText("cancel sign-in"), logout: reviewText("delete saved sign-in") };
 const keep = reviewText("keep current state");
-const unchecked = reviewText("oauth configured · sign-in state not checked");
+const unchecked = reviewText("OAuth configured (sign-in not checked)");
 const unverifiable = reviewText("zeta cannot verify saved sign-in state if the reply is lost.");
 const captions = {
   idle: unchecked,

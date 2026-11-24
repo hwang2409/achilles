@@ -27,7 +27,7 @@ test("a skill body loads only on click, and a late read for an older selection n
 
   fireEvent.click(await view.findByRole("button", { name: /alpha/ }));
   expect(calls).toStrictEqual([["skill_catalog", { scope: "effective", limit: 100 }]]);
-  expect(view.container.querySelector(".library-body")).toBeNull();
+  expect(view.container.querySelector(".ui-reading-markdown")).toBeNull();
 
   fireEvent.click(view.getByRole("button", { name: "show skill text" }));
   expect(calls.slice(1)).toStrictEqual([["skill_read", { name: "alpha", scope: "home" }]]);
@@ -40,8 +40,8 @@ test("a skill body loads only on click, and a late read for an older selection n
 
   fireEvent.click(view.getByRole("button", { name: "show skill text" }));
   await act(async () => reads.get("beta")?.("<b>BETA</b> BODY"));
-  expect(view.container.querySelector("pre.library-body")?.textContent).toBe("<b>BETA</b> BODY");
-  expect(view.container.querySelector("pre.library-body b")).toBeNull();
+  expect(view.container.querySelector(".ui-reading-markdown")?.textContent).toBe("<b>BETA</b> BODY");
+  expect(view.container.querySelector(".ui-reading-markdown b")).toBeNull();
   expect(document.activeElement?.getAttribute("aria-label")).toBe("beta skill text");
   expect(view.container.querySelector(".library-text [role=status]")?.textContent).toBe("skill text loaded");
 });

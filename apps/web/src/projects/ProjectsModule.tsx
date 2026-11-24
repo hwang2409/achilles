@@ -1,3 +1,4 @@
+import { ReadingMarkdown, ReadingPanel } from "../surface/ReadingPanel";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ZetaError, type ZetaClient } from "@fulcrum/zeta";
 import { NoAnswer } from "../zeta";
@@ -5,7 +6,7 @@ import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
 import type { MemoryActions } from "./MemoryActions";
 import { MAX_RESOLVE, memoryWriteAccess, type MemoryAction, type MemoryReceipt } from "./memoryWrites";
-import { canAcceptMemory, hasKindText, isMemoryId, memoryKinds, projectReads, readInbox, readKindText, readMemory, readMessage, readProjects, Unreadable,
+import { canAcceptMemory, hasKindText, isMemoryId, memoryKinds, projectReads, readInbox, readKindText, readMemory, readMemoryEntry, readMessage, readProjects, Unreadable,
   type Body, type InboxRow, type MemoryKind, type MemoryRow, type MemoryPage, type Page, type ProjectRow } from "./reads";
 import "./projects.css";
 
@@ -68,20 +69,20 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
   useEffect(() => { if (route && !route.known) { const href = hrefOf(route.id, "memory"); history.replaceState(null, "", surfaceHref(href)); setPath(href); } }, [route?.id, route?.known]);
   const listed = projects.state === "data" ? projects.rows : [];
   const lookup = useProjectLookup(client, projectReads(client) ? route?.id ?? null : null, listed, actions?.refresh);
-  if (!projectReads(client)) return <ModuleFrame title="projects">
+  if (!projectReads(client)) return <ModuleFrame title="Projects">
     <ModuleState kind="unsupported" title="projects need a newer zeta" detail="the zeta that achilles talks to cannot list projects. update zeta, then check again. chats, pages and the library still work."
       action={{ label: "check again", run: () => location.reload() }} />
   </ModuleFrame>;
   const link = (href: string, children: ReactNode, current?: boolean) =>
     <a href={surfaceHref(href)} aria-current={current ? "page" : undefined} onClick={(event) => go(event, href)}>{children}</a>;
-  if (!route) return <ModuleFrame title="projects">
+  if (!route) return <ModuleFrame title="Projects">
     <div className="projects">
       <Paged view={projects} noun="projects" empty="no projects yet. zeta creates one when a chat opens in a git folder.">
         {(rows) => <ul className="projects-list">
           {rows.map((row) => <li key={row.id}>{link(hrefOf(row.id), <>
             <strong data-row={row.id} title={row.name}>{row.name}</strong>
             <span title={row.path ?? undefined}>{row.path ?? "no folder"}</span>
-            <small>{row.sessions} sessions · {row.memory} memory · {row.inbox.new} new in inbox</small>
+            <small>{row.sessions} {row.sessions === 1 ? "session" : "sessions"} · {row.memory} memory · {row.inbox.new} new in inbox</small>
           </>)}</li>)}
         </ul>}
       </Paged>
@@ -89,21 +90,20 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
   </ModuleFrame>;
   const project = lookup.names.get(route.id);
   const name = project?.name ?? (lookup.state === "reading" ? "…" : "unknown project");
-  if (lookup.state === "missing") return <ModuleFrame title="projects">
+  if (lookup.state === "missing") return <ModuleFrame title="Projects">
     <div className="projects">
-      <div className="projects-bar">{link(hrefOf(), "‹ all projects")}</div>
+      <div className="projects-bar">{link(hrefOf(), "‹ All projects")}</div>
       <ModuleState kind="empty" title="no project with this id" detail="it may have been removed, or the address is wrong." />
     </div>
   </ModuleFrame>;
-  return <ModuleFrame title={`projects / ${name}`}>
+  return <ModuleFrame title={`Projects / ${name}`} subtitle={project?.path ?? undefined}>
     <div className="projects">
       <div className="projects-bar">
-        {link(hrefOf(), "‹ all projects")}
-        <nav aria-label="project views">
-          {tabs.map((tab) => <span key={tab}>{link(hrefOf(route.id, tab), tab, tab === route.tab)}</span>)}
+        {link(hrefOf(), "‹ All projects")}
+        <nav className="ui-tabs" aria-label="project views">
+          {tabs.map((tab) => <span key={tab}>{link(hrefOf(route.id, tab), tab === "memory" ? "Memory" : "Inbox", tab === route.tab)}</span>)}
         </nav>
       </div>
-      {project?.path && <p className="projects-note projects-path" title={project.path}>{project.path}</p>}
       {route.tab === "memory"
         ? <MemoryTab key={route.id} client={client} projectId={route.id} control={borrow} projectName={name} actions={actions} refresh={actions?.refresh ?? 0} />
         : <InboxTab key={route.id} client={client} projectId={route.id} control={borrow} names={lookup.names} />}
@@ -217,11 +217,11 @@ function Paged<T extends { id: string }>({ view, noun, empty, children }: { view
   </div>;
 }
 
-const kindLabel = (kind: MemoryKind) => kind === "legacy" ? "documents" : kind;
+const kindLabel = { brief: "Brief", decision: "Decisions", state: "State", backlog: "Backlog", changelog: "Changelog", legacy: "Documents" } satisfies Record<MemoryKind, string>;
 
 /** Shown only where a reveal button is: there is no control to take elsewhere. */
 const ControlNote = ({ control, shown }: { control: Borrow; shown: boolean }) => control.observer && shown
-  ? <p id={CONTROL_NOTE} className="projects-note">zeta lets only the tab in control read full text. taking control pauses sending and approvals in other tabs for this read.</p> : null;
+  ? <p id={CONTROL_NOTE} className="projects-note">Zeta lets only the tab in control read full text. This read will not interrupt another tab.</p> : null;
 
 function MemoryTab({ client, projectId, projectName, control, actions, refresh }: {
   client: ZetaClient; projectId: string; projectName: string; control: Borrow; actions?: MemoryActions; refresh: number;
@@ -229,7 +229,13 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
   const view = usePages(client, (reader, cursor, signal) => readMemory(reader, projectId, cursor, { signal }), [projectId, refresh]);
   const oldFormat = view.state === "data" && view.oldFormat;
   const [selection, setSelection] = useState<{ refresh: number; ids: Set<string> }>(() => ({ refresh, ids: new Set() }));
-  const selected = selection.refresh === refresh ? selection.ids : new Set<string>();
+  const [selecting, setSelecting] = useState(false);
+  const [openedId, setOpenedId] = useState<string | null>(null);
+  const opened = view.state === "data" ? view.rows.find(({ id }) => id === openedId) : undefined;
+  // A refresh can temporarily have no rows. Forget the id only once the new rows confirm it is gone.
+  if (view.state === "data" && openedId !== null && !opened) setOpenedId(null);
+  const lastOpened = useRef<HTMLButtonElement>(null);
+  const selected = selecting && selection.refresh === refresh ? selection.ids : new Set<string>();
   const canWrite = !!actions && !oldFormat && memoryWriteAccess(client, !control.observer);
   const waiting = control.borrowing || !!actions?.working;
   const feedback = actions?.feedback?.projectId === projectId ? actions.feedback : null;
@@ -239,27 +245,25 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
   };
   // format 1 summaries are the files' first lines, usually a markdown heading: show the heading text.
   const summary = (text: string) => (oldFormat ? text.replace(/^#+\s*/, "") : text) || "(empty)";
-  return <section className="projects-tab" aria-label="memory" tabIndex={-1} data-memory-tab>
+  return <section className="projects-tab ui-reading-host" aria-label="memory" tabIndex={-1} data-memory-tab>
     {feedback && <aside className="projects-notice" tabIndex={-1} data-memory-feedback>
       <div role={feedback.error ? "alert" : "status"}>{feedback.message}</div>
       <div className="projects-actions">
         {feedback.receipt && canWrite && <button type="button" data-write-surface="project.memory.undo" aria-disabled={waiting}
-          aria-describedby={control.observer ? "projects-write-note" : undefined}
+          aria-describedby={control.observer ? CONTROL_NOTE : undefined}
           onClick={(event) => start(event, "undo", [], feedback.receipt)}>undo this memory change</button>}
         <button type="button" onClick={(event) => { actions?.dismiss(); event.currentTarget.closest<HTMLElement>("[data-memory-tab]")?.focus(); }}>dismiss</button>
       </div>
     </aside>}
     {actions?.working && <p className="projects-note" role="status">preparing or finishing memory review…</p>}
-    {canWrite && control.observer && ((view.state === "data" && view.rows.length > 0) || feedback?.receipt) &&
-      <p id="projects-write-note" className="projects-note">zeta lets only the tab in control read full text. reviewing a change takes control to read the memory revision. it will not interrupt a chat tab in control.</p>}
+    <ControlNote control={control} shown={view.state === "data" && (canWrite || view.rows.length > 0)} />
     {canWrite && view.state === "data" && view.rows.some((row) => isMemoryId(row.id)) && <div className="projects-selection">
-      <span role="status">{active.length} selected{active.length === MAX_RESOLVE ? " · limit reached" : " · select up to 64 to resolve"}</span>
-      <button type="button" data-write-surface="project.memory.resolve" aria-disabled={!active.length || waiting}
-        aria-describedby={control.observer ? "projects-write-note" : undefined}
-        onClick={(event) => { if (active.length) start(event, "resolve", active); }}>review resolve</button>
+      <button className="ui-button" type="button" aria-pressed={selecting} onClick={() => { setSelecting(!selecting); setSelection({ refresh, ids: new Set() }); }}>{selecting ? "Cancel selection" : "Select"}</button>
+      {selecting && <><span role="status">{active.length} selected{active.length === MAX_RESOLVE ? " (limit reached)" : " (up to 64)"}</span>
+        <button className="ui-button" type="button" data-write-surface="project.memory.resolve" aria-disabled={!active.length || waiting}
+          aria-describedby={control.observer ? CONTROL_NOTE : undefined}
+          onClick={(event) => { if (active.length) start(event, "resolve", active); }}>review resolve</button></>}
     </div>}
-    <ControlNote control={control} shown={view.state === "data" && !oldFormat && view.rows.some((row) => hasKindText(row.kind))} />
-    {view.state === "data" && view.rows.length > 0 && !oldFormat && <p className="projects-note">summaries only · full text loads when you open it, is not cached, and never goes in the address</p>}
     {oldFormat && <aside className="projects-notice" role="status">
       <strong>this project uses the old memory format</strong>
       <p>achilles shows its summaries only. read or edit it with <code>zeta project memory</code>.</p>
@@ -267,33 +271,40 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
     <Paged view={view} noun="memory" empty="zeta has no memory entries for this project yet.">
       {(rows) => memoryKinds.map((kind) => {
         const group = rows.filter((row) => row.kind === kind);
-        return group.length > 0 && <section key={kind} className="projects-group" aria-labelledby={`memory-${kind}`}>
-          <h2 id={`memory-${kind}`}>{kindLabel(kind)} <small>{group.length}</small></h2>
+        return group.length > 0 && <details open key={kind} className="projects-group">
+          <summary>{kindLabel[kind]} <small>{group.length}</small></summary>
           <ul>
             {group.map((row) => <li key={row.id} data-row={row.id} tabIndex={-1}>
-              {canWrite && isMemoryId(row.id) ? <div className="projects-memory-row">
-                <label className="projects-select-entry">
-                  <input type="checkbox" checked={selected.has(row.id)} disabled={waiting || (!selected.has(row.id) && selected.size >= MAX_RESOLVE)}
-                    onChange={(event) => {
-                      const ids = new Set(selected);
-                      if (event.currentTarget.checked) ids.add(row.id); else ids.delete(row.id);
-                      setSelection({ refresh, ids });
-                    }} />
-                  <span>{summary(row.summary)}</span>
-                </label>
-                {row.automatic && <div className="projects-entry-action"><small>{row.accepted ? "accepted" : "automatic"}</small>
-                  {canAcceptMemory(row) && <button type="button" data-write-surface="project.memory.accept" aria-disabled={waiting}
-                    aria-describedby={control.observer ? "projects-write-note" : undefined}
-                    onClick={(event) => start(event, "accept", [row])}>review accept</button>}
-                </div>}
-              </div> : <><span>{summary(row.summary)}</span>{row.automatic && <small>automatic</small>}</>}
+              {selecting && canWrite && isMemoryId(row.id) && <label className="projects-select-entry">
+                <input type="checkbox" aria-label={summary(row.summary)} checked={selected.has(row.id)} disabled={waiting || (!selected.has(row.id) && selected.size >= MAX_RESOLVE)}
+                  onChange={(event) => {
+                    const ids = new Set(selected);
+                    if (event.currentTarget.checked) ids.add(row.id); else ids.delete(row.id);
+                    setSelection({ refresh, ids });
+                  }} />
+              </label>}
+              <button type="button" className="projects-entry" aria-expanded={opened?.id === row.id} onClick={(event) => {
+                lastOpened.current = event.currentTarget;
+                setOpenedId(row.id);
+              }}><span>{summary(row.summary)}</span></button>
             </li>)}
           </ul>
           {!oldFormat && hasKindText(kind) && <Reveal id={`${projectId}/${kind}`} noun={`${kind} text`} client={client} control={control}
             load={(reader, signal) => readKindText(reader, projectId, kind, { signal })} />}
-        </section>;
+        </details>;
       })}
     </Paged>
+    {opened && <ReadingPanel title={kindLabel[opened.kind]} onClose={() => {
+      setOpenedId(null);
+      requestAnimationFrame(() => lastOpened.current?.focus());
+    }}>
+      <ReadingMarkdown source={summary(opened.summary)} />
+      {opened.automatic && <p className="projects-note">{opened.accepted ? "Accepted" : "Automatic"}</p>}
+      {canWrite && canAcceptMemory(opened) && <button className="ui-button" type="button" data-write-surface="project.memory.accept" aria-disabled={waiting}
+        aria-describedby={control.observer ? CONTROL_NOTE : undefined} onClick={(event) => start(event, "accept", [opened])}>review accept</button>}
+      {!oldFormat && <Reveal key={opened.id} id={`${projectId}/${opened.id}`} noun="full entry" client={client} control={control}
+        load={(reader, signal) => readMemoryEntry(reader, projectId, opened.id, { signal })} markdown />}
+    </ReadingPanel>}
   </section>;
 }
 
@@ -328,7 +339,7 @@ const longBody = (text: string) => text.length > 2000 || text.split("\n").length
  * One explicit read per click. As an observer, the click borrows control for this one read and gives it back. The
  * text lives only in this instance's state: hiding it or leaving drops it.
  */
-function Reveal({ id, noun, context, client, control, load }: { id: string; noun: string; context?: string; client: ZetaClient; control: Borrow; load: (client: ZetaClient, signal: AbortSignal) => Promise<Body> }) {
+function Reveal({ id, noun, context, client, control, load, markdown }: { markdown?: boolean; id: string; noun: string; context?: string; client: ZetaClient; control: Borrow; load: (client: ZetaClient, signal: AbortSignal) => Promise<Body> }) {
   // a drop remounts this view: say why the text closed instead of resetting silently.
   const [shown, setShown] = useState<Shown>(() => control.dropped.delete(id) ? { state: "failed", problem: dropped } : null);
   const pending = useRef<AbortController | null>(null);
@@ -377,8 +388,7 @@ function Reveal({ id, noun, context, client, control, load }: { id: string; noun
       <p role="alert" className="projects-error">{shown.reason}</p>
     </div>}
     {shown?.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={context ? `${noun}: ${context}` : noun} className="projects-region">
-      <p className="projects-note">plain text · never sent to a model</p>
-      <pre className="projects-body" tabIndex={0}>{shown.body.text}</pre>
+      {markdown ? <ReadingMarkdown source={shown.body.text} /> : <><p className="projects-note">plain text · never sent to a model</p><pre className="projects-body" tabIndex={0}>{shown.body.text}</pre></>}
       {shown.body.truncated && <p className="projects-flag">cut short · the rest stays in zeta</p>}
       {longBody(shown.body.text) && hide}
     </div>}

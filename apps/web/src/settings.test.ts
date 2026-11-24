@@ -18,14 +18,14 @@ describe("web test isolation", () => {
 });
 
 describe("parseSettings", () => {
-  test("defaults to system appearance, Geist, system monospace, and 14px", () => {
-    expect(parseSettings(null)).toMatchObject({ theme: "auto", uiFont: "geist", codeFont: "system-mono", size: 14 });
+  test("defaults to system appearance and font, system monospace, and 15px", () => {
+    expect(parseSettings(null)).toMatchObject({ theme: "auto", uiFont: "system", codeFont: "system-mono", size: 15 });
   });
 
   test("replaces old named palettes but still applies v1 font and size choices", () => {
     const palettes = ["github-light", "github-dark", "gruvbox-light", "gruvbox-dark", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "one-dark"];
     for (const theme of palettes) expect(parseSettings(JSON.stringify({ theme })).theme).toBe("auto");
-    const ui = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "system-ui"]] as const;
+    const ui = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "--g1-font-ui"]] as const;
     const code = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "--g1-font-mono"]] as const;
     const root = document.documentElement;
     const original = root.style.cssText;

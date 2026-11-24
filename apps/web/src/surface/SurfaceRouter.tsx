@@ -177,7 +177,7 @@ function ObserverBanner({ connection, readOnly }: { connection: Connection; read
   return <aside className="observer-banner" aria-label="observer mode">
     <div>
       <strong>{readOnly ? "this page is read-only" : "another tab controls zeta"}</strong>
-      <span>{readOnly ? "open a chat to control zeta." : "this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled."}</span>
+      <span id="tab-authority-description">{readOnly ? "open a chat to control zeta." : "this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled."}</span>
     </div>
     {!readOnly && <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>}
     {/* its own full-width row under the text and the button, so a long refusal does not squeeze the text */}

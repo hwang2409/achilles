@@ -73,7 +73,7 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
           const detail = tool.description.trim();
           return { text, detail: detail && detail !== text ? detail : undefined, onSelect: () => send1(text) };
         })
-      : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => sendWithCreateMode(text) }));
+      : GENERIC_STARTERS.map((text): Starter => ({ text, onSelect: () => sendWithCreateMode(text) }));
   const starters: Starter[] = [
     ...pageStarters,
     ...(hasWaitingChat ? [{ text: "continue your waiting chat", tag: "waiting chat", onSelect: continueWaiting }] : []),
@@ -89,8 +89,8 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
     try { await onSelect(); } finally { sendingRef.current = false; setSending(false); }
   };
   return <div className="empty-chat">
-    <h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1>
+    <h1 title={`New chat on ${page.title}`}>New chat on {page.title}</h1>
     <p>create mode is only for making or changing pages and tools; tools already assigned to this page work with it on or off.</p>
-    <div className="chat-starters" data-write-surface={WRITE_SURFACE.emptySend}>{starters.map((starter, index) => <button key={index} title={!canWrite ? disabledReason : undefined} aria-describedby={!canWrite ? "read-only-reason" : undefined} disabled={sending || !canWrite} onClick={(event) => { keyboardFocusToComposer(event); void select(starter.onSelect); }}><b>{index + 1}</b><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
+    <div className="chat-starters" data-write-surface={WRITE_SURFACE.emptySend}>{starters.map((starter, index) => <button key={index} title={!canWrite ? disabledReason : undefined} aria-describedby={!canWrite ? "read-only-reason" : undefined} disabled={sending || !canWrite} onClick={(event) => { keyboardFocusToComposer(event); void select(starter.onSelect); }}><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
   </div>;
 }

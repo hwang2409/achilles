@@ -4,7 +4,9 @@ import { act } from "react";
 import React from "react";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { formatToolArguments, summarizeToolOutput, ToolSummaryBody, toolArgumentSummary } from "./ToolSummary";
-import type { ToolBodyProps, ToolItem } from "@fulcrum/react";
+import { RunProvider, type ToolBodyProps, type ToolItem } from "@fulcrum/react";
+import { createRunStore } from "@fulcrum/core";
+import { CompactTool } from "./CompactTool";
 
 const output = (text: string, extra: Partial<ToolBodyProps["output"]> = {}): ToolBodyProps["output"] => ({
   version: 1, length: text.length, bytes: text.length, lines: text.split("\n").length, retainedBytes: text.length,
@@ -78,6 +80,11 @@ describe("tool summaries", () => {
     expect(formatToolArguments({ deep: { deeper: { value: 1 } } })).toContain('"value": 1');
   });
 
+  test("indents raw arguments with real line breaks", () => {
+    expect(formatToolArguments({ route: "/example", title: "first\nsecond" }))
+      .toBe('{\n  "route": "/example",\n  "title": "first\\nsecond"\n}');
+  });
+
   test("shows zeta argument truncation in the visible raw disclosure", async () => {
     const base = item({ query: "large" });
     const truncated = { ...base, tool_call: { ...base.tool_call, meta: { argumentsTruncated: true } } };
@@ -91,4 +98,24 @@ describe("tool summaries", () => {
     expect(result.lines).toEqual(["output still streaming"]);
     expect(result.fallback).toBe(true);
   });
+});
+
+test.each([
+  ["middle omission", output("headtail", {
+    omission: { kind: "omitted", reason: "item-cap", whole: false, start: 4, end: 2052, bytes: 2048 },
+    *chunks() { yield { start: 0, line: 0, text: "head" }; yield { start: 2052, line: 1, text: "tail" }; },
+  }), "head\n2.0 KB not kept\ntail"],
+  ["protocol truncation", output("head", { protocolTruncated: true }), "head\nhost did not provide the complete output"],
+] as const)("compact tool result block shows %s", async (_name, text, expected) => {
+  const base = item({});
+  const tool: ToolItem = { ...base, result: {
+    tool_call_id: base.tool_call.id, relation: "same", is_error: false,
+    blocks: [{ metadata: { type: "reasoning" }, text }],
+  } };
+  const store = { ...createRunStore(), getItem: () => tool };
+  const mounted = render(React.createElement(RunProvider, { store }, React.createElement(CompactTool, { id: tool.id })));
+  fireEvent.click(mounted.getByText("list_books"));
+  const reasoning = mounted.container.querySelector<HTMLDetailsElement>('details[data-part="reasoning"]')!;
+  await act(async () => { reasoning.open = true; });
+  expect(reasoning.querySelector('[data-part="reasoning-body"]')?.textContent).toBe(expected);
 });

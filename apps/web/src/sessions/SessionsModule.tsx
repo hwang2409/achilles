@@ -98,12 +98,10 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
   const rows = data?.items ?? [];
   const row = rows.find((one) => one.id === id);
   const owned = new Set(chats.map((chat) => chat.session_id));
-  const continuationLabel = data?.complete ? "" : " loaded";
   return <section className="module-frame sessions-frame">
-    <header className="sessions-head">
-      <h1>sessions</h1>
-      {data && <span>all zeta sessions on this computer · {rows.length}{continuationLabel}</span>}
-      <button type="button" className="sessions-new" onClick={newChat} disabled={!client}>+ new chat</button>
+    <header className="sessions-head ui-page-header">
+      <div><h1>Sessions</h1><p className="ui-meta">Browse Zeta sessions on this computer.</p></div>
+      <button type="button" className="sessions-new ui-button" onClick={newChat} disabled={!client}>New chat</button>
     </header>
     <ShellDockSlot />
     {!data ? <div className="module-body">
