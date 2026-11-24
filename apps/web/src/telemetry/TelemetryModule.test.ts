@@ -116,11 +116,11 @@ test("the profile listbox sends the chosen profile, and its any row clears it ev
   } as unknown as ZetaClient;
   const view = render(createElement(TelemetryModule, { client, pathname: "/telemetry/sessions" }));
   const pick = async (index: number) => {
-    await act(async () => { fireEvent.click(view.getByRole("button", { name: "profile" })); });
+    await act(async () => { fireEvent.keyDown(view.getByRole("combobox", { name: "profile" }), { key: "Enter" }); });
     await act(async () => { fireEvent.click(view.getAllByRole("option")[index]); });
   };
   await waitFor(() => expect(view.getAllByRole("row").length).toBeGreaterThan(1));
-  await act(async () => { fireEvent.click(view.getByRole("button", { name: "profile" })); });
+  await act(async () => { fireEvent.keyDown(view.getByRole("combobox", { name: "profile" }), { key: "Enter" }); });
   expect(view.getAllByRole("option").map((option) => option.textContent?.replace("✓", ""))).toEqual(["any", "any", "worker"]);
   await act(async () => { fireEvent.keyDown(view.getByRole("listbox"), { key: "Escape" }); });
   await pick(1);
