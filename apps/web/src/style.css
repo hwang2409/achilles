@@ -18,6 +18,8 @@ body { margin: 0; }
 h1, h2, h3, h4 { font-size: var(--g1-type-title); }
 small { font-size: inherit; }
 button, input, textarea, select { color: inherit; font: inherit; }
+/* bare <code> otherwise falls back to the browser's Courier */
+code { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 .sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 button, input, textarea, select { border-radius: var(--g1-radius-control); }
 :where(button, .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }

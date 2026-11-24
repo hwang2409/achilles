@@ -10,9 +10,11 @@
   max-width: none;
   max-height: calc(100dvh - 2rem);
   padding: 0;
-  border: 1px solid var(--g1-border);
+  /* the dialog sits flat on the same fill as the page: a 14% edge (orca's) keeps it readable */
+  border: 1px solid color-mix(in srgb, var(--g1-fg) 14%, transparent);
+  border-radius: var(--g1-radius-container);
   background: var(--g1-bg);
- 
+  box-shadow: var(--g1-shadow-floating);
 }
 .confirmation-dialog[data-proof="name"] { --confirmation-action: var(--g1-danger);
   --confirmation-action-text: var(--g1-bg); }
@@ -27,7 +29,9 @@
 .confirmation-dialog header { justify-content: space-between; border-bottom: 1px solid var(--g1-rule); }
 .confirmation-heading-actions { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; display: flex; align-items: center; gap: 8px; color: var(--g1-muted); }
 .confirmation-dialog h2 { margin: 0; font-size: var(--g1-type-title); text-wrap: balance; }
-.confirmation-dialog .confirmation-close { flex: none; border-color: var(--g1-control-border); font-size: inherit; }
+/* the close control is quiet like the settings `esc`: no edge, muted until hovered */
+.confirmation-dialog .confirmation-close { flex: none; border-color: transparent; color: var(--g1-muted); font-size: inherit; }
+.confirmation-dialog .confirmation-close:hover:not(:disabled) { color: var(--g1-fg); }
 .confirmation-body { min-height: calc(3lh + 16px); overflow-y: auto; padding: 16px 16px 0; }
 .confirmation-body dl { margin: 0 0 12px; }
 .confirmation-body dl > div {
@@ -44,7 +48,9 @@
 .confirmation-proof { flex: none; min-height: calc(1lh + 8px); overflow-y: auto; padding: 0 16px 8px; }
 .confirmation-proof p { margin: 0; color: var(--g1-muted); }
 .confirmation-name { display: grid; gap: 8px; }
-.confirmation-name input { width: 100%; padding: 8px 12px; border: 1px solid var(--g1-control-border); background: var(--g1-bg); }
+/* room for the 2px outset focus ring of the input above */
+.confirmation-proof label + p { margin-top: 6px; }
+.confirmation-name input { width: 100%; padding: 0 12px; border: 1px solid var(--g1-control-border); background: var(--g1-bg); }
 .confirmation-scope { display: flex; gap: 10px; align-items: center; padding: 4px 8px; border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); cursor: pointer; }
 .confirmation-scope input { accent-color: var(--g1-accent); margin: 0; }
 /* Long feedback scrolls here instead of shrinking the details below three lines. */
@@ -94,8 +100,12 @@
 }
 .confirmation-activity time { font: 1em var(--achilles-code-font, var(--g1-font-mono)); font-variant-numeric: tabular-nums; }
 :is(.confirmation-inline, .confirmation-dialog, .confirmation-activity) button, button.confirmation-trigger,
-.confirmation-name input, .confirmation-scope { min-width: 44px; min-height: 44px; }
-:is(.confirmation-inline, .confirmation-dialog, .confirmation-activity) button, button.confirmation-trigger { padding: 4px 12px; }
+.confirmation-name input, .confirmation-scope { min-width: var(--g1-control-height); min-height: var(--g1-control-height); }
+:is(.confirmation-inline, .confirmation-dialog, .confirmation-activity) button, button.confirmation-trigger { padding: 0 12px; }
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  :is(.confirmation-inline, .confirmation-dialog, .confirmation-activity) button, button.confirmation-trigger,
+  .confirmation-name input, .confirmation-scope { min-width: 44px; min-height: 44px; }
+}
 :is(.confirmation-inline, .confirmation-dialog) button:disabled { cursor: default; opacity: .48; }
 :is(.confirmation-inline, .confirmation-dialog) button.confirmation-primary:not(:disabled) {
   color: var(--confirmation-action-text);
@@ -116,6 +126,7 @@
     max-height: none;
     margin: 0;
     border: 0;
+    border-radius: 0;
   }
   .confirmation-dialog[data-proof="name"] > form { height: 100%; }
   .confirmation-dialog[data-proof="name"] .confirmation-body { flex-grow: 1; }

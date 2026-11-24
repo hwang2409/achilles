@@ -1,22 +1,22 @@
-.settings-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--g1-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
+.settings-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--g1-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: var(--g1-bg); border: 1px solid color-mix(in srgb, var(--g1-fg) 14%, transparent); border-radius: var(--g1-radius-container); box-shadow: var(--g1-shadow-floating); overflow: hidden; }
 .settings-panel { overflow: auto; max-height: calc(100dvh - 34px); }
 .settings-titlebar, .settings-session > footer { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 20px; border-bottom: 1px solid var(--g1-rule); }
 .settings-titlebar > div { display: flex; align-items: center; gap: 12px; }
 .settings-titlebar h2 { margin: 0; font-size: var(--g1-type-title); text-wrap: balance; }
 .settings-titlebar > div:last-child > span, .settings-session > footer span { color: var(--g1-muted); }
-.settings-titlebar button { min-width: var(--g1-control-height); min-height: var(--g1-control-height); padding: 5px 9px; }
+.settings-titlebar button { min-width: var(--g1-control-height); min-height: var(--g1-control-height); padding: 0 9px; }
 .settings-mark { width: var(--g1-status-mark); height: var(--g1-status-mark); background: var(--g1-accent); }
 .settings-content { padding: 0 20px; }
 /* every row rule is inset to the content edge, also in the defaults section */
 .settings-session .settings-row { border-top: 1px solid var(--g1-rule); border-bottom: 1px solid var(--g1-rule); }
 #settings-lock-note { margin: 12px 20px 0; color: var(--g1-muted); }
 .settings-toggle:disabled { opacity: .55; }
-.settings-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--g1-rule); }
+.settings-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 18px; min-height: 44px; padding: 9px 0; border-bottom: 1px solid var(--g1-rule); }
 .settings-row:last-child { border-bottom: 0; }
 .settings-row-label h3 { margin: 0 0 2px; font-size: inherit; }
-.settings-row-label p { margin: 0; color: var(--g1-muted); }
+.settings-row-label p { margin: 0; color: var(--g1-muted); font-size: 13px; }
 .theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-.theme-options button { display: flex; align-items: center; justify-content: space-between; min-width: 0; min-height: var(--g1-control-height); gap: 8px; padding: 7px 8px; color: var(--g1-fg); font: inherit; text-align: left; background: transparent; border: 1px solid var(--g1-control-border); }
+.theme-options button { display: flex; align-items: center; justify-content: space-between; min-width: 0; min-height: var(--g1-control-height); gap: 8px; padding: 0 8px; color: var(--g1-fg); font: inherit; text-align: left; background: transparent; border: 1px solid var(--g1-control-border); }
 /* one selected look for every choice in this dialog: the shared selected fill and bold text */
 :is(.theme-options button[data-selected], .settings-segments button[aria-pressed="true"]) { font-weight: 700; color: var(--g1-fg); background: var(--g1-selected); }
 .theme-options button:focus-visible, .settings-segments button:focus-visible, .settings-link:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
@@ -25,7 +25,7 @@
 .font-options { display: grid; grid-template-columns: 46px minmax(0, 1fr); align-items: center; gap: 8px 10px; }
 .font-options > span, .size-density > span { color: var(--g1-muted); }
 .settings-segments { display: flex; flex-wrap: wrap; gap: 4px; }
-.settings-segments button { min-height: var(--g1-control-height); padding: 5px 10px; color: var(--g1-fg); font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
+.settings-segments button { min-height: var(--g1-control-height); padding: 0 10px; color: var(--g1-fg); font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
 .settings-segments button:focus-visible { z-index: 1; }
 .size-density { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; }
 .setting-explanation { display: flex; align-items: flex-start; gap: 12px; }
