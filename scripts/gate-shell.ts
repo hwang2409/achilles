@@ -164,7 +164,7 @@ export async function gateStablePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
   if (sockets !== 1) throw new Error(`agents opened ${sockets} zeta connections`);
   if (await frame.getByRole("heading", { name: "not available in this build" }).count() || await tab.getByText("page not found", { exact: true }).count()) throw new Error("agents rendered a placeholder or page-not-found state");
-  if (await tab.locator('.place-nav [aria-current="page"]').innerText() !== "Agents") throw new Error("agents route did not select agents");
+  if (await tab.locator('nav[aria-label="places"] [aria-current="page"]').innerText() !== "Agents") throw new Error("agents route did not select agents");
   if (!process.env.SCREENSHOT_DIR) return;
   for (const theme of ["dark", "light"]) {
     if (theme === "light") await tab.goto(`${origin}/agents?theme=g1-light`);

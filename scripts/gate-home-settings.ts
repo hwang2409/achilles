@@ -61,7 +61,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-390x844.png") });
     await tab.setViewportSize({ width: 1440, height: 900 });
     await dialog.getByRole("button", { name: "keep it off", exact: true }).click();
-    if (!await turnOn.isVisible()) throw new Error("a refused telemetry change did not keep the row off");
+    await turnOn.waitFor({ state: "visible", timeout: 5_000 }).catch(() => { throw new Error("a refused telemetry change did not keep the row off"); });
     const sha = createHash("sha256").update(seeded).digest("hex");
     console.log(`settings telemetry: zeta refused turning it on; the row showed zeta's reason; settings.toml sha256 ${sha} unchanged`);
     // off on a file that has the built-in line, written outside zeta. zeta checks that telemetry can start before
