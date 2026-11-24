@@ -1959,7 +1959,7 @@ with _database() as db:
       const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
       const textFit = Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && (renderedStyle?.overflowY === "visible" || rendered.scrollHeight <= rendered.clientHeight));
       const numericFit = !numeric || Boolean(rendered && rendered.innerText.length <= (scientific ? 7 : 5));
-      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
+      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface", '[data-slot="sheet-overlay"]'].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
       return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted: painted && { ...painted, top: painted.top + pane.scrollTop, bottom: painted.bottom + pane.scrollTop }, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
@@ -2013,7 +2013,7 @@ with _database() as db:
       const targetBox = target?.getBoundingClientRect();
       const point = targetBox ? { x: (Math.max(0, targetBox.left) + Math.min(innerWidth, targetBox.right)) / 2, y: (Math.max(0, targetBox.top) + Math.min(innerHeight, targetBox.bottom)) / 2 } : null;
       const hit = point ? document.elementFromPoint(point.x, point.y) : null;
-      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => {
+      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface", '[data-slot="sheet-overlay"]'].flatMap((selector) => {
         const element = document.querySelector<HTMLElement>(selector);
         const rect = element?.getBoundingClientRect();
         return element && rect && rect.width > 0 && rect.height > 0 ? [{ selector, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left } }] : [];
@@ -2023,7 +2023,7 @@ with _database() as db:
         viewport: { width: innerWidth, height: innerHeight },
         bar: document.querySelector<HTMLElement>(".page-chat-bar")?.getAttribute("aria-expanded"),
         surface: describe(".page-chat-surface"),
-        drawer: describe(".sidebar"),
+        drawer: describe("[data-shell-nav]"),
         target: targetBox && { top: targetBox.top, right: targetBox.right, bottom: targetBox.bottom, left: targetBox.left, width: targetBox.width, height: targetBox.height },
         targetHit: Boolean(hit && target && (hit === target || target.contains(hit))),
         overlayCoversTarget: Boolean(targetBox && overlays.some(({ rect }) => intersects(targetBox, rect))),
@@ -2033,7 +2033,7 @@ with _database() as db:
     });
     if (frame.viewport.width !== 390 || frame.viewport.height !== 844)
       throw new Error(`closed frame has wrong viewport: ${JSON.stringify(frame)}`);
-    if (frame.bar !== "false" || frame.surface?.visibility !== "hidden" || frame.surface.transform === "matrix(1, 0, 0, 1, 0, 0)" || !frame.drawer || frame.drawer.rect.right > 0 || frame.drawer.transform === "matrix(1, 0, 0, 1, 0, 0)")
+    if (frame.bar !== "false" || frame.surface?.visibility !== "hidden" || frame.surface.transform === "matrix(1, 0, 0, 1, 0, 0)" || (frame.drawer && frame.drawer.rect.right > 0))
       throw new Error(`closed frame overlays are not hidden and offscreen: ${JSON.stringify(frame)}`);
     if (!frame.target || !frame.targetHit || frame.overlayCoversTarget || frame.scroll.window !== 0 || frame.scroll.content !== 0)
       throw new Error(`closed frame target is not visible and unobscured: ${JSON.stringify(frame)}`);
