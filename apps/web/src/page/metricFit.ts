@@ -36,7 +36,8 @@ function fitMetricStrip(strip: HTMLElement) {
     const markerWidth = marker && marker.position !== "absolute"
       ? mark.getBoundingClientRect().width + parseFloat(marker.marginLeft) + parseFloat(marker.marginRight) + parseFloat(style.columnGap)
       : 0;
-    const insets = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(inner.paddingRight) + markerWidth;
+    const insets = parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth)
+      + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(inner.paddingRight) + markerWidth;
     const tokens = [...tile.querySelectorAll<HTMLElement>("[data-metric-number], [data-metric-word]")];
     return tokens.map((token, i) => ({ token, insets, word: token.textContent!, preceding: tokens[i - 1]?.textContent, probe: document.createElement("span") }));
   });
