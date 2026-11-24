@@ -65,7 +65,8 @@
 
 .chat-header { container-type: inline-size; height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--g1-page-gutter); border-bottom: 1px solid var(--g1-border); }
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
-.chat-heading span { order: 0; flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
+/* the crumb keeps its width (the title gives way first) until it passes 40% of the bar */
+.chat-heading span { order: 0; flex: 0 0 auto; max-width: 40%; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own
    allocated box (narrow viewport + sidebar + chat-actions leave .chat-heading under 160px) and
    visually overlap .chat-actions; ellipsis alone keeps the title readable at whatever room remains. */
