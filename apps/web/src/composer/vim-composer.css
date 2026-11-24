@@ -1,12 +1,12 @@
 .vim-composer [data-part="composer-field"] {
   display: block;
-  min-height: calc(1.55em + 2 * var(--inset));
+  min-height: calc(22px + 2 * var(--inset));
 }
 /* CodeMirror sizes itself; fulcrum's hidden sizing copy of the draft would add a blank line under it */
 .vim-composer [data-part="composer-field"]::after { display: none; }
 
 .vim-composer .cm-editor {
-  max-height: calc(10 * 1.55em + var(--inset));
+  max-height: calc(10 * 22px + var(--inset));
   background: transparent;
   color: inherit;
   font: inherit;
@@ -16,11 +16,11 @@
 .vim-composer .cm-editor.cm-focused { outline: none; }
 .vim-composer .cm-scroller { overflow: auto; font: inherit; }
 .vim-composer .cm-content {
-  min-height: calc(1.55em + 2 * var(--inset));
+  min-height: calc(22px + 2 * var(--inset));
   padding: var(--inset);
   caret-color: var(--fulcrum-accent);
   font: inherit;
-  line-height: 1.55;
+  line-height: 22px; /* the plain textarea's line height, so multi-line drafts are the same height in both modes */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

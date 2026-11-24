@@ -50,15 +50,26 @@
 }
 [data-part="tool"] > [data-part="tool-header"] { min-height: 26px; padding: 2px 0; border-radius: var(--g1-radius-control); }
 summary[data-part="tool-header"] { cursor: pointer; }
+/* the focus ring sits outside the row, so it does not cover the disclosure mark */
+summary[data-part="tool-header"]:focus-visible { outline-offset: 2px; }
 /* a tool row has no fill at rest or on hover (orca): hover brightens its verb instead */
 [data-part="tool"] > summary[data-part="tool-header"]:hover { background: transparent; }
 [data-part="tool"] > summary[data-part="tool-header"]:hover > [data-part="tool-name"] { color: var(--g1-fg); }
-[data-part="approval"] > [data-part="tool-header"] { background: color-mix(in srgb, var(--g1-warn-fill) 6%, var(--g1-bg)); }
+/* an approval has no disclosure mark, so its empty mark column goes and 12px puts its verb on a tool row's verb x */
+[data-part="approval"] > [data-part="tool-header"] {
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
+  padding-left: 12px;
+  background: color-mix(in srgb, var(--g1-warn-fill) 6%, var(--g1-bg));
+}
+[data-part="approval"] > [data-part="tool-header"]::before { display: none; }
 [data-part="tool-name"] { color: var(--g1-fg); }
-[data-part="tool"] [data-part="tool-name"] { color: var(--g1-muted); font-family: var(--achilles-ui-font, var(--g1-font-ui)); font-weight: 400; }
+/* the verb is the same muted sans word in a tool row and an approval card */
+:is([data-part="tool"], [data-part="approval"]) [data-part="tool-name"] { color: var(--g1-muted); font-family: var(--achilles-ui-font, var(--g1-font-ui)); font-weight: 400; }
 [data-part="tool-summary"] { color: var(--g1-muted); }
 [data-part="tool"] [data-part="tool-summary"] { color: var(--g1-fg); }
 [data-part="tool-status"] { font-size: inherit; }
+/* a finished call is quiet: muted word, the green mark stays */
+[data-part="tool"][data-state="done"] > [data-part="tool-header"] > [data-part="tool-status"] { color: var(--g1-muted); }
 :is([data-part="tool-status"], [data-part="text-viewer-status"], [data-part="delivery-note"])::before {
   width: var(--g1-status-mark);
   height: var(--g1-status-mark);
@@ -77,9 +88,8 @@ summary[data-part="tool-header"] { cursor: pointer; }
 [data-part="approval-actions"]:has(> [data-action="approve-always"]) { display: flex; }
 [data-part="approval-actions"] button:focus-visible { outline: var(--g1-focus-ring); }
 
-.main-pane [data-part="composer"] {
-  background: var(--g1-bg);
-}
+/* an error row is a card like the others: hairline border, control radius; the red "error" word carries the alarm */
+[data-part="item"][data-kind="error"] { border: var(--g1-border-width) solid var(--g1-border); border-radius: var(--g1-radius-control); }
 .main-pane [data-part="composer"][data-error] { border-color: var(--g1-danger); }
 [data-part="composer"] button, [data-part="jump-to-approval"] { border-radius: var(--g1-radius-control); }
 /* the composer looks the same empty, typed, or focused: its buttons keep one box (send and stop: composer.css) */
@@ -102,7 +112,7 @@ summary[data-part="reasoning-header"]:hover { background: transparent; color: va
   position: relative;
   display: flex;
   align-items: center;
-  height: 36px;
+  height: 32px;
   padding: 0 12px;
   border: var(--g1-border-width) solid var(--g1-border);
   border-radius: var(--g1-radius-container);
@@ -115,8 +125,9 @@ button[data-part="sub-agent"]:hover { background: var(--g1-hover); }
 [data-part="sub-agent-status"]::before { width: var(--g1-status-mark); height: var(--g1-status-mark); border-radius: 50%; transform: none; }
 [data-part="sub-agent-name"] { color: var(--g1-fg); font-weight: 600; }
 [data-part="sub-agent-meta"] { color: var(--g1-muted); }
-[data-part="sub-agent-open"] { color: var(--g1-muted); font-size: 0; }
-[data-part="sub-agent-open"]::after { content: "\203A"; font-size: 15px; font-weight: 400; line-height: 1; }
+/* the chevron is drawn, not a glyph, so it sits on the card's vertical center */
+[data-part="sub-agent-open"] { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 16px; color: var(--g1-muted); font-size: 0; }
+[data-part="sub-agent-open"]::after { content: ""; width: 5px; height: 5px; border: solid currentColor; border-width: 1.5px 1.5px 0 0; transform: translateX(-1px) rotate(45deg); }
 [data-part="sub-agent-line"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 .empty-chat h1 {
