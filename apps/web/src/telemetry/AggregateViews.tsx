@@ -25,8 +25,8 @@ export function AggregateView({ data, reads, bucket, label, open, empty }: { dat
     {page.items.length > 0 && <footer className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm">
       <span className="text-muted-foreground">{formatCount(page.items.length)} shown{tab !== "errors" && ` of ${formatCount(data.total)}`}{tab === "errors" && " · messages not recorded"}{data.ask.aggregate?.prefix && ` · through ${formatHour(data.window.end_ns)}`}</span>
       {(more || reads.aggregateLatest) && <div className="flex flex-wrap gap-2">
-        {reads.aggregateLatest && <Button variant="outline"  type="button" onClick={reads.aggregateLatest}>back to latest</Button>}
-        <Button variant="outline"  type="button" aria-disabled={!reads.aggregateNext} onClick={reads.aggregateNext}>{tab === "errors" ? "older" : "load more"} ›</Button>
+        {reads.aggregateLatest && <Button variant="outline" type="button" onClick={reads.aggregateLatest}>back to latest</Button>}
+        <Button variant="outline" type="button" aria-disabled={!reads.aggregateNext} onClick={reads.aggregateNext}>{tab === "errors" ? "older" : "load more"} ›</Button>
       </div>}
     </footer>}
   </section>;
@@ -93,7 +93,7 @@ function Models({ data, bucket, label }: { data: Extract<AggregateLoaded, { tab:
             <Button variant="outline" type="button" className="h-auto min-h-8 max-w-72 justify-start whitespace-normal text-start wrap-anywhere hover:underline" title={row.model} aria-label={`show trend for ${row.model}${row.provider ? ` (${row.provider})` : ""}`} aria-pressed={id === key} onClick={() => setSelected(id)}>{row.model}</Button>
             <span className="flex items-center gap-2 text-xs"><span className="max-w-56 truncate text-muted-foreground" title={row.provider ?? undefined}>{row.provider ?? "—"}</span><Name name={row.model} kind="model" compact reveal={full.reveal} /></span>
           </Cell>
-          <Cell ><Spark points={trends.get(id)} /></Cell>
+          <Cell><Spark points={trends.get(id)} /></Cell>
           <Cell label="calls">{formatCount(row.calls)}</Cell>
           <Cell label="errors"><span className={row.errors ? "text-destructive" : "text-muted-foreground"}>{formatCount(row.errors)}</span><span className="text-muted-foreground"> · {formatPercent(errorShare({ model: row }), 1) ?? "—"}</span></Cell>
           <Cell label="p50"><span title={latencyTitle}>{formatLatency(row.p50_ns)}</span></Cell>
@@ -171,12 +171,12 @@ function Errors({ data, label, operation, choose, open }: { data: Extract<Aggreg
             <span className="max-w-56 truncate" title={name}>{name}</span><span className="text-muted-foreground"><Meter part={count} scale={scale} />{formatCount(count)}</span>
           </li>;
         })}
-        {hidden > 0 && <li className="text-muted-foreground"><Button variant="outline"  type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "fewer types" : `${hidden} more buckets ▾`}</Button></li>}
+        {hidden > 0 && <li className="text-muted-foreground"><Button variant="outline" type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "fewer types" : `${hidden} more buckets ▾`}</Button></li>}
       </ul>
     </>}
     <p className="mb-1 text-xs text-muted-foreground xl:hidden" aria-hidden="true">more operations →</p>
     <div className="my-3 flex flex-wrap gap-1" role="group" aria-label="filter by operation"><span className="text-muted-foreground">operation</span>
-      {([null, ...OPERATIONS] as const).map((op) => <Button variant="outline" key={op ?? "all"} type="button"  className="aria-pressed:bg-accent" aria-pressed={op === operation} onClick={op !== operation ? () => choose(op) : undefined}>{op ?? "all"}</Button>)}
+      {([null, ...OPERATIONS] as const).map((op) => <Button variant="outline" key={op ?? "all"} type="button" className="aria-pressed:bg-accent" aria-pressed={op === operation} onClick={op !== operation ? () => choose(op) : undefined}>{op ?? "all"}</Button>)}
     </div>
     {items.length === 0 ? <p className="border-t py-4 text-muted-foreground" role="status">no {answered ? `${answered} ` : ""}errors in the {label}</p> :
       <AggregateTable kind="errors" columns={["time ↓", "error type", "operation", "duration", "session"]}>
@@ -195,7 +195,7 @@ function ErrorLine({ row, open }: { row: ErrorRow; open: Open }) {
     <Cell className="max-w-56 truncate text-destructive"><span title={row.error_type ?? undefined}>▲ {row.error_type ?? "unknown class"}</span></Cell>
     <Cell className="max-w-56 truncate">{row.operation}{target && <> <span className={row.tool_name ? "text-foreground" : "text-muted-foreground"} title={target}>{target}</span></>}</Cell>
     <Cell className="tabular-nums">{formatDuration(row.duration_ns)}</Cell>
-    <Cell >{href ? <a className="text-accent-foreground" href={href} onClick={(event) => open(event, href)} aria-label={`open session ${root}`}>{shortId(root!)} <span aria-hidden="true">↗</span></a> : <span className="text-muted-foreground">—</span>}</Cell>
+    <Cell>{href ? <a className="text-accent-foreground" href={href} onClick={(event) => open(event, href)} aria-label={`open session ${root}`}>{shortId(root!)} <span aria-hidden="true">↗</span></a> : <span className="text-muted-foreground">—</span>}</Cell>
   </TableRow>;
 }
 

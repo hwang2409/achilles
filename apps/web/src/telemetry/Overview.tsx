@@ -123,7 +123,7 @@ export function TrendChart({ series, chart, bucket }: { series: ChartPoint[]; ch
     <figure className="min-w-0">
       <figcaption className="mb-3 flex flex-wrap justify-between gap-2 text-sm text-muted-foreground">
         <span>{what}</span>
-        <span >now {formatHour(nowNs)} · dashed = this {bucket} so far</span>
+        <span>now {formatHour(nowNs)} · dashed = this {bucket} so far</span>
       </figcaption>
       <div className="relative pb-8">
         <div

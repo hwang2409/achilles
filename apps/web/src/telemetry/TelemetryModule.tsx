@@ -102,7 +102,7 @@ function TelemetryPages({ client, tab, tabs, go, sessionId, openTelemetrySetting
     const reply = shown?.data.tab === "detail" ? shown.data : undefined;
     const missingTrace = problem?.code === "trace_not_found";
     return <Frame detail tools={<Tools status={reply?.status} refreshing={reads.phase === "refreshing"} refresh={reads.refresh} />} tabs={tabs}>
-      {missingTrace ? <Alert variant="destructive" className="mb-4 flex flex-wrap items-center justify-between gap-3 p-4 [&_h2]:font-semibold [&_p]:text-sm"><div><h2>trace not found</h2><p>the selected trace may have expired.{reply && " showing the last available data."}</p></div><Button variant="outline" type="button"  onClick={traceId ? () => setTrace(undefined) : reads.refresh}>{traceId ? "show latest trace" : "retry now"}</Button></Alert>
+      {missingTrace ? <Alert variant="destructive" className="mb-4 flex flex-wrap items-center justify-between gap-3 p-4 [&_h2]:font-semibold [&_p]:text-sm"><div><h2>trace not found</h2><p>the selected trace may have expired.{reply && " showing the last available data."}</p></div><Button variant="outline" type="button" onClick={traceId ? () => setTrace(undefined) : reads.refresh}>{traceId ? "show latest trace" : "retry now"}</Button></Alert>
         : problem && <FailedBanner problem={problem} updatedAt={reply ? reads.updatedAt : undefined} retrying={reads.retrying} retry={reads.refresh} />}
       {reply ? <div className={shown?.stale ? "opacity-70" : undefined} aria-busy={shown?.stale && !problem || undefined}><SessionDetail key={sessionId} data={reply} sessionId={sessionId} back={back} chooseTrace={(id) => setTrace({ sessionId, id })} /></div>
         : problem ? <div className="p-4"><SessionBackLink back={back} /></div> : <DetailLoading back={back} />}
@@ -186,8 +186,8 @@ function ReceiverMark({ status }: { status: TelemetryStatus }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
       <span aria-hidden="true" data-tone={tone} className="data-[tone=danger]:text-destructive">{tone === "danger" ? "▲" : "■"}</span>
-      <span >{text}</span>
-      {status.last_export_ns !== null && <span className="text-muted-foreground" title="last export"><span > · </span>{formatAgo(status.last_export_ns)}</span>}
+      <span>{text}</span>
+      {status.last_export_ns !== null && <span className="text-muted-foreground" title="last export"><span> · </span>{formatAgo(status.last_export_ns)}</span>}
     </span>
   );
 }
@@ -256,7 +256,7 @@ function NoTelemetryYet({ rangeLabel, widen }: { rangeLabel: string; widen?: () 
       <p>sessions send spans when a turn ends. start a chat or wait for a running agent to finish its turn; it shows here within a few seconds.</p>
       <div className="flex flex-wrap gap-2">
         <Button asChild><a href="/">+ new chat</a></Button>
-        {widen && <Button variant="outline" type="button"  onClick={widen}>last 7 days</Button>}
+        {widen && <Button variant="outline" type="button" onClick={widen}>last 7 days</Button>}
       </div>
     </section>
   );

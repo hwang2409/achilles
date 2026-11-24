@@ -113,7 +113,7 @@ export function FailedRead({ failure, project, retry, reading, offline }: { fail
     <ModuleState kind="failed" title="zeta could not read mcp configuration" detail={project ? "zeta’s current project is unavailable or its configuration could not be read."
       : failure.reason === "operation_busy" ? "zeta is busy. try again." : "retry to read the current configuration from disk."} />
     {!offline && <div className="flex flex-wrap items-center gap-2 px-4 pb-4">
-      <Button variant="outline" type="button"  onClick={retry} disabled={reading}>{reading ? "reading…" : "retry"}</Button>
+      <Button variant="outline" type="button" onClick={retry} disabled={reading}>{reading ? "reading…" : "retry"}</Button>
       <Button variant="outline" type="button" onClick={() => void copy()}>copy details</Button>
       <span role="status">{copied}</span>
     </div>}

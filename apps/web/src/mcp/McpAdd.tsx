@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
@@ -149,12 +150,14 @@ export function McpAdd({ owner, snapshot, defaultScope, online, reviewTrust, clo
       <h2>add connection</h2>
       <p>save a definition for new sessions. adding it does not start a process or contact a server.</p>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">scope<select name="scope" value={scope} onChange={(event) => setScope(event.currentTarget.value === "project" ? "project" : "user")}>
-          <option value="user">user</option><option value="project">zeta’s current project</option>
-        </select></label>
-        <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">transport<select name="transport" value={http ? "http" : "stdio"} onChange={(event) => { setHttp(event.currentTarget.value === "http"); setOauth(false); }}>
-          <option value="stdio">local command (stdio)</option><option value="http">remote HTTP</option>
-        </select></label>
+        <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">scope<Select name="scope" value={scope} onValueChange={(value) => setScope(value === "project" ? "project" : "user")}>
+          <SelectTrigger aria-label="scope" className="min-h-11 w-full"><SelectValue /></SelectTrigger><SelectContent>
+          <SelectItem value="user">user</SelectItem><SelectItem value="project">zeta’s current project</SelectItem>
+        </SelectContent></Select></label>
+        <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">transport<Select name="transport" value={http ? "http" : "stdio"} onValueChange={(value) => { setHttp(value === "http"); setOauth(false); }}>
+          <SelectTrigger aria-label="transport" className="min-h-11 w-full"><SelectValue /></SelectTrigger><SelectContent>
+          <SelectItem value="stdio">local command (stdio)</SelectItem><SelectItem value="http">remote HTTP</SelectItem>
+        </SelectContent></Select></label>
       </div>
       <label className="grid min-w-0 gap-1 text-sm [&_input]:min-h-11">connection name<Input name="name" type="text" autoComplete="off" spellCheck={false} /></label>
       {http ? <PrivateField key="url" name="url" label="HTTP URL" /> : <PrivateField key="command" name="command" label="local command" />}
@@ -172,7 +175,7 @@ export function McpAdd({ owner, snapshot, defaultScope, online, reviewTrust, clo
       <p className="text-xs">name: 1–256 characters. other fields: up to 8192 characters, no NUL. up to 128 arguments, environment entries, and headers each. entry keys cannot be empty. check the command or URL before confirming.</p>
       {error && <p role="alert">{error}</p>}
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" ref={opener} type="submit"  disabled={!online}>review connection</Button>
+        <Button variant="outline" ref={opener} type="submit" disabled={!online}>review connection</Button>
         <Button variant="outline" type="button" onClick={() => { clear(); close(); }}>cancel add</Button>
       </div>
     </form>

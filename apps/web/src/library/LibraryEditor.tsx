@@ -76,7 +76,7 @@ function EditorActions({ dirty, what, onDiscard, save, status }: { dirty: boolea
     {/* a long name breaks after its hyphens, like the editor heading (copy gives the real name); "?" stays in view */}
     <span>discard your changes to <span className="font-semibold wrap-anywhere">{what.split("-").flatMap((part, index) => index ? ["-", <wbr key={index} />, part] : [part])}?</span></span>
     <Button variant="outline" type="button" ref={keep} onClick={() => setConfirm(false)}>keep editing</Button>
-    <Button variant="outline" type="button"  onClick={onDiscard}>discard changes</Button>
+    <Button variant="outline" type="button" onClick={onDiscard}>discard changes</Button>
   </div>;
   return <div key="bar" className="flex flex-wrap items-center gap-2 border-t pt-4">
     {status}
@@ -195,7 +195,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
     <div className="grid gap-2 [&>legend]:mb-2 [&_small]:text-muted-foreground [&_small[data-invalid]]:text-destructive [&>label]:grid [&>label]:gap-2 [&>label:has(input[type=radio])]:flex">
       <label htmlFor={`${id}-description`}>description</label>
       {edited === null
-        ? <input id={`${id}-description`} readOnly={Boolean(blocked)} value={description} autoComplete="off" onChange={(event) => change(setDescription)(event.target.value)} onKeyDown={onEnter} />
+        ? <Input id={`${id}-description`} readOnly={Boolean(blocked)} value={description} autoComplete="off" onChange={(event) => change(setDescription)(event.target.value)} onKeyDown={onEnter} />
         : <small id={`${id}-description`}>the description is in the file text now. edit it there.</small>}
     </div>
     <div className="grid gap-2 [&>legend]:mb-2 [&_small]:text-muted-foreground [&_small[data-invalid]]:text-destructive [&>label]:grid [&>label]:gap-2 [&>label:has(input[type=radio])]:flex">

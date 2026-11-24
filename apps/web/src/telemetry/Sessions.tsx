@@ -57,7 +57,7 @@ export function Sessions({ page, total, query, shown, rangeLabel, profiles, mode
           <input type="checkbox" checked={query.errorsOnly} onChange={(event) => setFilters({ errorsOnly: event.target.checked })} />
           <span><span className="hidden sm:inline">with </span>errors only</span>
         </label>
-        {isFiltered(query) && <Button variant="outline" type="button"  onClick={() => setFilters({ errorsOnly: false, profile: null, model: null })}>clear filters</Button>}
+        {isFiltered(query) && <Button variant="outline" type="button" onClick={() => setFilters({ errorsOnly: false, profile: null, model: null })}>clear filters</Button>}
       </div>
       {page.items.length === 0
         ? <p className="border-y py-4 text-muted-foreground">no sessions match these filters.</p>
@@ -72,8 +72,8 @@ export function Sessions({ page, total, query, shown, rangeLabel, profiles, mode
         <p>these {formatCount(page.items.length)} used <b className="tabular-nums">{formatTokens(sum("total_tokens"))}</b> tokens · in <b className="tabular-nums">{formatTokens(sum("input_tokens"))}</b> · out <b className="tabular-nums">{formatTokens(sum("output_tokens"))}</b></p>
         <div className="flex flex-wrap items-center gap-2">
           <span className="tabular-nums text-muted-foreground">{from}–{to}{count && ` of ${formatCount(total)}`}</span>
-          <Button variant="outline" type="button"  disabled={!previous} onClick={previous} aria-label="newer sessions">‹ newer</Button>
-          <Button variant="outline" type="button"  disabled={!next} onClick={next} aria-label="older sessions">older ›</Button>
+          <Button variant="outline" type="button" disabled={!previous} onClick={previous} aria-label="newer sessions">‹ newer</Button>
+          <Button variant="outline" type="button" disabled={!next} onClick={next} aria-label="older sessions">older ›</Button>
         </div>
       </footer>}
     </div>

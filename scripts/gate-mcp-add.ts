@@ -11,6 +11,10 @@ const receipt = (tab: Page) => tab.getByText(/^new sessions use this configurati
 const addForm = (tab: Page) => tab.locator("[data-connection-add-form]");
 const startAdd = (tab: Page) => tab.locator(`[data-write-surface="${WRITE_SURFACE.mcpAdd}"]`).click(opts);
 const control = (tab: Page, name: string) => addForm(tab).locator(`[name="${name}"]`);
+const choose = async (tab: Page, label: string, option: string) => {
+  await addForm(tab).getByRole("combobox", { name: label, exact: true }).click(opts);
+  await tab.getByRole("option", { name: option, exact: true }).click(opts);
+};
 const button = (tab: Page, name: string) => tab.getByRole("button", { name, exact: true });
 const review = async (tab: Page) => {
   await button(tab, "review connection").click(opts);
@@ -76,7 +80,7 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
     await tab.screenshot({ path: join(dir, artifact), animations: "disabled", ...opts });
   }
   async function httpInput(tab: Page, name: string) {
-    await control(tab, "transport").selectOption("http", opts);
+    await choose(tab, "transport", "remote HTTP");
     await control(tab, "oauth").check(opts);
     await button(tab, "add environment").click(opts);
     await button(tab, "add header").click(opts);
@@ -116,7 +120,7 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
 
     tab = await open();
     await tab.setViewportSize({ width: 390, height: 844 });
-    await control(tab, "scope").selectOption("project", opts);
+    await choose(tab, "scope", "zeta’s current project");
     await fill(tab, { name: "fixture-add-project", command: mark("command") });
     await review(tab);
     await inspect(tab, mcpAddArtifacts[1]);
@@ -140,7 +144,7 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
     await tab.getByRole("alert").filter({ hasText: "zeta refused the name or fields" }).waitFor(opts);
     await assertCleared(tab);
     await button(tab, "back to fields").click(opts);
-    await control(tab, "transport").selectOption("http", opts);
+    await choose(tab, "transport", "remote HTTP");
     await fill(tab, { name: mark("name"), url: `ftp://example.invalid/${mark("url")}` });
     await review(tab);
     await confirm(tab);
@@ -149,7 +153,7 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
     if (await Bun.file(userFile).text() !== beforeFailures || errors.filter((code) => code === -32602).length !== 2) throw new Error("duplicate or malformed add did not fail cleanly");
     await inspect(tab);
     await button(tab, "back to fields").click(opts);
-    await control(tab, "transport").selectOption("stdio", opts);
+    await choose(tab, "transport", "local command (stdio)");
     await fill(tab, { name: "fixture-stale-add", command: mark("command") });
     await review(tab);
     const outOfBand = JSON.parse(beforeFailures);

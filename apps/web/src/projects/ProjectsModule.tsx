@@ -256,9 +256,9 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
     {actions?.working && <p className="text-sm text-muted-foreground" role="status">preparing or finishing memory review…</p>}
     <ControlNote control={control} shown={view.state === "data" && (canWrite || view.rows.length > 0)} />
     {canWrite && view.state === "data" && view.rows.some((row) => isMemoryId(row.id)) && <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-      <Button variant="outline"  type="button" aria-pressed={selecting} onClick={() => { setSelecting(!selecting); setSelection({ refresh, ids: new Set() }); }}>{selecting ? "Cancel selection" : "Select"}</Button>
+      <Button variant="outline" type="button" aria-pressed={selecting} onClick={() => { setSelecting(!selecting); setSelection({ refresh, ids: new Set() }); }}>{selecting ? "Cancel selection" : "Select"}</Button>
       {selecting && <><span role="status">{active.length} selected{active.length === MAX_RESOLVE ? " (limit reached)" : " (up to 64)"}</span>
-        <Button variant="outline"  type="button" data-write-surface="project.memory.resolve" aria-disabled={!active.length || waiting}
+        <Button variant="outline" type="button" data-write-surface="project.memory.resolve" aria-disabled={!active.length || waiting}
           aria-describedby={control.observer ? CONTROL_NOTE : undefined}
           onClick={(event) => { if (active.length) start(event, "resolve", active); }}>review resolve</Button></>}
     </div>}
@@ -295,7 +295,7 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
     {opened && <ReadingPanel title={kindLabel[opened.kind]} opener={lastOpened} onClose={() => setOpened(null)}>
       <ReadingMarkdown source={summary(opened.summary)} />
       {opened.automatic && <p className="text-sm text-muted-foreground">{opened.accepted ? "Accepted" : "Automatic"}</p>}
-      {canWrite && canAcceptMemory(opened) && <Button variant="outline"  type="button" data-write-surface="project.memory.accept" aria-disabled={waiting}
+      {canWrite && canAcceptMemory(opened) && <Button variant="outline" type="button" data-write-surface="project.memory.accept" aria-disabled={waiting}
         aria-describedby={control.observer ? CONTROL_NOTE : undefined} onClick={(event) => start(event, "accept", [opened])}>review accept</Button>}
       {!oldFormat && <Reveal key={opened.id} id={`${projectId}/${opened.id}`} noun="full entry" client={client} control={control}
         load={(reader, signal) => readMemoryEntry(reader, projectId, opened.id, { signal })} markdown />}

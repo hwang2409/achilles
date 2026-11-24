@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useRef, useState } from "react";
@@ -44,10 +45,10 @@ export function AgentSpawn({ client, owner, refresh }: Props) {
     }}>
       {!parent && !note && !unavailable && <p role="status">reading the active session…</p>}
       {note && <p role="status">{note}</p>}
-      <label>profile <select required autoFocus value={name} onChange={(event) => setName(event.currentTarget.value)}>
-        <option value="">choose a profile</option>
-        {parent?.profiles.map(({ name }) => <option key={name} value={name}>{display(name)}</option>)}
-      </select></label>
+      <label>profile <Select required value={name} onValueChange={setName}>
+        <SelectTrigger autoFocus aria-label="profile"><SelectValue placeholder="choose a profile" /></SelectTrigger>
+        <SelectContent>{parent?.profiles.map(({ name }) => <SelectItem key={name} value={name}>{display(name)}</SelectItem>)}</SelectContent>
+      </Select></label>
       {profile?.description && <small>{display(profile.description)}</small>}
       <label>task <Textarea required value={task} onChange={(event) => setTask(event.currentTarget.value)} /></label>
       <Button variant="outline" ref={opener} type="submit" disabled={!!unavailable || !profile || !task.trim()} data-write-surface={WRITE_SURFACE.agentsSpawn}>review spawn</Button>

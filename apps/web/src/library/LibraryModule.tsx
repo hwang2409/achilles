@@ -451,8 +451,8 @@ function LibraryText({ client, method, row, noun, edit, onGone }: { client: Zeta
       {reveal.state === "loading" && <p role="status">Reading {noun} text…</p>}
       {reveal.state === "failed" && <div ref={region} tabIndex={-1} className="grid gap-2 focus-visible:outline-ring">
         <p role="alert" className="text-destructive">could not show the text: {reveal.problem.message}</p>
-        {reveal.problem.retry && <Button variant="outline" type="button"  onClick={() => void show()}>retry</Button>}
-        {gone && <Button variant="outline" type="button"  onClick={onGone}>refresh list</Button>}
+        {reveal.problem.retry && <Button variant="outline" type="button" onClick={() => void show()}>retry</Button>}
+        {gone && <Button variant="outline" type="button" onClick={onGone}>refresh list</Button>}
       </div>}
       {reveal.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={`${row.name} ${noun} text`} className="grid gap-2 focus-visible:outline-ring">
         {reveal.body.redacted && <p className="text-sm text-muted-foreground">this file has text that looks like a secret; it is shown masked here and is still in the file</p>}

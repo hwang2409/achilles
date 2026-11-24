@@ -36,7 +36,7 @@ export function SpanInspector({ span, first, traceId, inline = false, close }: {
   const tokens: Field[] = [["input", count(span.input_tokens)], ["cache read", cache], ["cache write", count(span.cache_write_tokens)], ["output", count(span.output_tokens)]];
   const full = !inline || expanded;
   return <div className="grid gap-3 [&_section]:border-b [&_section]:pb-3 [&_h3]:font-semibold">
-    {!inline && <header className="flex items-start justify-between gap-2 [&_h2]:font-semibold"><div><h2><span aria-hidden="true" data-tone={spanTone(span)} className="data-[tone=error]:text-destructive">{span.status === "error" ? "▲" : "■"}</span> {spanLabel(span)}</h2><p className="text-muted-foreground">{span.operation} span · <span className={span.status === "error" ? "text-destructive" : "tm-ok"}>{state}</span></p></div><Button variant="outline" type="button"  aria-label="close span inspector" onClick={close}>×</Button></header>}
+    {!inline && <header className="flex items-start justify-between gap-2 [&_h2]:font-semibold"><div><h2><span aria-hidden="true" data-tone={spanTone(span)} className="data-[tone=error]:text-destructive">{span.status === "error" ? "▲" : "■"}</span> {spanLabel(span)}</h2><p className="text-muted-foreground">{span.operation} span · <span className={span.status === "error" ? "text-destructive" : "tm-ok"}>{state}</span></p></div><Button variant="outline" type="button" aria-label="close span inspector" onClick={close}>×</Button></header>}
     {inline && !expanded && <Fields rows={[["first token", duration(span.ttft_ns)], ...tokens, ["retry", retryCount ? <span className="text-muted-foreground">{retryCount}{retries[0]?.retry_reason ? ` · ${retries[0].retry_reason}` : ""}{retries[0] ? ` · +${formatDuration(Math.max(0, retries[0].time_ns - span.start_ns))}` : ""}</span> : null]]} />}
     {full && <>
       <div className="flex flex-wrap gap-3 border-y py-2 [&_strong]:block [&_strong]:text-foreground"><span className="text-muted-foreground">duration<strong>{formatDuration(span.duration_ns)}</strong></span><span className="text-muted-foreground">starts at<strong>+{start}</strong></span></div>
@@ -57,7 +57,7 @@ export function SpanInspector({ span, first, traceId, inline = false, close }: {
         <p className="text-muted-foreground">{[event.retry_attempt !== null ? `attempt ${event.retry_attempt}` : null, event.retry_reason, event.retry_delay !== null ? `waited ${formatCount(event.retry_delay)} ms` : null, event.retry_after ? "retry-after" : null, event.decision, event.scope, duration(event.duration_ns)].filter((value) => value != null).join(" · ")}</p>
       </li>)}</ul></section>}
       <section><h3>identifiers</h3><Fields rows={[["span", span.span_id], ["parent", span.parent_span_id], ["trace", traceId], ["session", span.session_id], ["run", span.run_id], ["parent run", span.parent_run_id], ["request", span.request_id]]} />
-        <Button variant="outline"  type="button" onClick={async () => {
+        <Button variant="outline" type="button" onClick={async () => {
           try { await navigator.clipboard.writeText(span.span_id); setCopy("span id copied"); }
           catch { setCopy("could not copy span id"); }
         }}>copy span id</Button>{copy && <p role="status">{copy}</p>}

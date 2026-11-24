@@ -139,9 +139,9 @@ function TraceView({ data, trace, sessionId, chooseTrace }: { data: DetailData; 
         {traceIds.length > 1 && <div className="min-w-0"><EnumListbox label="trace" value={traceOptions[traceIds.indexOf(trace.trace_id)] ?? shortId(trace.trace_id)} options={traceOptions} onChange={(label) => chooseTrace(traceIds[traceOptions.indexOf(label)])} /></div>}
         <div className="flex flex-wrap gap-2">
           {turns.length > 0 && <div className="flex flex-wrap gap-1">
-            <Button variant="outline" type="button"  aria-label="older turn" disabled={turnIndex < 0 || turnIndex + 1 >= turns.length} onClick={() => chooseTurn(turns[turnIndex + 1].item.span_id)}>‹</Button>
-            <Button variant="outline" type="button"  aria-label={turn ? `${turnLabel}, show all spans` : "all spans, show latest turn"} onClick={() => chooseTurn(turn ? "all" : turns[0].item.span_id)}>{turnLabel}{turn && <span className="text-muted-foreground"> · {turns.length - turnIndex}/{formatCount(turns.length)}</span>}</Button>
-            <Button variant="outline" type="button"  aria-label="newer turn" disabled={turnIndex <= 0} onClick={() => chooseTurn(turns[turnIndex - 1].item.span_id)}>›</Button>
+            <Button variant="outline" type="button" aria-label="older turn" disabled={turnIndex < 0 || turnIndex + 1 >= turns.length} onClick={() => chooseTurn(turns[turnIndex + 1].item.span_id)}>‹</Button>
+            <Button variant="outline" type="button" aria-label={turn ? `${turnLabel}, show all spans` : "all spans, show latest turn"} onClick={() => chooseTurn(turn ? "all" : turns[0].item.span_id)}>{turnLabel}{turn && <span className="text-muted-foreground"> · {turns.length - turnIndex}/{formatCount(turns.length)}</span>}</Button>
+            <Button variant="outline" type="button" aria-label="newer turn" disabled={turnIndex <= 0} onClick={() => chooseTurn(turns[turnIndex - 1].item.span_id)}>›</Button>
           </div>}
           <Button variant="outline" type="button" className="aria-pressed:bg-accent" aria-pressed={onlyErrors} onClick={() => setOnlyErrors(!onlyErrors)}><span aria-hidden="true">{onlyErrors ? "☑" : "□"}</span> errors<span className="hidden xl:inline"> only</span></Button>
         </div>

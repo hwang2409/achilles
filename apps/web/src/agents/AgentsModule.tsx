@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
@@ -128,12 +129,14 @@ export function AgentsModule({ client, connecting, retry, send, controls }: { cl
           <div className="grid gap-2 border-b p-4 [&>div]:flex [&>div]:flex-wrap [&>div]:items-end [&>div]:gap-2 [&_label]:grid [&_label]:gap-1 [&_label]:text-sm [&_label]:text-muted-foreground">
             <Input ref={search} type="search" aria-label="filter loaded runs" placeholder="filter loaded runs" value={query} onChange={(event) => setQuery(event.target.value)} />
             <div>
-              <label>state <select value={filters.status ?? ""} disabled={!client} onChange={(event) => setFilters({ ...filters, status: (event.target.value || undefined) as AgentFilters["status"] })}>
-                <option value="">all</option>{(report.source === "catalog" ? catalogStatuses : agentStatuses.filter((state) => report.source === "attached" ? state !== "waiting" : state !== "finishing")).map((state) => <option key={state} value={state}>{state}</option>)}
-              </select></label>
-              {roots.length > 1 && report.source !== "attached" && <label>session <select value={filters.root ?? ""} disabled={!client} onChange={(event) => setFilters({ ...filters, root: event.target.value || undefined })}>
-                <option value="">all</option>{[...roots].sort((a, b) => rootTitle(a).localeCompare(rootTitle(b))).map((root) => <option key={root} value={root}>{rootTitle(root)}</option>)}
-              </select></label>}
+              <label>state <Select value={filters.status ?? "all"} disabled={!client} onValueChange={(value) => setFilters({ ...filters, status: (value === "all" ? undefined : value) as AgentFilters["status"] })}>
+                <SelectTrigger aria-label="state"><SelectValue /></SelectTrigger><SelectContent>
+                <SelectItem value="all">all</SelectItem>{(report.source === "catalog" ? catalogStatuses : agentStatuses.filter((state) => report.source === "attached" ? state !== "waiting" : state !== "finishing")).map((state) => <SelectItem key={state} value={state}>{state}</SelectItem>)}
+              </SelectContent></Select></label>
+              {roots.length > 1 && report.source !== "attached" && <label>session <Select value={filters.root ?? "#all"} disabled={!client} onValueChange={(value) => setFilters({ ...filters, root: value === "#all" ? undefined : value })}>
+                <SelectTrigger aria-label="session"><SelectValue /></SelectTrigger><SelectContent>
+                <SelectItem value="#all">all</SelectItem>{[...roots].sort((a, b) => rootTitle(a).localeCompare(rootTitle(b))).map((root) => <SelectItem key={root} value={root}>{rootTitle(root)}</SelectItem>)}
+              </SelectContent></Select></label>}
               <Button variant="outline" type="button" disabled={!client || refreshing} onClick={refresh}>refresh now</Button>
             </div>
           </div>

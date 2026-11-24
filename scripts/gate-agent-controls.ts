@@ -63,8 +63,9 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await main.goto(`${origin}/agents`);
     await main.getByRole("button", { name: "+ spawn agent" }).click();
     const picker = main.getByRole("combobox", { name: "profile" });
-    await picker.getByRole("option", { name: "run", exact: true }).waitFor({ state: "attached" });
-    await picker.selectOption("run");
+    await main.getByText("reading the active session…", { exact: true }).waitFor({ state: "hidden" });
+    await picker.click();
+    await main.getByRole("option", { name: "run", exact: true }).click();
     await main.getByRole("textbox", { name: "task" }).fill(task);
     await main.locator(spawnButton).click();
     const dialog = main.getByRole("dialog");
