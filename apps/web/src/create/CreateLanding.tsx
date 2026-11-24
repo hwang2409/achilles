@@ -36,7 +36,7 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
             readOnly={build.pending || build.locked} placeholder="a page to track…" onChange={(event) => build.setDraft(event.target.value)} />
           <div data-create-form-actions="" className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground" data-testid="build-facts">create on · runs in a new chat · {build.approvalMode === "ask" ? "ask before running tools" : build.approvalMode === "allow" ? "auto-approve tools" : "checking approval mode…"}</span>
-            <Button ref={submit} className="aria-disabled:border aria-disabled:bg-transparent aria-disabled:text-muted-foreground" type="submit" aria-disabled={build.unavailable || !build.draft.trim()} aria-busy={build.unavailable || undefined}>{build.unavailable ? "starting…" : build.error ? "retry build" : "build page"}</Button>
+            <Button ref={submit} className="min-w-28 aria-disabled:border aria-disabled:bg-transparent aria-disabled:text-muted-foreground" type="submit" aria-disabled={build.unavailable || !build.draft.trim()} aria-busy={build.unavailable || undefined}>{build.unavailable ? "starting…" : build.error ? "retry build" : "build page"}</Button>
           </div>
           <div id="create-build-status" className="mt-1 text-xs text-muted-foreground [&[role=alert]]:text-destructive" role={build.error ? "alert" : "status"}>
             {build.error ?? (build.pending ? "starting your build chat…" : null)}
