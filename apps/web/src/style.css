@@ -225,11 +225,10 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 :where(button, .ui-button, .ui-icon-button):where(:not(:disabled, [aria-disabled="true"], .collapse-button, .new-chat, [role="option"], [role="menuitem"], [role="menuitemradio"], .chat-starters button)):active { transform: scale(.96); transition-duration: var(--g1-fast); }
 :where(a, button, summary):focus-visible { transition-duration: 0s; }
 @keyframes g1-fade { from { opacity: 0; } }
-@keyframes g1-pop { from { opacity: 0; transform: scale(.98); } }
-@keyframes g1-drop { from { opacity: 0; transform: translateY(-4px); } }
-dialog[open] { animation: g1-pop var(--g1-base) var(--g1-ease); }
+/* overlays fade only: their geometry is final from the first frame, so measurement and focus never race the motion */
+dialog[open] { animation: g1-fade var(--g1-base) var(--g1-ease); }
 dialog[open]::backdrop { animation: g1-fade var(--g1-base) var(--g1-ease); }
-:is(.header-menu, #page-chat-choices, #page-chat-modes, .enum-listbox [role="listbox"]) { animation: g1-drop var(--g1-fast) var(--g1-ease); }
+:is(.header-menu, #page-chat-choices, #page-chat-modes, .enum-listbox [role="listbox"]) { animation: g1-fade var(--g1-fast) var(--g1-ease); }
 /* fast loads never flash a skeleton: it fades in only after 300 ms */
 :is(.module-skeleton, .sidebar-skeleton, .search-skeleton) { animation: g1-fade var(--g1-base) var(--g1-ease) 300ms both; }
 @media (prefers-reduced-motion: reduce) {
