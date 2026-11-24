@@ -731,8 +731,9 @@ with _database() as db:
           const box = element.getBoundingClientRect();
           if (![box.top, box.right, box.bottom, box.left].every(Number.isFinite)) return false;
           if (box.bottom <= 0 || box.top >= innerHeight || box.right <= 0 || box.left >= innerWidth) return false;
-          const x = Math.max(box.left + 1, Math.min(box.right - 1, innerWidth / 2));
-          const y = Math.max(box.top + 1, Math.min(box.bottom - 1, innerHeight / 2));
+          // Hit the visible center, not a rounded corner outside the button.
+          const x = (Math.max(0, box.left) + Math.min(innerWidth, box.right)) / 2;
+          const y = (Math.max(0, box.top) + Math.min(innerHeight, box.bottom)) / 2;
           const hit = document.elementFromPoint(x, y);
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
@@ -1852,7 +1853,7 @@ with _database() as db:
       };
       const target = document.querySelector<HTMLElement>(".record-form-actions button.primary:not(:disabled)");
       const targetBox = target?.getBoundingClientRect();
-      const point = targetBox ? { x: Math.max(targetBox.left + 1, Math.min(targetBox.right - 1, innerWidth / 2)), y: Math.max(targetBox.top + 1, Math.min(targetBox.bottom - 1, innerHeight / 2)) } : null;
+      const point = targetBox ? { x: (Math.max(0, targetBox.left) + Math.min(innerWidth, targetBox.right)) / 2, y: (Math.max(0, targetBox.top) + Math.min(innerHeight, targetBox.bottom)) / 2 } : null;
       const hit = point ? document.elementFromPoint(point.x, point.y) : null;
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => {
         const element = document.querySelector<HTMLElement>(selector);
