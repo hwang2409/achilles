@@ -22,7 +22,7 @@
 .metric-block > div { min-width: 0; padding-inline-end: var(--metric-inner-pad, 6px); display: grid; gap: 2px; }
 .metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: inherit; line-height: 16px; overflow-wrap: anywhere; }
 .metric-value-line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
-.metric-block strong { min-width: 0; max-width: 100%; font-size: var(--g1-type-title); line-height: calc(1em + 6px); font-variant-numeric: tabular-nums; }
+.metric-block strong { min-width: 0; max-width: 100%; font-size: var(--metric-value-size, var(--g1-type-title)); line-height: calc(1em + 6px); font-variant-numeric: tabular-nums; }
 .metric-block strong:not(.metric-value-number) { text-wrap: balance; }
 .metric-block strong.metric-value-number { white-space: nowrap; }
 .metric-word { display: inline-block; max-width: 100%; vertical-align: top; overflow-wrap: anywhere; }
