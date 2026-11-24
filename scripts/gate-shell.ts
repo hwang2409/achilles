@@ -15,7 +15,7 @@ export async function gateShell(
   const expected = [["work", ["chats", "pages", "agents", "sessions", "projects", "telemetry"]], ["library", ["skills", "agent profiles"]], ["manage", ["settings", "accounts", "connections"]]];
   if (JSON.stringify(grouped) !== JSON.stringify(expected)) throw new Error(`unexpected place order: ${JSON.stringify(grouped)}`);
   if (!(await places.getByRole("link", { name: "chats", exact: true }).getAttribute("aria-current"))) throw new Error("home did not select chats");
-  if (await page.locator(".sidebar .page-list").count() || await page.locator(".sidebar").getByRole("button", { name: "settings", exact: true }).count()) throw new Error("sidebar duplicated a stable place");
+  if (await page.locator(".sidebar [data-page-list]").count() || await page.locator(".sidebar").getByRole("button", { name: "settings", exact: true }).count()) throw new Error("sidebar duplicated a stable place");
   await waitFor(async () => await places.locator("small").count() === 2, "only chats and pages have catalog counts");
   await page.keyboard.press(appShortcut("k"));
   const palette = page.getByRole("dialog", { name: "command palette" });
@@ -149,8 +149,8 @@ export async function gateShell(
     await page.evaluate(() => { document.documentElement.style.zoom = ""; });
     await page.emulateMedia({ reducedMotion: "no-preference" });
   }
-  if (await page.locator(".page-chat-head").count()) {
-    await page.locator(".page-chat-bar").click();
+  if (await page.locator("[data-page-chat-head]").count()) {
+    await page.locator("[data-page-chat-bar]").click();
     const overflow = page.getByRole("button", { name: "page chat options" });
     await overflow.click();
     const modeMenu = page.getByRole("menu", { name: "page chat options" });
@@ -162,12 +162,12 @@ export async function gateShell(
   } else {
     const overflow = page.getByRole("button", { name: "chat options" });
     await overflow.click();
-    if (!(await page.locator(".header-menu").getByRole("button", { name: /create mode/ }).isVisible())) throw new Error("narrow chat menu did not expose create mode");
-    if (!(await page.locator(".header-menu .approval-mode").isVisible())) throw new Error("narrow chat menu did not expose approval mode");
-    if (!(await page.locator(".header-menu").getByRole("button", { name: "history" }).isVisible())) throw new Error("narrow chat menu did not expose history");
+    if (!(await page.getByRole("menu", { name: "chat options" }).getByRole("menuitem", { name: /create mode/ }).isVisible())) throw new Error("narrow chat menu did not expose create mode");
+    if (!(await page.getByRole("menu", { name: "chat options" }).locator("[data-approval-mode]").isVisible())) throw new Error("narrow chat menu did not expose approval mode");
+    if (!(await page.getByRole("menu", { name: "chat options" }).getByRole("menuitem", { name: /^history$/i }).isVisible())) throw new Error("narrow chat menu did not expose history");
     await capture("09-narrow-chat-menu-review-390x844.png");
     await page.keyboard.press("Escape");
-    if (await page.locator(".header-menu").count()) throw new Error("escape did not close the narrow chat menu");
+    if (await page.getByRole("menu", { name: "chat options" }).count()) throw new Error("escape did not close the narrow chat menu");
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -269,8 +269,8 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   const expectedApproval = (await readHome()).approval_mode === "ask" || savedApproval === false ? "ask before running tools" : "auto-approve tools";
   const expectedFacts = `create on · runs in a new chat · ${expectedApproval}`;
   await gateWait.playwright(facts.filter({ hasText: expectedFacts }), "waitFor");
-  const build = tab.locator(".create-form-actions button[type=submit]");
-  const actionWidths = () => tab.locator(".new-chat, .create-form-actions button[type=submit]").evaluateAll((buttons) =>
+  const build = tab.locator("[data-create-form-actions] button[type=submit]");
+  const actionWidths = () => tab.locator(".new-chat, [data-create-form-actions] button[type=submit]").evaluateAll((buttons) =>
     buttons.map((button) => button.getBoundingClientRect().width));
   const prompt = tab.getByRole("textbox", { name: "describe your page" });
   await tab.setViewportSize({ width: 390, height: 844 });
@@ -284,7 +284,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
     await tab.evaluate(() => document.fonts.ready.then(() => undefined));
     if (await tab.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error(`create page overflow at ${width}px`);
     readyWidths.set(width, await actionWidths());
-    measure.push((await tab.locator(".create-landing").boundingBox())!.width);
+    measure.push((await tab.locator("[data-create-landing]").boundingBox())!.width);
     await capture("landing", width);
     if (width === 390) {
       await tab.getByRole("button", { name: "open menu" }).press("Enter");

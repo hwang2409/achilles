@@ -140,7 +140,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (hintSize !== "15px") throw new Error(`composer guidance did not scale with the 16 px setting: ${hintSize}`);
   if (screenshotDir) {
     await page.setViewportSize({ width: 760, height: 900 });
-    const guidanceAligned = await composer.locator(".vim-guidance").evaluate((element) => {
+    const guidanceAligned = await composer.locator("[data-vim-guidance]").evaluate((element) => {
       const chip = element.querySelector("[data-vim-mode]")?.getBoundingClientRect();
       const hint = element.querySelector('[data-part="composer-status"]')?.getBoundingClientRect();
       return Boolean(chip && hint && chip.top < hint.bottom && hint.top < chip.bottom);

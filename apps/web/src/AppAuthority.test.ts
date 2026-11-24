@@ -8,7 +8,7 @@ import { draftStore } from "./draftStore";
 import { getSettings, SETTINGS_KEY, updateSettings } from "./settings";
 import { WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
 
-const { fireEvent, render } = await import("@testing-library/react");
+const { fireEvent, render, waitFor } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
@@ -193,7 +193,12 @@ const running = { attached: true, joined: { status: { state: "running", session:
 const insert = { description: "Add a book", name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } };
 const records = { tool: insert, page: { layout: { blocks: [{ type: "form", title: "add book", tool: insert.name }, { type: "list", title: "books", collection: "books" }] } } };
 const docked: Options = { ...records, attached: true };
+const openPageChat = async (app: RenderResult) => {
+  const trigger = app.queryByRole("button", { name: /^Page chat/i });
+  if (trigger?.matches('[data-page-chat-bar]') && trigger.getAttribute("aria-expanded") === "false") await click(trigger);
+};
 const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row => ({ kind: "visible", options, check: async (app, authority, writes) => {
+  await openPageChat(app);
   if (id !== "page-chat.new") await click(app.getByRole("button", { name: "page chat options" }));
   const control = select(app, tag(id));
   expect(disabled(control)).toBe(authority === "observer");
@@ -881,7 +886,7 @@ const rows: Record<WriteSurfaceId, Row> = {
   "page.chat": { kind: "visible", absent: true, options: { page: { layout: { blocks: [{ type: "list", title: "Books", collection: "books" }] } }, attached: true }, check: async (app, authority, writes) => {
     const ask = app.queryByText("Ask the chat", { selector: "button", exact: true });
     expect(Boolean(ask)).toBe(authority === "controller");
-    if (!ask) { await keydown(select(app, '[data-part="composer"]'), "Enter"); return; }
+    if (!ask) { await openPageChat(app); await keydown(select(app, '[data-part="composer"]'), "Enter"); return; }
     await click(ask);
     const field = select(app, "textarea") as HTMLTextAreaElement;
     expect(field.value).toContain("add a book");
@@ -1123,6 +1128,7 @@ test("a library tab reconnects as observer once its editor closed, and as contro
 });
 
 const requestApprovalChange = async (app: RenderResult) => {
+  await openPageChat(app);
   await click(app.getByRole("button", { name: "page chat options" }));
   await click(select(app, tag("page-chat.auto-approve")));
   await click(app.getByRole("button", { name: "confirm", exact: true }));
@@ -1202,10 +1208,14 @@ test("tool approval errors leave the old setting and a stale chat never writes",
       await click(select(app, tag("page-chat.auto-approve")));
       await click(app.getByRole("button", { name: "confirm", exact: true }));
       expect(app.getByText("saving…")).toBeTruthy();
-      await click(select(app, '[aria-haspopup="listbox"]'));
+      const modes = app.getByRole("button", { name: "page chat options" });
+      await keydown(select(app, '[data-page-chat-popup="modes"]'), "Escape");
+      await waitFor(() => expect(document.activeElement === modes).toBe(true));
+      await click(select(app, '[data-page-chat-head] button[aria-haspopup="listbox"]'));
       await click(app.getByRole("option", { name: /Other fixture chat/ }));
       await act(async () => { release(settings); });
       expect(writes.filter((method) => method === "set_settings")).toHaveLength(1);
+      await openPageChat(app);
       expect(select(app, "#page-chat-title").textContent).toBe("Other fixture chat");
       expect(app.queryByText("could not change tool approval; try again")).toBeNull();
     } finally { release(settings); }

@@ -52,8 +52,8 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
   const finishConfirmation = () => { focusMode.current?.focus(); setConfirmation(null); };
   const changePopup = (kind: Popup, open: boolean) => {
     if (open && kind === "chats") catalog.clearSearch();
-    setConfirmation(null);
-    setPopup(open ? kind : null);
+    if (kind === "modes") setConfirmation(null);
+    setPopup((current) => open ? kind : current === kind ? null : current);
   };
   const modes = [
     { ...approval, id: WRITE_SURFACE.pageChatAutoApprove, label: "run tools without asking", enable: "run tools without asking", disable: "ask before running tools", on: "tools run without asking", off: "ask before running tools" },

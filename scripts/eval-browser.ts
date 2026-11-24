@@ -103,7 +103,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     const before = tab.frames.length;
     await tab.page.getByRole("button", { name: "new chat" }).first().click();
     // done when the page shows why no chat started, or a new chat's empty view
-    await tab.page.locator('.create-mode-alert:has-text("still running"), .empty-chat').first().waitFor({ timeout: READY_MS });
+    await tab.page.locator('[data-create-mode-alert]:has-text("still running"), [data-empty-chat]').first().waitFor({ timeout: READY_MS });
     await ready(tab); await type(tab, text); row.new_chat_typed = true;
     // the page answers an Enter at once: a send, a steer, or a failed row; zeta answers a request within this wait
     await tab.page.waitForTimeout(2_000);
@@ -231,7 +231,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
         if (!row?.fired) return;
         const probe = answer ? answerProbe(answer) : "";
         // the page side repeats plainText: a function passed to the page cannot close over this module
-        row.answer_visible = Boolean(probe) && await tab.page.waitForFunction((needle: string) => (document.querySelector(".transcript") as HTMLElement | null)?.innerText.replace(/[*_#`>|[\]()~-]/g, "").replace(/\s+/g, " ").toLowerCase().includes(needle), probe, { timeout: 10_000 }).then(() => true, () => false);
+        row.answer_visible = Boolean(probe) && await tab.page.waitForFunction((needle: string) => (document.querySelector("[data-chat-transcript]") as HTMLElement | null)?.innerText.replace(/[*_#`>|[\]()~-]/g, "").replace(/\s+/g, " ").toLowerCase().includes(needle), probe, { timeout: 10_000 }).then(() => true, () => false);
       } };
     },
     // a turn-cap or failure stop: press the page's own stop button, so nothing keeps running for the page

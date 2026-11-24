@@ -81,10 +81,10 @@ export async function gateTranscript(
     root.style.setProperty("--achilles-code-font", '"IBM Plex Mono"');
     root.style.setProperty("--achilles-ui-size", "16px");
     root.dataset.density = "compact";
-    const transcript = getComputedStyle(document.querySelector(".transcript")!);
-    const prose = getComputedStyle(document.querySelector('.transcript [data-part="message"][data-format="markdown"]')!);
-    const code = getComputedStyle(document.querySelector(".transcript pre code")!);
-    const timeline = document.querySelector('.transcript [data-part="timeline"]')!;
+    const transcript = getComputedStyle(document.querySelector("[data-chat-transcript]")!);
+    const prose = getComputedStyle(document.querySelector('[data-chat-transcript] [data-part="message"][data-format="markdown"]')!);
+    const code = getComputedStyle(document.querySelector("[data-chat-transcript] pre code")!);
+    const timeline = document.querySelector('[data-chat-transcript] [data-part="timeline"]')!;
     return {
       font: transcript.fontFamily,
       proseFont: prose.fontFamily,
@@ -239,7 +239,7 @@ export async function gateTranscript(
     throw new Error("text-only stream rendered more than one visible jump to latest control");
   const jumpDiagnostics = async () => page.evaluate(() => {
     const scroll = document.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
-    const pane = document.querySelector<HTMLElement>('.transcript');
+    const pane = document.querySelector<HTMLElement>('[data-chat-transcript]');
     const frame = document.querySelector<HTMLElement>('[data-part="timeline-frame"]');
     const lane = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"]');
     const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]');
@@ -271,15 +271,15 @@ export async function gateTranscript(
     if (width === 390) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
     if (width === 390) {
-      const bar = page.locator(".page-chat-bar");
+      const bar = page.locator("[data-page-chat-bar]");
       await gateWait.playwright(bar, "waitFor", { state: "visible" });
       await bar.click();
       const sheet = page.getByRole("dialog", { name: "page chat" });
       await gateWait.playwright(sheet, "waitFor", { state: "visible" });
       if (!(await sheet.evaluate((node) => node.contains(document.activeElement))))
         throw new Error("390px page chat manual opener did not move focus into the sheet");
-      await gateWait.playwright(sheet.locator(".transcript"), "waitFor", { state: "visible" });
-      if (await sheet.locator(".transcript").evaluate((element) => element.clientHeight <= 0)) throw new Error("390px page chat jump sheet has no usable transcript height");
+      await gateWait.playwright(sheet.locator("[data-chat-transcript]"), "waitFor", { state: "visible" });
+      if (await sheet.locator("[data-chat-transcript]").evaluate((element) => element.clientHeight <= 0)) throw new Error("390px page chat jump sheet has no usable transcript height");
     }
     await waitForJump(async () => await page.evaluate((narrow) => {
       const shell = document.querySelector<HTMLElement>(".app-shell");
@@ -302,7 +302,7 @@ export async function gateTranscript(
     const geometry = await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').evaluate((control) => {
       const rect = (element: Element) => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height }; };
       const controlRect = rect(control);
-      const pane = document.querySelector<HTMLElement>('.transcript')!;
+      const pane = document.querySelector<HTMLElement>('[data-chat-transcript]')!;
       const paneRect = rect(pane);
       const lane = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"]')!;
       const laneRect = rect(lane);
@@ -328,7 +328,7 @@ export async function gateTranscript(
     if (width === 390) {
       const sheet = page.getByRole("dialog", { name: "page chat" });
       await sheet.getByRole("button", { name: "close page chat" }).click();
-      const bar = page.locator(".page-chat-bar");
+      const bar = page.locator("[data-page-chat-bar]");
       await gateWait.playwright(bar, "waitFor", { state: "visible" });
       await bar.evaluate((element) => { if (document.activeElement !== element) throw new Error("390px page chat close did not restore focus to the bar"); });
     }
@@ -352,7 +352,7 @@ export async function gateTranscript(
   });
   await waitForJump(async () => (JSON.parse(await Bun.file(controlPath).text()).jump_stream_barrier ?? null) === "held", "held jump stream chunks");
   // Desktop CSS can show the jump before the closed mobile sheet drops inert.
-  const desktopJump = page.locator(".page-chat-docked #page-chat-sheet:not([inert], [role], [aria-modal])").locator(textOnlyJump);
+  const desktopJump = page.locator("#page-chat-sheet[data-page-chat-docked]:not([inert], [role], [aria-modal])").locator(textOnlyJump);
   await gateWait.playwright(desktopJump, "waitFor", { state: "visible" });
   await desktopJump.focus();
   if (!(await desktopJump.evaluate((element) => document.activeElement === element))) throw new Error("text-only jump to latest control is not keyboard focusable");
@@ -442,8 +442,8 @@ export async function gateReloadMidTurn(
       if (count === 0) missing.push(index); else if (count > 1) repeated.push(index);
     }
     if (missing.length || repeated.length) throw new Error(`reply after reload lost lines ${JSON.stringify(missing)} and repeated lines ${JSON.stringify(repeated)}`);
-    const prompts = await page.locator(".transcript").getByText("stream across a reload", { exact: true }).count();
-    if (prompts !== 1) throw new Error(`reload showed the prompt ${prompts} times: ${(await page.locator(".transcript").innerText()).slice(-1500)}`);
+    const prompts = await page.locator("[data-chat-transcript]").getByText("stream across a reload", { exact: true }).count();
+    if (prompts !== 1) throw new Error(`reload showed the prompt ${prompts} times: ${(await page.locator("[data-chat-transcript]").innerText()).slice(-1500)}`);
     const cancelled = requests().slice(framesBeforeReload).some((frame) => JSON.stringify(frame).includes('"reason":"disconnect"'));
     if (cancelled) throw new Error("zeta cancelled the turn on reload (reason disconnect)");
     if (await page.getByRole("alert").count()) throw new Error(`reload mid-turn showed a notice: ${await page.getByRole("alert").first().innerText()}`);
