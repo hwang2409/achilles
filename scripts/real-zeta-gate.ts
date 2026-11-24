@@ -1537,7 +1537,7 @@ with _database() as db:
   }
   if (screenshotDir) {
     const captureInsets = async (width: number) => {
-      const surface = page.locator("[data-page-chat-docked] [data-page-chat-surface]");
+      const surface = page.locator("[data-page-chat-docked][data-page-chat-surface]");
       const user = surface.locator('[data-part="message-content"]').filter({ hasText: /^open created page$/ });
       await gateWait.playwright(user, "waitFor", { state: "visible" });
       const insets = await surface.evaluate((node) => {
