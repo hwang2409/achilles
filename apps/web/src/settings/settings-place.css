@@ -53,5 +53,3 @@
 
 .sp :is(.confirmation-trigger, .confirmation-row button) { min-height: var(--g1-control-height); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); }
 @media (max-width: 760px), (pointer: coarse) { .sp :is(.confirmation-trigger, .confirmation-row button) { min-height: var(--g1-touch-height); } }
-/* bare <code> otherwise falls back to the browser's Courier */
-.sp code { font-family: var(--achilles-code-font, var(--g1-font-mono)); }

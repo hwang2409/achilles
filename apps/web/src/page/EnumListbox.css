@@ -1,6 +1,6 @@
 .enum-listbox { position: relative; min-width: 0; }
 .enum-listbox-label { display: block; margin-bottom: 6px; color: var(--fulcrum-muted); font-size: inherit; line-height: 16px; }
-.enum-listbox-button { width: 100%; min-height: var(--g1-control-height); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 32px 4px 8px; border: 1px solid var(--g1-control-border); background-color: var(--fulcrum-surface); color: var(--fulcrum-fg); text-align: left; font: inherit; cursor: pointer; }
+.enum-listbox-button { width: 100%; min-height: var(--g1-control-height); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 32px 0 8px; border: 1px solid var(--g1-control-border); background-color: var(--fulcrum-surface); color: var(--fulcrum-fg); text-align: left; font: inherit; cursor: pointer; }
 .enum-listbox-button:focus-visible, .enum-listbox-menu:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 .enum-listbox-button[aria-invalid="true"] { border-color: var(--fulcrum-danger); }
 .enum-listbox-button:disabled { color: var(--g1-muted); cursor: not-allowed; }

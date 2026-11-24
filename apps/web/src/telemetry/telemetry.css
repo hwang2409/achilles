@@ -23,7 +23,7 @@
 .telemetry-module .tm-accent { color: var(--fulcrum-accent); }
 .telemetry-module .tm-tool { color: var(--tm-tool); }
 .telemetry-module .tm-dim b { color: var(--fulcrum-fg); font-weight: 500; }
-.telemetry-module code { color: var(--fulcrum-fg); font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+.telemetry-module code { color: var(--fulcrum-fg); }
 .telemetry-module .tm-narrow-only { display: none; }
 .telemetry-module .tm-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -34,7 +34,7 @@
 @keyframes tm-appear { from { visibility: hidden; } }
 .tm-tabs-row { flex: none; display: flex; flex-wrap: wrap; align-items: stretch; gap: 0 24px; padding: 0 var(--tm-pad) 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
 
-.tm-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--g1-control-height); padding: 0 14px; border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); background: none; color: var(--fulcrum-fg); cursor: pointer; font: inherit; white-space: nowrap; }
+.tm-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--g1-control-height); padding: 0 14px; border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); background: none; color: var(--fulcrum-fg); cursor: pointer; font: inherit; white-space: nowrap; }
 .tm-button:disabled { color: var(--fulcrum-muted); cursor: default; }
 .tm-primary:not(:disabled) { border-color: var(--g1-primary); background: var(--g1-primary); color: var(--g1-primary-text); }
 .tm-link { min-height: 36px; padding: 0 4px; border: 0; background: none; color: var(--fulcrum-accent); cursor: pointer; font: inherit; }
