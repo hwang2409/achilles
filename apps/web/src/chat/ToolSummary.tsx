@@ -128,7 +128,48 @@ function argsText(item: ToolItem): string {
   return parts.join(" · ");
 }
 
-export function toolArgumentSummary(item: ToolItem): string { return argsText(item); }
+const PATH_BUDGET = 56;
+const HOME = /\/(?:Users|home)\/[^/\s]+(?=\/|\s|$)/g;
+// the argument a reader needs, shown without its key: tool name pattern -> argument keys
+const PRIMARY: [RegExp, string[]][] = [
+  [/^(read|edit|write|multi_?edit|view|cat|ls|list_dir|notebook_?edit)$/, ["path", "file_path", "notebook_path"]],
+  [/^(bash|shell|exec|run_background)$/, ["command", "cmd"]],
+  [/^(grep|glob|search|find|rg|web_?search)$/, ["pattern", "query"]],
+  [/^(fetch|web_?fetch)$/, ["url"]],
+];
+
+/** Shorten a path for one row: relative to cwd when inside it, home as ~, then cut in the middle so the file name stays. */
+export function displayPath(path: string, cwd?: string | null): string {
+  const base = cwd?.replace(/\/+$/, "");
+  let result = text(path, 4096);
+  if (base && result === base) result = ".";
+  else if (base && result.startsWith(`${base}/`)) result = result.slice(base.length + 1);
+  result = result.replace(HOME, "~");
+  if (result.length <= PATH_BUDGET) return result;
+  const name = result.slice(result.lastIndexOf("/") + 1);
+  const tail = Math.min(PATH_BUDGET - 1, Math.max(Math.ceil(PATH_BUDGET / 2), name.length + 1));
+  return `${result.slice(0, PATH_BUDGET - 1 - tail)}…${result.slice(-tail)}`;
+}
+
+function primaryText(item: ToolItem, cwd?: string | null): string | undefined {
+  const args = item.tool_call.arguments;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const name = item.tool_call.name.trim().toLowerCase().replace(/-/g, "_");
+  const keys = PRIMARY.find(([pattern]) => pattern.test(name))?.[1];
+  const key = keys?.find((candidate) => typeof (args as Record<string, unknown>)[candidate] === "string" && ((args as Record<string, string>)[candidate]).trim());
+  if (!key) return undefined;
+  const value = (args as Record<string, string>)[key];
+  if (key.includes("path")) return displayPath(value, cwd);
+  if (key !== "command" && key !== "cmd") return text(value, 200);
+  const base = cwd?.replace(/\/+$/, "");
+  let command = value.slice(0, 800);
+  // only whole path segments: a cwd of /a/b must not touch /a/bc
+  if (base) command = command.split(`${base}/`).join("").replace(new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![^\\s'"\`;|&)])`, "g"), ".");
+  return text(command.replace(HOME, "~"), 200);
+}
+
+/** One-line argument summary for a collapsed tool row; cwd is the session cwd, or null when unknown. */
+export function toolArgumentSummary(item: ToolItem, cwd?: string | null): string { return primaryText(item, cwd) ?? argsText(item); }
 
 export function summarizeToolOutput(output: ToolBodyProps["output"], error = false, state: ItemState = "done"): Summary {
   const read = outputText(output);

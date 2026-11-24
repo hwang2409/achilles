@@ -49,6 +49,7 @@ export class SessionNotFoundError extends Error {}
 
 export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null, current: () => boolean = () => true) {
   let name: string | null = null;
+  let sessionCwd: string | null = null;
   // With `resume_attach`, `resume` of this chat during its live turn (for example an approval wait after a reload)
   // attaches and re-binds the page tools at once. Without it zeta refuses that `resume`, so attach without it: the
   // transcript and pending approval come from status and history, and `rebind` re-sends the page binding when idle.
@@ -56,8 +57,10 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
   let rebind = !supportsFeature(client, "resume_attach") && await runningSession(client) === id;
   for (let retried = false; !rebind; retried = true) {
     try {
-      const resumed = await rebindPage(client, id, pageBinding(credential, cwd)) as { session?: { name?: string | null } };
+      const resumed = await rebindPage(client, id, pageBinding(credential, cwd)) as { session?: { name?: string | null; cwd?: unknown } };
       name = resumed.session?.name ?? null;
+      // the stored session cwd; page.workspace is only what achilles asked for, and a resumed session keeps its own
+      sessionCwd = typeof resumed.session?.cwd === "string" ? resumed.session.cwd : null;
       break;
     } catch (caught) {
       const reason = (caught as { data?: { code?: string } }).data?.code;
@@ -71,9 +74,9 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
     }
   }
   if (!current()) throw aborted();
-  if (serverMode === "ask") return { id, name, rebind, ...await applyApprovalMode(client, id, "ask", current) };
+  if (serverMode === "ask") return { id, name, cwd: sessionCwd, rebind, ...await applyApprovalMode(client, id, "ask", current) };
   const settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
-  return { id, name, rebind, approvalMode: settings.approval_mode, pending: false };
+  return { id, name, cwd: sessionCwd, rebind, approvalMode: settings.approval_mode, pending: false };
 }
 
 const statusEvents = (id: string, status: Status): RunEvent[] => (status.pending_approvals ?? []).flatMap((item) => fromZetaEvent({ event: "approval_request", session_id: id, ...item, ...(item.resolution_pending ? { state: "resolving", status: "resolving…" } : {}) }));
