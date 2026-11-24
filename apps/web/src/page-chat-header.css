@@ -9,7 +9,7 @@
 .page-chat-head strong { font-size: 14px; font-weight: 600; }
 .page-chat-readouts { padding-inline: var(--g1-space-2); overflow: hidden; text-overflow: ellipsis; }
 .page-chat-new-reason { padding: var(--g1-space-1) var(--g1-space-4); color: var(--g1-muted); font-size: var(--g1-type-meta); }
-.page-chat-switcher { display: flex; align-items: center; gap: var(--g1-space-2); flex: 1; min-width: 0; text-align: start; }
+.page-chat-switcher { display: flex; align-items: center; gap: var(--g1-space-2); flex: 1; min-width: 0; text-align: start; padding-inline-start: 0; border-inline-start-width: 0; }
 .page-chat-icon { flex: none; font-size: 18px; }
 .page-chat-head [aria-expanded="true"] { background: var(--g1-selected); }
 .page-chat-popup {
