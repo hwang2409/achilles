@@ -1,3 +1,6 @@
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { restorableFocus } from "../keyboard";
@@ -5,7 +8,6 @@ import { WRITE_SURFACE } from "../writeSurfaces";
 import { listAccounts, safeAccountId, supportsRequest, type Account } from "../zeta";
 import { useAccountSwitch } from "../accounts/AccountSwitchReview";
 import { currentAccount, type ChatDestination } from "../accounts/accountSwitch";
-import "./composer-commands.css";
 
 type Output = { accounts: Account[] } | { text: string; error?: boolean };
 
@@ -86,15 +88,15 @@ export function CommandOutput({ commands, opener }: { commands: ReturnType<typeo
     return () => { document.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); };
   }, [open, opener, close]);
   if (!output) return null;
-  return <div ref={panel} className="composer-command-output" role="group" aria-label="composer command result">
-    <p role={"error" in output && output.error ? "alert" : "status"}>{"accounts" in output ? (output.accounts.length ? "accounts" : "no accounts") : output.text}</p>
-    <button className="composer-command-close" type="button" onClick={() => { opener?.focus({ preventScroll: true }); close(); }}>close</button>
-    {"accounts" in output && <ul>
-      {output.accounts.map((account) => <li key={account.account}>
+  return <Card ref={panel} className="absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-10 gap-0 bg-background p-0 shadow-md" role="group" aria-label="composer command result"><ScrollArea className="[&_[data-slot=scroll-area-viewport]]:max-h-[min(240px,38dvh)]"><div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-2 [overflow-wrap:anywhere]">
+    <p className="[&[role=alert]]:text-destructive" role={"error" in output && output.error ? "alert" : "status"}>{"accounts" in output ? (output.accounts.length ? "accounts" : "no accounts") : output.text}</p>
+    <Button variant="outline" size="sm" type="button" onClick={() => { opener?.focus({ preventScroll: true }); close(); }}>close</Button>
+    {"accounts" in output && <ul className="col-span-full">
+      {output.accounts.map((account) => <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 border-t py-1.5" key={account.account}>
         <span>{account.account}</span>
-        <small>{[account.current ? "current" : account.default ? "default" : "", !account.available ? "needs login" : ""].filter(Boolean).join(" · ")}</small>
-        {!account.current && <button type="button" data-write-surface={WRITE_SURFACE.composerAccountSwitch} disabled={!canSwitch || !account.available} aria-label={`switch to ${account.account}`} onClick={() => switchTo(output.accounts, account.account, opener)}>switch</button>}
+        <small className="col-start-1 text-muted-foreground">{[account.current ? "current" : account.default ? "default" : "", !account.available ? "needs login" : ""].filter(Boolean).join(" · ")}</small>
+        {!account.current && <Button variant="outline" size="sm" className="col-start-2 row-span-2 row-start-1" type="button" data-write-surface={WRITE_SURFACE.composerAccountSwitch} disabled={!canSwitch || !account.available} aria-label={`switch to ${account.account}`} onClick={() => switchTo(output.accounts, account.account, opener)}>switch</Button>}
       </li>)}
     </ul>}
-  </div>;
+  </div></ScrollArea></Card>;
 }

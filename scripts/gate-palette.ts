@@ -14,7 +14,7 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   const paletteInput = palette.getByRole("combobox");
   const field = page.getByRole("textbox", { name: "message", exact: true });
   const isFocused = async (locator: typeof field) => await locator.count() === 1 && await locator.evaluate((element) => element === document.activeElement);
-  const vimDraft = () => page.locator('.vim-composer [data-part="composer-field"]').getAttribute("data-value");
+  const vimDraft = () => page.locator('[data-vim-composer] [data-part="composer-field"]').getAttribute("data-value");
   const runCommand = async (query: string, option: string) => {
     await paletteInput.fill(query);
     await waitFor(async () => (await palette.getByRole("option", { selected: true }).innerText()).startsWith(option), `palette selects ${option}`);
@@ -42,7 +42,7 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await waitFor(async () => await palette.getByRole("option").filter({ has: page.locator("mark") }).count() > 1, "filtered palette highlights");
   await capture("palette-filtered-1440x900.png");
   await runCommand("toggle vim", "toggle vim mode");
-  const composer = page.locator(".vim-composer");
+  const composer = page.locator("[data-vim-composer]");
   await gateWait.playwright(composer, "waitFor", { state: "visible", timeout: 20_000 });
   await waitFor(() => isFocused(field), "palette command returns focus to the vim composer");
 
@@ -110,6 +110,6 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await waitFor(async () => await page.locator("[data-session-id]").getAttribute("data-session-id") === chatId, "palette opens a chat");
   await page.keyboard.press("ControlOrMeta+k");
   await runCommand("toggle vim", "toggle vim mode");
-  await gateWait.playwright(page.locator(".vim-composer"), "waitFor", { state: "detached", timeout: 20_000 });
+  await gateWait.playwright(page.locator("[data-vim-composer]"), "waitFor", { state: "detached", timeout: 20_000 });
   if (viewport) await page.setViewportSize(viewport);
 }

@@ -336,7 +336,7 @@ try {
     // A missing credential triggers real auth failure without sending a provider request.
     await rm(oauthPath("failed"));
     await composer.press("Enter");
-    const card = authPage.locator(".chat-auth-error");
+    const card = authPage.locator("[data-chat-auth-error]");
     await card.waitFor({ timeout: 20_000 });
     const id = await authPage.locator("[data-session-id]").getAttribute("data-session-id");
     if (!id) throw new Error("switch-then-reply chat has no session id");

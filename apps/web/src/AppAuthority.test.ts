@@ -306,7 +306,7 @@ async function proveSwitch(app: RenderResult, writes: string[]) {
 const recoveryWrite = (id: WriteSurfaceId, request: string): Row => {
   const calls: { method: string; params: Record<string, unknown> }[] = [];
   return { kind: "visible", options: accountFixture(calls), check: async (app, authority, writes, requests) => {
-    const card = select(app, ".transcript .chat-auth-error");
+    const card = select(app, ".transcript [data-chat-auth-error]");
     expect(card.querySelector('a[href="/accounts"]')).not.toBeNull();
     const control = select(app, tag(id));
     expect(disabled(control)).toBe(authority === "observer");

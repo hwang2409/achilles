@@ -63,39 +63,6 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 @media (width >= 1280px) {
   .page-view.docked { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: minmax(0, 1fr); }
 }
-.main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-ui-font, var(--g1-font-ui)); font-size: var(--achilles-ui-size, 14px); }
-:root[data-code-font]:not([data-code-font="system-mono"]) .main-pane [data-part="composer"] :is(textarea, .cm-editor) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
-[data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: 12px; line-height: 20px; }
-[data-part="composer-queued"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 2px 8px; border-left: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
-[data-part="composer-queued-label"] { flex: none; color: var(--fulcrum-accent); }
-[data-part="composer-queued-label"]::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-right: 8px; vertical-align: 1px; outline: 1px solid currentColor; outline-offset: -1px; }
-[data-part="composer-queued"][data-sending] [data-part="composer-queued-label"]::before { background: currentColor; }
-[data-part="composer-queued"][data-failed] { border-left-color: var(--fulcrum-danger); }
-[data-part="composer-queued"][data-failed] [data-part="composer-queued-label"] { color: var(--fulcrum-danger); font-weight: 700; }
-[data-part="composer-queued"][data-failed] [data-part="composer-queued-label"]::before { background: currentColor; }
-[data-part="composer-queued-text"] { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* its own line, wrapped, so the reason is readable on a phone (no tooltip-only text) */
-[data-part="composer-queued-error"] { flex: 1 0 100%; color: var(--fulcrum-danger); overflow-wrap: anywhere; }
-[data-part="composer-queued-hint"] { flex: 1 0 100%; color: var(--fulcrum-muted); }
-[data-part="composer"] [data-part="composer-queued-retry"],
-[data-part="composer"] [data-part="composer-queued-edit"],
-[data-part="composer"] [data-part="composer-queued-copy"],
-[data-part="composer"] [data-part="composer-queued-cancel"] { --action: var(--fulcrum-muted); min-width: 0; min-height: 28px; padding: 0 8px; background: transparent; color: var(--fulcrum-fg); border-color: var(--fulcrum-border); font-size: 12px; }
-[data-part="composer"] [data-part="composer-queued-cancel"] { width: 28px; padding: 0; font-size: 16px; }
-/* "copy" -> "copied" keeps its width, so the buttons beside it do not move */
-[data-part="composer"] [data-part="composer-queued-copy"] { min-width: 9ch; }
-[data-part="composer-queued-actions"] { display: contents; }
-/* the row's buttons share the text's line box (display: contents): a triple-click must select only the message */
-[data-part="composer-queued-actions"] button { -webkit-user-select: none; user-select: none; }
-/* narrow: a failed row's actions get their own line, so they never split across the label line and the next */
-@media (max-width: 480px) {
-  [data-part="composer-queued"][data-failed] [data-part="composer-queued-text"] { flex-basis: 0; }
-  [data-part="composer-queued"][data-failed] [data-part="composer-queued-actions"] { display: flex; flex: 1 0 100%; flex-wrap: wrap; gap: 8px; }
-}
-@media (pointer: coarse), (max-width: 640px) {
-  [data-part="composer"] [data-part="composer-queued-retry"], [data-part="composer"] [data-part="composer-queued-edit"], [data-part="composer"] [data-part="composer-queued-copy"], [data-part="composer"] [data-part="composer-queued-cancel"] { min-height: 40px; }
-  [data-part="composer"] [data-part="composer-queued-cancel"] { width: 40px; }
-}
 .connection-banner { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-left: 2px solid var(--fulcrum-danger); border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-danger) 25%, var(--fulcrum-border)); padding: 8px 24px; color: var(--fulcrum-fg); background: color-mix(in srgb, var(--fulcrum-danger) 8%, transparent); font-size: 12px; }
 .connection-banner button { padding: 6px 10px; }
 .full-state { flex: 1; min-height: 0; overflow-y: auto; display: grid; place-content: center; gap: 20px; padding: 32px; }
@@ -129,10 +96,7 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .record-form-actions button:disabled, .record-form-actions button[aria-disabled="true"] { opacity: .6; cursor: default; }
 @media (max-width: 760px), (max-height: 500px) {
   .record-form-actions button { min-height: 40px; }
-  [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
-  [data-part="approval"] button { min-height: 40px; }
   .connection-banner { align-items: flex-start; padding: 8px 12px; }
-  .main-pane [data-part="composer"] button { min-height: 40px; }
   .full-state > .primary { min-height: 44px; }
   .connection-state h1 { margin-top: 16px; }
   .connection-state > .primary { margin-top: 16px; }

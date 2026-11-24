@@ -1,3 +1,4 @@
+import { Textarea } from "@/components/ui/textarea";
 import { AccountSwitchReceipt } from "./accounts/AccountSwitchReview";
 import type { createAccountLogin } from "./accounts/accountLogin";
 import { PageChatHeader } from "./PageChatHeader";
@@ -34,10 +35,7 @@ import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
 import { continuationNotification } from "./chat/continuation";
-import "./chat/continuation.css";
 import "./shell.css";
-import "./chat/markdown.css";
-import "./chat/fulcrum-g1.css";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 import "./jumpToLatest.css";
 
@@ -60,7 +58,7 @@ function ErrorRow({ id }: { id: string }) {
 function ChatNotification({ id }: { id: string }) {
   const item = useItem(id);
   if (item?.type !== "notification" || item.event.type !== "notification" || item.event.notification_id !== continuationNotification || typeof item.event.data?.text !== "string") return <Notification id={id} />;
-  return <p className="chat-continuation" role="status">{item.event.data.text}</p>;
+  return <p className="my-3 border-t py-3 text-sm text-muted-foreground [overflow-wrap:anywhere]" role="status">{item.event.data.text}</p>;
 }
 
 const renderers: Renderers = { notification: ChatNotification, message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: CompactTool, error: ErrorRow };
@@ -139,7 +137,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
 }
 
 function VimLoading() {
-  return <div className="vim-loading" data-part="composer" data-state="read-only" role="group" aria-label="message" aria-disabled="true"><div data-part="composer-field"><textarea rows={1} aria-label="message" placeholder="loading vim…" disabled /></div></div>;
+  return <div data-vim-loading="" data-chat-composer="" data-part="composer" data-state="read-only" role="group" aria-label="message" aria-disabled="true"><div data-part="composer-field"><Textarea className="min-h-0" rows={1} aria-label="message" placeholder="loading vim…" disabled /></div></div>;
 }
 
 function activeLastState(waiting: number, outcome: string, turn: "idle" | "running") {
@@ -446,7 +444,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
             pending: createMode?.pending ? "saving…" : undefined, error: createMode?.error,
             savedAt: createReceipt?.pageId === activePage.id && createReceipt?.sessionId === ready?.sessionId && createReceipt?.enabled === activePage.create_mode ? createReceipt.at : undefined }}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-chat-transcript="" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);

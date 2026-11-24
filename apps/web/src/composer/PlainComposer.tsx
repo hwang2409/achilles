@@ -1,3 +1,6 @@
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   useCallback,
   useId,
@@ -82,15 +85,15 @@ export function PlainComposer(props: ComposerAdapterProps) {
       <div
         ref={group}
         tabIndex={-1}
-        className={className}
-        data-part="composer"
+        className={cn("relative rounded-md", className)}
+        data-chat-composer="" data-part="composer"
         data-write-surface={WRITE_SURFACE.composerSend}
         data-state="read-only"
         role="group"
         aria-label={label}
       >
         <div data-part="composer-field" data-value={model.draft}>
-          <textarea
+          <Textarea className="min-h-0 field-sizing-fixed"
             ref={input}
             rows={1}
             value={model.draft}
@@ -104,8 +107,8 @@ export function PlainComposer(props: ComposerAdapterProps) {
 
   return (
     <form
-      className={className}
-      data-part="composer"
+      className={cn("relative rounded-md", className)}
+      data-chat-composer="" data-part="composer"
       data-write-surface={WRITE_SURFACE.composerSend}
       data-state={state}
       data-error={model.error?.kind}
@@ -119,7 +122,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
     >
       <QueuedMessages model={model} onRetry={(id) => { retry(id); focusInput(); }} onRestore={(id) => { restore(id); focusInput(); }} onCancel={(id) => { cancel(id); focusInput(); }} />
       <div data-part="composer-field" data-value={model.draft}>
-        <textarea
+        <Textarea className="min-h-0 field-sizing-fixed"
           ref={input}
           rows={1}
           value={model.draft}
@@ -142,10 +145,10 @@ export function PlainComposer(props: ComposerAdapterProps) {
           </span>
         </p>
         {running && onStop ? (
-          <button
+          <Button
             ref={stopButtonRef}
             type="button"
-            data-part="composer-stop"
+            variant="outline" data-part="composer-stop"
             data-write-surface={WRITE_SURFACE.composerAbort}
             data-action="stop"
             aria-label="stop the running turn"
@@ -155,9 +158,9 @@ export function PlainComposer(props: ComposerAdapterProps) {
             onClick={stop}
           >
             {model.stopping ? "stopping" : "stop"}
-          </button>
+          </Button>
         ) : null}
-        <button
+        <Button
           type="submit"
           data-part="composer-submit"
           data-write-surface={steer ? WRITE_SURFACE.composerSteer : WRITE_SURFACE.composerSend}
@@ -166,7 +169,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           aria-disabled={!action || undefined}
         >
           {queues ? "queue" : steer ? "steer" : "send"}
-        </button>
+        </Button>
       </div>
     {props.commandOutput}
     </form>

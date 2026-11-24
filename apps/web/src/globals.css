@@ -240,3 +240,261 @@
   body { @apply bg-background text-foreground; }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 }
+
+/* Fulcrum / CodeMirror adapter — public parts and editor internals. */
+/* Host skin for Fulcrum's public parts. Keep its scroll roots, cursor gutter and state text. */
+[data-part="message"] {
+  --fulcrum-measure: 944px;
+}
+[data-part="message"], [data-part="item"][data-kind="user"] {
+  font-size: 15px;
+  line-height: 1.6;
+}
+[data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+[data-part="item"][data-kind="user"] > [data-part="delivery-note"] { grid-column: 1; }
+[data-part="message-prompt"] { display: none; }
+[data-part="delivery-note"],
+[data-part="run-end-marker"] {
+  font-family: var(--achilles-code-font, var(--font-mono));
+}
+
+/* The same card skin applies in live chat and agent timelines. Leave the pinned
+   per-tool viewers, syntax colors, and disclosure sizing in charge of their bodies. */
+:is([data-part="tool"], [data-part="approval"]) {
+  border-width: 1px;
+  border-radius: var(--radius);
+  font-family: var(--achilles-code-font, var(--font-mono));
+  font-size: 13px;
+}
+[data-part="tool"] { border-color: var(--border); }
+[data-part="approval"][data-decision="approve"] { --rail: var(--success); }
+[data-part="approval"][data-decision="deny"] { --rail: var(--destructive); }
+[data-part="tool-header"] {
+  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 36px;
+  column-gap: 8px;
+  background: var(--card);
+}
+[data-part="tool"][data-state="streaming"] > [data-part="tool-header"] { background: var(--accent); }
+[data-part="approval"] > [data-part="tool-header"] { background: color-mix(in srgb, var(--warning-fill) 6%, var(--background)); }
+[data-part="tool-name"] { color: var(--foreground); }
+[data-part="tool-summary"] { color: var(--muted-foreground); }
+[data-part="tool-status"] { font-size: 13px; }
+:is([data-part="tool-status"], [data-part="text-viewer-status"], [data-part="delivery-note"])::before {
+  width: 6px;
+  height: 6px;
+}
+[data-part="approval-actions"] button {
+  border-radius: var(--radius);
+  border-color: var(--input);
+}
+[data-part="approval-actions"] button[data-action="approve"]:not(:disabled, [aria-disabled="true"]) {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-part="approval-actions"] button[data-action="deny"]:not(:disabled, [aria-disabled="true"]) { color: var(--destructive); }
+[data-part="approval-actions"]:has(> [data-action="approve-always"]) { display: flex; }
+[data-part="approval-actions"] button:focus-visible { outline: 2px solid var(--ring); }
+
+[data-part="composer"] {
+  background: var(--background);
+}
+[data-part="composer"][data-error] { border-color: var(--destructive); }
+[data-part="jump-to-approval"] { border-radius: var(--radius); }
+[data-part="composer"] :is([data-part="composer-reason"], [data-part="composer-message"])::before {
+  width: 6px;
+  height: 6px;
+}
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  summary[data-part="tool-header"] { min-height: 44px; }
+}
+
+/* Markdown rendered inside Fulcrum messages. */
+[data-part="message"] [data-part="message-content"] > :first-child { margin-top: 0; }
+[data-part="message"] [data-part="message-content"] > :last-child { margin-bottom: 0; }
+[data-part="message"] [data-part="md-paragraph"] { margin: 0 0 12px; }
+[data-part="message"] [data-part="md-heading"] { margin: 20px 0 8px; font-weight: 700; line-height: 1.5; text-wrap: balance; }
+[data-part="message"] [data-part="md-heading"][data-level="1"] { font-size: 20px; line-height: 28px; letter-spacing: -.01em; }
+[data-part="message"] [data-part="md-heading"][data-level="2"] { margin-top: 28px; font-size: 20px; line-height: 1.6; letter-spacing: -.02em; }
+[data-part="message"] [data-part="md-heading"][data-level="3"] { font-size: 14px; line-height: 22px; color: var(--fulcrum-muted); }
+[data-part="message"] [data-part="md-list"] { margin: 0 0 12px; padding-left: 20px; }
+[data-part="message"] ul[data-part="md-list"] { padding-left: 0; list-style: none; }
+[data-part="message"] ol[data-part="md-list"] { padding-left: 28px; }
+[data-part="message"] ul[data-part="md-list"] > [data-part="md-list-item"] { position: relative; padding-left: 16px; margin: 0 0 4px; }
+[data-part="message"] ul[data-part="md-list"] > [data-part="md-list-item"]::before { content: "–"; position: absolute; left: 0; color: var(--fulcrum-muted); }
+[data-part="message"] ol[data-part="md-list"] > [data-part="md-list-item"] { padding-left: 4px; margin: 0 0 4px; }
+[data-part="message"] [data-part="md-blockquote"] { margin: 0 0 12px; padding-left: 16px; border-left: 2px solid var(--fulcrum-border); color: var(--fulcrum-muted); font-style: italic; }
+[data-part="message"] [data-part="md-link"] { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+[data-part="message"] [data-part="md-code-inline"] {
+  padding: 0 5px;
+  border: 0;
+  background: color-mix(in srgb, var(--fulcrum-fg) 7%, transparent);
+  font: 13px/20px var(--achilles-code-font, var(--font-mono));
+}
+[data-part="message"] [data-part="code-fence"] {
+  margin: 0 0 12px;
+  border: 1px solid var(--fulcrum-border);
+  background: var(--fulcrum-surface);
+}
+[data-part="message"] [data-part="code-fence-head"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--fulcrum-border);
+  color: var(--fulcrum-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+[data-part="message"] [data-part="code-fence-head"] button { min-width: 32px; min-height: 24px; padding: 2px 4px; border: 0; color: var(--fulcrum-muted); font-size: 12px; }
+[data-part="message"] [data-part="code-fence-head"] button:hover { color: var(--fulcrum-fg); background: transparent; }
+[data-part="message"] [data-part="code-fence-head"] button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"] {
+  margin: 0;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  font: 13px/20px var(--achilles-code-font, var(--font-mono));
+}
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"]::before { display: none; }
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"] {
+  tab-size: 2;
+}
+[data-part="message"] :is(pre, pre code, time) { font-family: var(--achilles-code-font, var(--font-mono)); }
+[data-part="message"] [data-part="md-code-block"][data-language]::before { margin: -4px 0 8px; font-size: 12px; color: var(--fulcrum-muted); }
+[data-part="message"] [data-part="code-fence"]:has([data-part="md-code-block"][data-size="large"]) {
+  display: contents;
+}
+[data-part="message"] [data-part="code-fence"]:has([data-part="md-code-block"][data-size="large"]) > [data-part="code-fence-head"] {
+  display: none;
+}
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"][data-size="large"] {
+  padding: 0;
+}
+[data-part="message"] [data-part="code-fence"] [data-part="md-code-block"]:not([data-size="large"])::before {
+  display: none;
+  content: none;
+}
+[data-part="message"] [data-part="md-table"] {
+  display: block;
+  max-width: 100%;
+  margin: 0 0 12px;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+}
+[data-part="message"] [data-part="md-table"] :is(th, td) {
+  min-width: 8ch;
+  padding: 6px 12px;
+  border: 1px solid var(--fulcrum-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+[data-part="message"] [data-part="md-table"] th { background: var(--fulcrum-surface); font-weight: 700; }
+[data-part="message"] [data-part="md-table"] :is(th, td)[align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  [data-part="message"] [data-part="code-fence-head"] button { min-width: 44px; min-height: 44px; }
+}
+
+/* fulcrum's timeline rows use content-visibility for long logs; disclosures must remeasure in normal flow. */
+[data-chat-transcript] [data-part="tool"] { display: flow-root; content-visibility: visible; contain: none; }
+/* virtual rows carry inline containment; raw disclosure growth must reach the owner observer after reloads and breakpoint changes. */
+[data-chat-transcript] [data-part="timeline"][data-virtual="true"] > [data-virtual-id] { contain: none !important; }
+[data-chat-transcript] [data-part="tool-summary-preview"] {
+  padding: 8px 12px 8px 12px;
+  color: var(--fulcrum-fg);
+  white-space: pre-wrap;
+}
+[data-chat-transcript] [data-part="tool-summary-preview"] > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-chat-transcript] [data-part="tool-summary-preview"] > div:first-child,
+[data-chat-transcript] [data-part="tool-summary-preview"] > div:last-child { color: var(--fulcrum-muted); }
+[data-chat-transcript] [data-part="tool-summary-preview"] > div + div { margin-top: 2px; }
+/* keep the disclosure in normal flow so its open pre moves every later transcript row. */
+[data-chat-transcript] [data-part="tool-raw"] { display: block; margin: 0 12px 8px 12px; color: var(--fulcrum-muted); }
+[data-chat-transcript] [data-part="tool-raw"] summary { cursor: pointer; min-height: 24px; }
+[data-chat-transcript] [data-part="tool-raw"] summary:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 2px; }
+[data-chat-transcript] [data-part="tool-raw"] pre { max-height: 40vh; margin: 8px 0 0; color: var(--fulcrum-fg); white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  [data-chat-transcript] [data-part="tool-header"] { grid-template-columns: 12px minmax(0, 1fr) auto; grid-template-rows: 24px 24px; row-gap: 0; }
+  [data-chat-transcript] [data-part="tool-name"] { grid-column: 2; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-chat-transcript] [data-part="tool-summary"] { grid-column: 2; grid-row: 2; }
+  [data-chat-transcript] [data-part="tool-status"] { grid-column: 3; grid-row: 1; }
+}
+[data-chat-transcript] [data-part="tool-foot"] { display: none; }
+
+@media (max-width: 640px) {
+  [data-chat-transcript] [data-compact-tool] > [data-part="tool-header"] { grid-template-columns: 12px minmax(0, 2fr) minmax(0, 3fr) auto; grid-template-rows: auto; }
+  [data-chat-transcript] [data-compact-tool] [data-part="tool-summary"] { grid-column: 3; grid-row: 1; }
+  [data-chat-transcript] [data-compact-tool] [data-part="tool-status"] { grid-column: 4; }
+}
+
+[data-vim-composer] .cm-editor {
+  max-height: calc(10 * 1.55em + var(--inset));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-family: var(--achilles-code-font, var(--font-mono));
+}
+
+[data-vim-composer] .cm-editor.cm-focused { outline: none; }
+[data-vim-composer] .cm-scroller { overflow: auto; font: inherit; }
+[data-vim-composer] .cm-content {
+  min-height: calc(1.55em + 2 * var(--inset));
+  padding: var(--inset);
+  caret-color: var(--fulcrum-accent);
+  font: inherit;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-vim-composer] .cm-line { padding: 0; }
+[data-vim-composer] [data-part="composer-field"][data-empty="true"] .cm-content::before {
+  color: var(--fulcrum-muted);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+[data-vim-composer] .cm-cursor { border-left-color: var(--fulcrum-accent); }
+[data-vim-composer] .cm-selectionBackground,
+[data-vim-composer] .cm-content ::selection { background: var(--fulcrum-accent) !important; color: var(--fulcrum-bg) !important; }
+[data-vim-composer][data-mode="normal"] .cm-fat-cursor,
+[data-vim-composer][data-mode="visual"] .cm-fat-cursor { background: var(--fulcrum-fg); color: var(--fulcrum-bg); }
+
+[data-vim-composer]:not([data-focused]) .cm-fat-cursor,
+[data-vim-composer]:not([data-focused]) .cm-cursor { display: none; }
+
+[data-chat-composer] { --composer-font: var(--achilles-ui-font, var(--font-sans)); }
+:root[data-code-font]:not([data-code-font="system-mono"]) [data-chat-composer] { --composer-font: var(--achilles-code-font, var(--font-mono)); }
+[data-chat-composer] :is([data-part="composer-field"], .cm-editor) { font: var(--achilles-ui-size, 14px) / 1.55 var(--composer-font); }
+[data-chat-composer] [data-part="composer-field"] > textarea { font: inherit; }
+[data-chat-composer] [data-part="composer-field"] > textarea:focus-visible,
+[data-chat-composer] .cm-content:focus-visible { outline: none; box-shadow: none; }
+[data-vim-composer] [data-part="composer-field"] { display: block; min-height: calc(1.55em + 2 * var(--inset)); }
+[data-chat-composer] button[data-slot="button"] { font-size: var(--achilles-ui-size, 14px); font-family: var(--achilles-ui-font, var(--font-sans)); border-radius: var(--radius); }
+[data-chat-composer] button[data-slot="button"]:hover { text-decoration: none; }
+[data-chat-composer] button[data-part="composer-submit"][data-action="steer"]:not([aria-disabled="true"]) { background: var(--background); color: var(--foreground); }
+[data-chat-composer] button[data-part="composer-stop"] { min-width: 0; }
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  [data-chat-composer] button[data-slot="button"], [data-part="approval"] button { min-height: 40px; }
+  [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
+}
