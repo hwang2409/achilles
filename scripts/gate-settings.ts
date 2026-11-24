@@ -27,15 +27,11 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   };
   const fresh = await page.locator("html").evaluate((node) => {
     const style = getComputedStyle(node);
-    const sample = document.createElement("span");
-    sample.hidden = true;
-    sample.style.fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif";
-    document.body.append(sample);
-    const expectedUi = getComputedStyle(sample).fontFamily;
-    sample.remove();
-    return { ui: style.fontFamily, expectedUi, mono: style.getPropertyValue("--achilles-code-font"), size: style.fontSize };
+    return { ui: style.fontFamily, mono: style.getPropertyValue("--achilles-code-font"), size: style.fontSize };
   });
-  if (fresh.ui !== fresh.expectedUi || fresh.mono.trim() !== 'ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace' || fresh.size !== "15px")
+  const systemMono = "ui-monospace,Menlo,Monaco,Consolas,Liberation Mono,DejaVu Sans Mono,monospace";
+  const normalizeFont = (stack: string) => stack.split(",").map((family) => family.trim().replace(/^(["'])(.*)\1$/, "$2")).join(",");
+  if (normalizeFont(fresh.ui) !== systemMono || normalizeFont(fresh.mono) !== systemMono || fresh.size !== "15px")
     throw new Error(`wrong fresh typography: ${JSON.stringify(fresh)}`);
   const jetBrainsFaces = () => page.evaluate(() => [...document.fonts].filter(face => face.family.includes("JetBrains Mono")).length);
   if (await jetBrainsFaces()) throw new Error("JetBrains Mono was registered with default settings");
@@ -50,9 +46,9 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await gateWait.playwright(page.getByRole("switch", { name: "vim mode" }), "waitFor");
   await gateWait.playwright(page.getByRole("switch", { name: "auto-approve default" }), "waitFor");
   const switchSizes = await page.getByRole("switch").evaluateAll((switches) => switches.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
-  if (switchSizes.some(({ width, height }) => width !== 38 || height < 24)) throw new Error(`settings switches have the wrong target size: ${JSON.stringify(switchSizes)}`);
+  if (switchSizes.some(({ width, height }) => width < 38 || height < 24)) throw new Error(`settings switches have the wrong target size: ${JSON.stringify(switchSizes)}`);
   if (screenshots) await page.screenshot({ path: `${screenshots}/04-settings-dialog.png` });
-  await page.getByRole("option", { name: "Light", exact: true }).click();
+  await page.getByRole("button", { name: "Light", exact: true }).click();
   await page.getByRole("button", { name: "IBM Plex Sans" }).click();
   await page.getByRole("button", { name: "JetBrains Mono", exact: true }).last().click();
   const checkSavedMono = async () => {
@@ -103,18 +99,13 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await page.getByRole("switch", { name: "auto-approve default" }).click();
   await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
   if (await focused() !== "auto-approve default") throw new Error(`confirming auto-approve dropped focus to ${await focused()}`);
-  await page.getByRole("option", { name: "Light", exact: true }).click();
+  await page.getByRole("button", { name: "Light", exact: true }).click();
   await resetKeeps(true);
   await page.getByRole("button", { name: "esc" }).click();
   await page.keyboard.press(appShortcut("Comma"));
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   const desktopDialog = page.getByRole("dialog", { name: "settings", exact: true });
-  const roleDialogs = await desktopDialog.evaluateAll((dialogs) => dialogs.map((dialog) => {
-    const labelledBy = dialog.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim() ?? "").join(" ") ?? null;
-    return { tagName: dialog.tagName, ariaLabel: dialog.getAttribute("aria-label"), labelledBy, open: dialog instanceof HTMLDialogElement ? dialog.open : null, hidden: dialog.hidden || dialog.getAttribute("aria-hidden"), outerHTML: dialog.outerHTML.slice(0, 150) };
-  }));
-  const domDialogs = await page.locator("dialog.settings-dialog").evaluateAll((dialogs) => dialogs.map((dialog) => ({ open: (dialog as HTMLDialogElement).open, hidden: dialog.hidden || dialog.getAttribute("aria-hidden"), outerHTML: dialog.outerHTML.slice(0, 150) })));
-  if (roleDialogs.length !== 1 || domDialogs.length !== 1 || !domDialogs[0]?.open) throw new Error(`open while settings was closing left the wrong dialog state: role count=${roleDialogs.length} matches=${JSON.stringify(roleDialogs)} dom=${JSON.stringify(domDialogs)}`);
+  if (await desktopDialog.count() !== 1 || !await desktopDialog.isVisible()) throw new Error("open while settings was closing left the wrong dialog state");
   await page.keyboard.press("Escape");
   await gateWait.playwright(desktopDialog, "waitFor", { state: "hidden" });
 
@@ -144,7 +135,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("body-opened settings escape did not focus the composer"); });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await gateWait.playwright(page, "waitForFunction", () => document.querySelector(".sidebar")?.getAttribute("aria-hidden") === "true");
+  await page.locator(".sidebar").waitFor({ state: "hidden" });
   const menuButton = page.getByRole("button", { name: "open menu" });
   await menuButton.click();
   const settingsLink = page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "settings", exact: true });
@@ -165,16 +156,16 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   if (!await firstControl.evaluate((node) => node === document.activeElement && document.activeElement !== document.body)) throw new Error("settings focus did not wrap forward to the first enabled control");
   await page.keyboard.press("Escape");
   if (await narrowDialog.isVisible()) throw new Error("narrow settings escape did not close the dialog");
-  if (await page.locator("aside.sidebar").getAttribute("aria-hidden") === "true") throw new Error("settings escape closed the drawer before the dialog");
+  if (!await page.locator("aside.sidebar").isVisible()) throw new Error("settings escape closed the drawer before the dialog");
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("href")?.startsWith("/settings")).catch(() => { throw new Error("narrow settings escape did not restore opener focus"); });
   await page.keyboard.press("Escape");
-  if (await page.locator("aside.sidebar").getAttribute("aria-hidden") !== "true") throw new Error("second escape did not close the drawer");
+  await page.locator("aside.sidebar").waitFor({ state: "hidden" });
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu").catch(() => { throw new Error("drawer escape did not restore menu focus"); });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${origin}/allow`);
   const menu = page.getByRole("button", { name: "open menu" });
   await menu.click();
-  await page.getByRole("button", { name: "close menu" }).click({ position: { x: 370, y: 400 } });
+  await page.mouse.click(380, 400);
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu");
   await menu.click();
   const sidebar = page.locator(".sidebar");

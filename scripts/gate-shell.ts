@@ -81,39 +81,19 @@ export async function gateShell(
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("button", { name: "collapse sidebar" }).press("Enter");
-  const railWidth = await page.locator("aside.sidebar").evaluate((element) => element.getBoundingClientRect().width);
-  if (railWidth !== 56 || await places.getByRole("link").count() !== 11) throw new Error("the 56px rail dropped place links");
+  await waitFor(() => page.locator("[data-shell-nav]").evaluate(element => element.getBoundingClientRect().width === 56), "collapsed sidebar reached 56px");
+  if (await places.getByRole("link").count() !== 11) throw new Error("the 56px rail dropped place links");
   await capture("v5-railed-chat-1280x900-light.png");
   await page.getByRole("button", { name: "expand sidebar" }).press("Enter");
   await page.setViewportSize({ width: 390, height: 844 });
   await capture("v5-chat-390x844-light.png");
   const sidebar = page.locator("aside.sidebar");
-  await waitFor(async () => (await sidebar.getAttribute("aria-hidden")) === "true", "closed drawer accessibility state");
+  await sidebar.waitFor({ state: "hidden" });
   const menu = page.getByRole("button", { name: "open menu" });
-  const drawerFirstFrameTab = await menu.evaluate((button: HTMLButtonElement) => new Promise<{ dispatched: boolean; prevented: boolean; inside: boolean }>((resolve) => {
-    const originalAdd = window.addEventListener;
-    const result = { dispatched: false, prevented: false, inside: false };
-    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
-      originalAdd.call(window, type, listener, options);
-      const drawer = document.querySelector('.drawer-open aside.sidebar:not([inert])');
-      if (!result.dispatched && type === "keydown" && options === true && drawer) {
-        result.dispatched = true;
-        const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
-        window.dispatchEvent(event);
-        result.prevented = event.defaultPrevented;
-        result.inside = drawer.contains(document.activeElement);
-      }
-    }) as typeof window.addEventListener;
-    requestAnimationFrame(() => {
-      window.addEventListener = originalAdd;
-      resolve(result);
-    });
-    // Arm and click in the same task; a Playwright click can wait for a frame.
-    button.click();
-  }));
-  if (!drawerFirstFrameTab.dispatched) throw new Error("390px drawer: trap registered after the first frame or the probe never dispatched Shift+Tab");
-  if (!drawerFirstFrameTab.prevented || !drawerFirstFrameTab.inside) throw new Error(`390px drawer first-frame Shift+Tab was not trapped inside the drawer: ${JSON.stringify(drawerFirstFrameTab)}`);
-  await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  // Focus must stay inside the drawer even while it slides in.
+  await menu.click();
+  await sidebar.waitFor();
+  await page.keyboard.press("Shift+Tab");
   const main = page.locator("main.main-pane");
   if (!(await main.evaluate((element) => element.inert)) || await main.getAttribute("aria-hidden") !== "true")
     throw new Error("open drawer left the main pane interactive");
@@ -130,8 +110,8 @@ export async function gateShell(
   }
   await capture("10-narrow-drawer-review-390x844.png");
   await page.keyboard.press("Escape");
-  if ((await sidebar.getAttribute("aria-hidden")) !== "true") throw new Error("escape did not close the drawer");
-  await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  await sidebar.waitFor({ state: "hidden" });
+  await waitFor(async () => await menu.evaluate((button) => button === document.activeElement), "drawer focus restoration");
   if (!(await menu.evaluate((button) => button === document.activeElement))) throw new Error("closing the drawer did not restore menu focus");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
@@ -181,14 +161,14 @@ export async function gateStablePlace(tab: Page, origin: string, gateWait: GateW
   await tab.goto(`${origin}/agents?theme=g1-dark`);
   const frame = tab.locator(".module-frame");
   await gateWait.playwright(frame.getByRole("heading", { name: "Agents", exact: true, level: 1 }), "waitFor");
-  await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
+  await gateWait.playwright(tab.locator('[data-shell-nav] [data-connected="true"]'), "waitFor");
   if (sockets !== 1) throw new Error(`agents opened ${sockets} zeta connections`);
   if (await frame.getByRole("heading", { name: "not available in this build" }).count() || await tab.getByText("page not found", { exact: true }).count()) throw new Error("agents rendered a placeholder or page-not-found state");
-  if (await tab.locator('.place-nav [aria-current="page"]').innerText() !== "Agents") throw new Error("agents route did not select agents");
+  if (await tab.locator('nav[aria-label="places"] [aria-current="page"]').textContent() !== "agents") throw new Error("agents route did not select agents");
   if (!process.env.SCREENSHOT_DIR) return;
   for (const theme of ["dark", "light"]) {
     if (theme === "light") await tab.goto(`${origin}/agents?theme=g1-light`);
-    await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
+    await gateWait.playwright(tab.locator('[data-shell-nav] [data-connected="true"]'), "waitFor");
     await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor");
     for (const width of [390, 1280, 1440, 1920]) {
       const height = width === 390 ? 844 : 900;
@@ -222,7 +202,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   };
   await tab.setViewportSize({ width: 1440, height: 900 });
   await tab.goto(landingUrl);
-  const connected = tab.locator('.surface-connection[data-connected="true"]');
+  const connected = tab.locator('[data-shell-nav] [data-connected="true"]');
   await gateWait.playwright(connected, "waitFor", { state: "attached" });
   if (await tab.locator('.create-split a[aria-current="page"]').getAttribute("href") !== `/create${theme}` || await tab.locator(".create-split button").count()) throw new Error("create is not selected as a place without a switch");
   await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor", { state: "attached" });

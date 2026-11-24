@@ -67,7 +67,7 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await picker.selectOption("run");
     await main.getByRole("textbox", { name: "task" }).fill(task);
     await main.locator(spawnButton).click();
-    const dialog = main.getByRole("dialog");
+    const dialog = main.getByRole("alertdialog");
     await dialog.getByText(root, { exact: true }).waitFor();
     await dialog.getByText("inherited cwd", { exact: true }).waitFor();
     await capture(main, "spawn-review-1440");
@@ -91,7 +91,7 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     const review = main.locator(cancelButton);
     // The form is no longer needed; preserve room for the selected run in narrow layouts.
     await main.getByRole("button", { name: "close spawn form" }).click();
-    const name = async (tab: Page) => (await tab.getByRole("dialog").locator(".confirmation-proof strong").innerText()).trim();
+    const name = async (tab: Page) => (await tab.getByRole("alertdialog").locator("[data-confirmation-proof] strong").innerText()).trim();
     await review.click();
     await capture(main, "cancel-review-1440");
     await main.keyboard.press("Escape");

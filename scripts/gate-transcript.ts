@@ -282,22 +282,23 @@ export async function gateTranscript(
       if (await sheet.locator("[data-chat-transcript]").evaluate((element) => element.clientHeight <= 0)) throw new Error("390px page chat jump sheet has no usable transcript height");
     }
     await waitForJump(async () => await page.evaluate((narrow) => {
-      const shell = document.querySelector<HTMLElement>(".app-shell");
+      const shell = document.querySelector<HTMLElement>("[data-shell]");
       const main = document.querySelector<HTMLElement>(".main-pane");
-      const sidebar = document.querySelector<HTMLElement>(".sidebar");
-      const scrim = document.querySelector<HTMLElement>(".drawer-scrim");
+      const sidebar = document.querySelector<HTMLElement>("[data-shell-nav]");
+      const scrim = document.querySelector<HTMLElement>('[data-slot="sheet-overlay"]');
       const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]');
-      if (!shell || !main || !sidebar || !scrim || !control || !control.isConnected || !control.getClientRects().length) return false;
+      if (!shell || !main || !control || !control.isConnected || !control.getClientRects().length) return false;
       const style = getComputedStyle(control);
-      const scrimStyle = getComputedStyle(scrim);
+      const scrimStyle = scrim && getComputedStyle(scrim);
       if (style.visibility === "hidden" || style.opacity === "0" || style.pointerEvents === "none") return false;
-      if (narrow && (sidebar.getBoundingClientRect().right > 0 || scrimStyle.opacity !== "0" || scrimStyle.pointerEvents !== "none")) return false;
+      if (narrow && sidebar && sidebar.getBoundingClientRect().right > 0) return false;
+      if (narrow && scrimStyle && (scrimStyle.opacity !== "0" || scrimStyle.pointerEvents !== "none")) return false;
       const rect = control.getBoundingClientRect();
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       const dialog = hit?.closest("[role=dialog], dialog");
       const pageChatSheet = document.querySelector<HTMLElement>("#page-chat-sheet");
-      return !shell.classList.contains("drawer-open") && !main.inert && main.getAttribute("aria-hidden") !== "true" &&
-        (hit === control || control.contains(hit)) && !hit?.closest(".drawer-scrim") && (!dialog || dialog === pageChatSheet);
+      return !shell.querySelector('[aria-controls="surface-sidebar"][aria-expanded="true"]') && !main.inert && main.getAttribute("aria-hidden") !== "true" &&
+        (hit === control || control.contains(hit)) && !hit?.closest('[data-slot="sheet-overlay"]') && (!dialog || dialog === pageChatSheet);
     }, width <= 760), `responsive shell and unobscured jump control at ${width}`);
     const geometry = await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').evaluate((control) => {
       const rect = (element: Element) => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height }; };

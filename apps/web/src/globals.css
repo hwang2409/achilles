@@ -235,10 +235,27 @@
   --fulcrum-gap: 12px;
 }
 
+@media (max-width: 760px), (max-height: 500px) {
+  :root { --g1-page-gutter: 16px; }
+}
+
 @layer base {
   * { @apply border-border; }
+  html {
+    background: var(--background);
+    font-family: var(--achilles-ui-font, var(--font-sans));
+    font-size: var(--achilles-ui-size, 15px);
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html, body, #root { height: 100%; overflow: hidden; }
   body { @apply bg-background text-foreground; }
+  kbd, code, pre { font-family: var(--achilles-code-font, var(--font-mono)); }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  /* Native dialogs left on routes use the user-agent centering behavior. */
+  dialog:modal { margin: auto; }
 }
 
 /* Fulcrum / CodeMirror adapter — public parts and editor internals. */

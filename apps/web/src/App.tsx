@@ -41,7 +41,6 @@ import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
 import { continuationNotification } from "./chat/continuation";
-import "./shell.css";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 
 export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
@@ -607,14 +606,20 @@ const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
   const text = connectionFailure(state) ?? "connecting to zeta…";
-  if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="connection-banner" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><Button variant="outline" onClick={() => connection.retryNow()}>retry now</Button></div>; }
+  if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="flex shrink-0 items-center justify-between gap-4 border-b border-s-2 border-destructive/30 bg-destructive/10 px-4 py-2 text-xs sm:px-6" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><Button variant="outline" onClick={() => connection.retryNow()}>retry now</Button></div>; }
   const command = connection.startCommand;
   // a short heading, the full sentence as body text; the time of the last try (not a rising attempt
   // count alone, which read as a failure) plus the count itself, so a click has something to confirm it worked.
   const heading = connectionHeadings[state.phase];
   const attempt = "attempt" in state ? state.attempt : 0;
   const status = "retryAt" in state
-    ? <>retrying by itself · last try <span className="local-time">{new Date(state.retryAt - backoff(attempt)).toLocaleTimeString().toLowerCase()}</span> · tried {attempt} time{attempt === 1 ? "" : "s"}</>
+    ? <>retrying by itself · last try <span className="whitespace-nowrap">{new Date(state.retryAt - backoff(attempt)).toLocaleTimeString().toLowerCase()}</span> · tried {attempt} time{attempt === 1 ? "" : "s"}</>
     : "retrying…";
-  return <section className="full-state connection-state" role="alert"><p><span className="retry-mark" />{status}</p><h1>{heading ?? text}</h1>{heading && <p className="connection-detail">{text}</p>}{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<Button onClick={() => connection.retryNow()}>retry now</Button></section>;
+  return <section className="m-auto w-full max-w-[720px] min-w-0 overflow-auto p-4 sm:p-8" role="alert">
+    <p className="text-muted-foreground"><span className="me-3 inline-block size-2 bg-warning" aria-hidden="true" />{status}</p>
+    <h1 className="mt-6 mb-3 max-w-[26ch] text-[clamp(26px,4vw,42px)] font-semibold max-h-[420px]:mt-3">{heading ?? text}</h1>
+    {heading && <p className="mb-3 text-muted-foreground">{text}</p>}
+    {state.phase === "not_running" && <div className="grid grid-cols-[1fr_auto] items-center border-s-2 border-s-success bg-card"><span className="px-3 text-muted-foreground">shell</span><Button variant="ghost" type="button" onClick={() => navigator.clipboard.writeText(command)}>copy</Button><code className="col-span-full border-t px-3 py-4 whitespace-pre-wrap [overflow-wrap:anywhere]">$ {command}</code></div>}
+    <Button className="mt-4" onClick={() => connection.retryNow()}>retry now</Button>
+  </section>;
 }

@@ -208,7 +208,7 @@ test("a build that needs you is counted once in the chats badge", async () => {
   const build = { ...chat, last_state: "approval" as const };
   const shell = mountShell({ needsYou: 1, sessionId: build.session_id, waiting: 1, chats: [build] });
   try {
-    const badge = () => shell.view.container.querySelector('a[aria-label="chats"] .waiting-count')?.textContent;
+    const badge = () => shell.view.container.querySelector('a[aria-label="chats"] [data-waiting-count]')?.textContent;
     for (let i = 0; i < 50 && !shell.view.container.querySelector(".chat-row"); i++) await flush();
     expect(badge()).toBe("1");
   } finally { shell.close(); }
