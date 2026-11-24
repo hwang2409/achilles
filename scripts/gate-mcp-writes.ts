@@ -12,7 +12,7 @@ const config = (name: string, enabled: boolean, args: string[]) => ({ servers: {
   [name]: { transport: "stdio", command: "echo", args, enabled, env: { FIXTURE_VALUE: canaries[1] } },
 } });
 const connection = (scope: string, name: string) => `/connections/${scope}/${name}`;
-const confirm = (tab: Page) => tab.locator(".confirmation-primary");
+const confirm = (tab: Page) => tab.locator("[data-confirmation-action]");
 const action = (tab: Page, kind: "enabled" | "trusted" | "remove") => tab.locator(`[data-write-surface="mcp.${kind}"]`);
 const settings = (tab: Page) => tab.locator("[aria-label='configuration actions']");
 

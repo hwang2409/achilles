@@ -54,7 +54,7 @@ export function useModalFocus(open: boolean, container: RefObject<HTMLElement | 
     const node = container.current;
     if (!node) return;
     const key = (event: KeyboardEvent) => {
-      if (nativeModal(event)) return;
+      if (nativeModal(event) || event.composedPath().some(target => target instanceof Element && !node.contains(target) && target.matches('[role="dialog"][aria-modal="true"], [data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="alert-dialog-content"]'))) return;
       wrapTab(event, node);
     };
     window.addEventListener("keydown", key, true);

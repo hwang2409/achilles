@@ -18,7 +18,7 @@ const choose = async (tab: Page, label: string, option: string) => {
 const button = (tab: Page, name: string) => tab.getByRole("button", { name, exact: true });
 const review = async (tab: Page) => {
   await button(tab, "review connection").click(opts);
-  await tab.getByRole("dialog", { name: "review new connection" }).waitFor(opts);
+  await tab.getByRole("alertdialog", { name: "review new connection" }).waitFor(opts);
   if (await button(tab, "add connection").isEnabled()) throw new Error("add review bypasses scope proof");
 };
 const confirm = async (tab: Page) => {
