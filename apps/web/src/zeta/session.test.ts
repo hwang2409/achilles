@@ -67,13 +67,14 @@ describe("openHomeSession", () => {
       methods.push(method);
       if (method === "status") return methods.length === 1 ? { session: { session_id: "other" }, state: "running" } : { state: "idle" };
       if (method === "resume" && ++resumes === 1) throw Object.assign(new Error("a turn is already running"), { code: -32004 });
-      if (method === "resume") return { session: { name: "existing" } };
+      if (method === "resume") return { session: { name: "existing", cwd: "/stored/dir" } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       throw new Error(`unexpected ${method}`);
     } };
 
     const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow").catch((caught: Error) => ({ error: caught.message }));
-    expect(result).toMatchObject({ id: "existing", name: "existing", rebind: false });
+    // the stored session cwd wins over the requested one: a resumed session keeps its own directory
+    expect(result).toMatchObject({ id: "existing", name: "existing", cwd: "/stored/dir", rebind: false });
     expect(methods).toEqual(["status", "resume", "status", "resume", "session_settings"]);
   });
 });

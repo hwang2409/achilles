@@ -3,11 +3,12 @@ import { GenericBody, ToolResultBlocks, useItem, type ToolBodyProps } from "@ful
 import { ToolSummaryBody, toolArgumentSummary, toolErrorLine } from "./ToolSummary";
 
 const OpenTools = createContext<Set<string> | null>(null);
+const SessionCwd = createContext<string | null>(null);
 
 // Rows may remount during virtual scrolling or replay; disclosure belongs to the open chat.
-export function ToolDisclosure({ sessionId, children }: { sessionId: string; children: ReactNode }) {
+export function ToolDisclosure({ sessionId, cwd = null, children }: { sessionId: string; cwd?: string | null; children: ReactNode }) {
   const open = useMemo(() => new Set<string>(), [sessionId]);
-  return <OpenTools.Provider value={open}>{children}</OpenTools.Provider>;
+  return <OpenTools.Provider value={open}><SessionCwd.Provider value={cwd}>{children}</SessionCwd.Provider></OpenTools.Provider>;
 }
 
 const withNotice = (text: string, notice: string) => `${text}${text && !text.endsWith("\n") ? "\n" : ""}${notice}`;
@@ -33,6 +34,7 @@ function readText(source: ToolBodyProps["output"]): string {
 
 export function CompactTool({ id }: { id: string }) {
   const choices = useContext(OpenTools);
+  const cwd = useContext(SessionCwd);
   const item = useItem(id);
   const [open, setOpen] = useState(() => choices?.has(id) ?? false);
   const [opened, setOpened] = useState(open);
@@ -41,7 +43,7 @@ export function CompactTool({ id }: { id: string }) {
   const approval = item.approval?.type === "approval_end" ? item.approval.decision : undefined;
   const status = approval === "deny" ? "denied" : state === "streaming" ? "running" : state === "error" ? "failed" : state;
   const name = item.tool_call.name.trim().slice(0, 260) || "unnamed tool";
-  const summary = toolArgumentSummary(item);
+  const summary = toolArgumentSummary(item, cwd);
   const duration = item.view?.durationMs;
   return <details className="compact-tool" open={open} data-part="tool" data-kind="tool" data-id={id} data-tool={name} data-tool-view={item.view?.kind} data-state={state}>
       <summary data-part="tool-header" onClick={(event) => {
