@@ -10,11 +10,6 @@ import { type LibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, savedNotice } from
 import "./library.css";
 
 const tabs = surfaceRoutes.filter(({ id }) => id === "skills" || id === "agent-profiles");
-const tierRules = {
-  project: "wins over home",
-  home: "wins over packaged",
-  packaged: "read-only",
-};
 const narrow = "(max-width: 760px), (max-height: 500px)";
 const yesNo = (value: boolean) => value ? "yes" : "no";
 const PAGE = { scope: "effective", limit: 100 } as const;
@@ -371,12 +366,12 @@ function LibraryList({ view, kind, title, live, selected, query, onQuery, more, 
       <span role="status">{term ? `${matches.length} of ${rows.length}` : matches.length} {partial ? "loaded" : term ? "" : "found"}</span>
     </div>
     {live && !rows.some(({ source }) => source === "project") &&
-      <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} found · zeta loads them from .zeta/{kind === "skills" ? "skills" : "agents"} in the open chat's project</p>}
+      <p className="library-hint">No project {kind === "skills" ? "skills" : "profiles"} found. Zeta looks in .zeta/{kind === "skills" ? "skills" : "agents"} in the open chat's project</p>}
     {matches.length === 0 && <p className="library-no-matches">{partial ? "no matches in the loaded rows. load more to search the rest." : "no matches. try a different search."}</p>}
     {sourceTiers.map((source) => {
       const group = matches.filter((row) => row.source === source);
       return group.length > 0 && <section className="library-group" key={source} aria-labelledby={`library-${source}`}>
-        <h2 id={`library-${source}`}>{source} <small>{tierRules[source]} · {group.length}{partial && " loaded"}{problemCount(group)}</small></h2>
+        <h2 id={`library-${source}`}>{source[0].toUpperCase() + source.slice(1)} <small>{group.length}{partial && " loaded"}{problemCount(group)}</small></h2>
         <ul>
           {group.map((row) => <li key={row.name}>
             {/* detail 0: activated by Enter or Space, not a pointer. */}
@@ -486,7 +481,7 @@ function EditEntry({ edit, row, body }: { edit: EditControl; row: CatalogRow; bo
 
 function problemCount(rows: CatalogRow[]) {
   const count = rows.filter((row) => row.diagnostics?.items.length).length;
-  return count > 0 && ` · ${count} ${count === 1 ? "has" : "have"} a problem`;
+  return count > 0 && `, ${count} with warnings`;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
