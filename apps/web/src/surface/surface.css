@@ -1,7 +1,7 @@
 /* Graphite Sharp shell navigation. */
 .sidebar-scroll { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: auto; scrollbar-width: thin; }
 .sidebar-destinations { display: contents; }
-.sidebar-destinations > .chat-list { flex: 0 0 auto; max-height: 170px; }
+
 .brand-row > .surface-connection { display: inline-flex; align-items: center; gap: var(--g1-space-1); margin-left: auto; padding: 0; font-size: var(--g1-type-meta); font-variant-numeric: tabular-nums; }
 .surface-actions, .surface-search { flex: none; display: grid; gap: var(--g1-space-2); margin: 0 var(--g1-sidebar-padding); }
 .surface-actions { padding-block: var(--g1-space-2) var(--g1-space-1); row-gap: 0; }
@@ -16,7 +16,8 @@
 .surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0; color: var(--fulcrum-muted); border-color: transparent; }
 .surface-search .palette-button > span { display: none; }
 .place-nav { flex: none; margin: 0 var(--g1-sidebar-padding) var(--g1-space-3); }
-.place-nav h2 { margin: var(--g1-space-3) 0 var(--g1-space-1); padding-inline: var(--g1-space-2); font-size: var(--g1-type-meta); font-weight: 600; color: var(--g1-muted); }
+.place-nav h2, .chat-group h2 { font-size: var(--g1-type-meta); font-weight: 600; color: var(--g1-muted); }
+.place-nav h2 { margin: var(--g1-space-3) 0 var(--g1-space-1); padding-inline: var(--g1-space-2); }
 .place-nav h2::first-letter, .place-link > span::first-letter { text-transform: uppercase; }
 .place-link > span { display: block; }
 .place-link { display: flex; align-items: center; gap: var(--g1-space-2); min-height: var(--g1-nav-row-height); padding: 0 var(--g1-space-2); font-size: var(--g1-type-small); line-height: 1.25; }
@@ -84,8 +85,8 @@
   .sidebar .chat-row-rename { min-width: 44px; top: 0; }
   /* the whole drawer scrolls here, so it keeps rows below the two sticky heads (see .chat-list in shell.css) */
   .sidebar-scroll { display: contents; }
-  .sidebar-destinations { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; scroll-padding-top: 80px; }
-  .sidebar-destinations > .chat-list { max-height: none; overflow: visible; }
+  .sidebar-destinations { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; scrollbar-width: thin; scroll-padding-top: 80px; }
+  .sidebar-destinations > .chat-list { flex: 1 0 auto; overflow: visible; }
   .sidebar .chat-group h2 { top: 44px; }
   .surface-search .chat-search { padding-right: 48px; }
   .surface-search .chat-search input { min-height: 44px; }

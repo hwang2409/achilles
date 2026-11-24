@@ -92,12 +92,12 @@ function groupLabel(value: string) {
   return date.toLocaleDateString(undefined, { month: "long", year: date.getFullYear() === now.getFullYear() ? undefined : "numeric" }).toLowerCase();
 }
 
-// one lowercase style for every age: "10:23 pm", "mon", "nov 7"
+// use the locale’s time and date casing.
 export function timeLabel(value: string) {
   const date = new Date(value);
   const group = groupLabel(value);
   const label = group === "today" ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : group === "yesterday" || group === "this week" ? date.toLocaleDateString([], { weekday: "short" }) : date.toLocaleDateString([], { month: "short", day: "numeric" });
-  return label.toLowerCase();
+  return label;
 }
 
 // the one GET /api/chats loader: the sidebar list and the palette each own a list over it
@@ -308,7 +308,7 @@ function ChatRow({ chat, build, onScreen, current, active, index, query, onSelec
   const state = chat.purpose === "page_build" ? buildTone(build) : chat.last_state;
   const label = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
   const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
-  const meta = <span><span className="chat-row-meta" title={label ? `${label} · ${chat.page_title}` : chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
+  const meta = <span><span className="chat-row-meta" title={label ? `${label} · ${chat.page_title}` : chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div ref={seen} id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>

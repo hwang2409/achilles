@@ -67,6 +67,7 @@
   --g1-space-8: 32px;
   --g1-space-10: 40px;
   --g1-sidebar-padding: var(--g1-space-2);
+  --g1-sidebar-inset: calc(var(--g1-sidebar-padding) + var(--g1-space-2));
   --g1-nav-row-height: var(--g1-space-7);
   --g1-page-gutter: var(--g1-space-6);
   --g1-page-padding: var(--g1-space-6) var(--g1-page-gutter);

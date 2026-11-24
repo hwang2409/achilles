@@ -3,17 +3,17 @@
 .brand-mark { position: relative; width: 20px; height: 20px; flex: none; background: var(--g1-primary); }
 
 .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--g1-border); background: var(--g1-bg-subtle); overflow: hidden; z-index: 4; }
-.chat-group h2 { position: sticky; top: 36px; z-index: 1; height: 36px; box-sizing: border-box; margin: 0; padding: 0 var(--g1-space-3); color: var(--g1-muted); background: var(--g1-bg-subtle); font-size: var(--g1-type-meta); font-weight: 600; line-height: 36px; }
+.chat-group h2 { position: sticky; top: var(--g1-nav-row-height); z-index: 1; height: var(--g1-nav-row-height); box-sizing: border-box; margin: 0; padding: 0 var(--g1-sidebar-inset); background: var(--g1-bg-subtle); line-height: var(--g1-nav-row-height); }
 .chat-group h2::first-letter, .list-head > span::first-letter { text-transform: uppercase; }
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .brand-row { flex: 0 0 44px; display: flex; align-items: center; gap: var(--g1-space-2); padding: 0 var(--g1-space-4); border-bottom: 1px solid var(--g1-border); }
-.list-head { width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--g1-space-3); border: 0; font-size: var(--g1-type-meta); font-weight: 600; color: var(--g1-muted); }
-.chat-row { position: relative; display: block; min-height: var(--g1-nav-row-height); padding: var(--g1-space-1) var(--g1-space-3); }
+.list-head { width: 100%; min-height: var(--g1-nav-row-height); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--g1-sidebar-inset); border: 0; font-size: var(--g1-type-meta); font-weight: 600; color: var(--g1-muted); }
+.chat-row { position: relative; display: grid; min-height: var(--g1-nav-row-height); padding: 0 var(--g1-sidebar-inset); align-content: center; }
 .chat-row:hover { background: var(--g1-hover); }
-.chat-row strong { display: -webkit-box; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 20px; }
-.chat-row > span { display: flex; gap: 4px; min-width: 0; margin-top: 2px; color: var(--g1-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: var(--g1-type-kbd); line-height: 16px; }
+.chat-row strong { display: -webkit-box; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: var(--g1-type-small); line-height: 18px; }
+.chat-row > span { display: flex; gap: 4px; min-width: 0; color: var(--g1-muted); font-size: var(--g1-type-meta); line-height: 16px; }
 .chat-row-meta { overflow: hidden; min-width: 0; white-space: nowrap; text-overflow: ellipsis; }
-.chat-row i { margin-left: auto; flex: 0 0 auto; white-space: nowrap; font-style: normal; }
+.chat-row time { margin-left: auto; flex: 0 0 auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .chat-row.state-running { box-shadow: inset var(--g1-selection-width) 0 var(--g1-accent); }
 .chat-row.state-approval { box-shadow: inset var(--g1-selection-width) 0 var(--g1-warn-fill); }
 .chat-row.state-failed { box-shadow: inset var(--g1-selection-width) 0 var(--g1-danger-mark); }
@@ -40,8 +40,8 @@
 .page-list-error button { min-height: 40px; padding: 8px 0; color: var(--fulcrum-accent); }
 /* no scroll snap here: a row inserted on top re-snapped the list to the old first row, under the sticky heads.
    scroll-padding-top stays: it keeps a focused row (arrow keys, scrollIntoView) below the two sticky heads
-   (36px list head + 36px group head) instead of hidden under them. useOnScreen reads it too: a build row under the heads is not on screen. */
-.chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-padding-top: 72px; }
+   (list head + group head) instead of hidden under them. useOnScreen reads it too: a build row under the heads is not on screen. */
+.chat-list { flex: 1 1 auto; min-height: 80px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--g1-border) transparent; scroll-padding-top: calc(2 * var(--g1-nav-row-height)); }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 2; background: var(--g1-bg-subtle); border-top: 1px solid var(--g1-rule); }
 .transcript [data-part="timeline-scroll"]:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
 /* the rows paint over an outline of the scroll box itself, so its focus ring is a layer of the frame above them */
