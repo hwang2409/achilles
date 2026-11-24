@@ -72,7 +72,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
   const [{ id, transcript, invalid }, setSelection] = useState(selection);
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
   const search = useRef<HTMLInputElement>(null);
-  const detail = useRef<HTMLElement>(null);
+  const backLink = useRef<HTMLAnchorElement>(null);
   const restore = useRef<string | undefined>(undefined);
   const focus = useRef(false);
   useEffect(() => {
@@ -91,7 +91,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
   useLayoutEffect(() => {
     if (focus.current) {
       focus.current = false;
-      if (id) detail.current?.querySelector<HTMLAnchorElement>(".sessions-back")?.focus();
+      if (id) backLink.current?.focus();
       else (restore.current && rowRefs.current.get(restore.current) || search.current)?.focus();
     }
     if (id) restore.current = id;
@@ -110,7 +110,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
       <div className="group grid min-h-0 w-full flex-1 min-[761px]:[@media(min-height:501px)]:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]" data-detail={!!id || invalid}>
         <SessionCatalog result={{ data, error, refreshing, refresh }} online={!!client} id={id} owned={owned} search={search} rowRefs={rowRefs} follow={follow} />
         <DetailPane id={id} row={row} transcript={transcript} invalid={invalid} complete={data.complete} reader={reader}
-          owned={!!row && owned.has(row.id)} detail={detail} follow={follow} continueSession={continueSession} />
+          owned={!!row && owned.has(row.id)} backLink={backLink} follow={follow} continueSession={continueSession} />
       </div>
     </>}
   </ModuleFrame>;
@@ -164,13 +164,13 @@ function SessionCatalog({ result, online, id, owned, search, rowRefs, follow }: 
   </section>;
 }
 
-function DetailPane({ id, row, transcript, invalid, complete, reader, owned, detail, follow, continueSession }: {
+function DetailPane({ id, row, transcript, invalid, complete, reader, owned, backLink, follow, continueSession }: {
   id?: string; row?: SessionRow; transcript: boolean; invalid: boolean; complete: boolean; reader?: SessionsReader;
-  owned: boolean; detail: RefObject<HTMLElement | null>; follow: Follow; continueSession: ContinueSession;
+  owned: boolean; backLink: RefObject<HTMLAnchorElement | null>; follow: Follow; continueSession: ContinueSession;
 }) {
   const back = transcript ? href(id) : href();
-  return <section className="min-w-0 flex flex-col overflow-hidden max-[760px]:group-data-[detail=false]:hidden [@media(max-height:500px)]:group-data-[detail=false]:hidden overflow-auto" ref={detail} tabIndex={-1} aria-label={transcript ? "session transcript" : "session detail"}>
-    {(id || invalid) && <a className="inline-flex min-h-10 items-center text-sm text-accent-foreground hover:underline mx-4 md:mx-8" href={back} onClick={(event) => follow(event, back)}>
+  return <section className="min-w-0 flex flex-col overflow-hidden max-[760px]:group-data-[detail=false]:hidden [@media(max-height:500px)]:group-data-[detail=false]:hidden overflow-auto" tabIndex={-1} aria-label={transcript ? "session transcript" : "session detail"}>
+    {(id || invalid) && <a ref={backLink} className="inline-flex min-h-10 items-center text-sm text-accent-foreground hover:underline mx-4 md:mx-8" href={back} onClick={(event) => follow(event, back)}>
       {transcript ? "← session detail" : "← sessions"}
     </a>}
     {invalid ? <ModuleState kind="failed" title="invalid session link" /> : row ? <SessionDetail key={row.id} row={row} reader={reader} transcript={transcript}
