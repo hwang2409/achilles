@@ -682,6 +682,9 @@ with _database() as db:
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   const dockHead = (tab: Page) => tab.locator("[data-page-chat-head]");
+  const approvalState = (tab: Page, mode: "allow" | "ask") => tab.locator(`[data-page-chat-head][data-approval-mode="${mode}"]`).or(
+    tab.locator("[data-chat-header]").getByText(mode === "allow" ? "Auto-approve" : "Ask before tools", { exact: true })
+  ).filter({ visible: true }).first();
   const modeMenu = (tab: Page) => dockHead(tab).getByRole("button", { name: "page chat options" });
   const modeItem = (tab: Page, name: "create mode" | "run tools without asking") => tab.getByRole("menuitemcheckbox", { name, exact: true });
   const ensureModeMenu = async (tab: Page) => { if (await modeMenu(tab).getAttribute("aria-expanded") === "false") await modeMenu(tab).click(); };
@@ -2881,7 +2884,7 @@ with _database() as db:
   await gateWait.playwright(page.getByText("allow page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await gateWait.playwright(page.locator(\':is([data-chat-header], [data-page-chat-head])[data-approval-mode="allow"]\').filter({ visible: true }).first(), "waitFor", { state: "visible" });
+  await gateWait.playwright(approvalState(page, "allow"), "waitFor", { state: "visible" });
   await awaitApprovalMode("set_settings", allowSession, "allow", "allow-mode session settings");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
   await page.reload();
@@ -2915,7 +2918,7 @@ with _database() as db:
     return Boolean(current && current !== readingChatBeforeReload);
   }, "new allow-mode reading chat");
   const reloadChat = await homeSessionId();
-  await gateWait.playwright(page.locator(\':is([data-chat-header], [data-page-chat-head])[data-approval-mode="allow"]\').filter({ visible: true }).first(), "waitFor", { state: "visible" });
+  await gateWait.playwright(approvalState(page, "allow"), "waitFor", { state: "visible" });
   const reloadBooks = async () => {
     const response = await fetch(`${origin}/api/pages/${createdPage.id}/records/books?field=title&equals=${encodeURIComponent('"Reload Book"')}`, { headers: { Authorization: `Bearer ${readingCredential}` } });
     if (!response.ok) throw new Error(`reload book query failed: ${response.status}`);
@@ -3034,7 +3037,7 @@ with _database() as db:
   await waitFor(async () => Boolean(replyTo("resume")), "reloaded page resumed the chat in the woken turn's setup");
   const wakeAttach = replyTo("resume");
   if (wakeAttach?.result?.attached !== "live_turn") throw new Error(`reload in a woken turn's setup did not attach to it: ${redact(JSON.stringify(wakeAttach?.error ?? { attached: wakeAttach?.result?.attached ?? null }))}`);
-  await gateWait.playwright(page.locator(\':is([data-chat-header], [data-page-chat-head])[data-approval-mode="allow"]\').filter({ visible: true }).first(), "waitFor", { state: "visible" });
+  await gateWait.playwright(approvalState(page, "allow"), "waitFor", { state: "visible" });
   // zeta reports the setup as running, so the page keeps the mode pending; an older zeta reported idle and refused it
   if (replyTo("set_settings") && replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
   if (await page.getByRole("alert").count()) throw new Error(`reload in a woken turn's setup showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
@@ -3046,7 +3049,7 @@ with _database() as db:
   await waitForIdleTurn(page, waitFor);
   const wakeTool = JSON.parse(await Bun.file(control).text()).tool_results?.find((result: { call_id: string }) => result.call_id === "wake-inspect");
   if (!wakeTool || wakeTool.is_error) throw new Error(`the woken turn's page tool did not run on the re-sent binding: ${JSON.stringify(wakeTool ?? null)}`);
-  await gateWait.playwright(page.locator(\':is([data-chat-header], [data-page-chat-head])[data-approval-mode="ask"]\').filter({ visible: true }).first(), "waitFor", { state: "visible", timeout: 20_000 });
+  await gateWait.playwright(approvalState(page, "ask"), "waitFor", { state: "visible", timeout: 20_000 });
   await awaitApprovalMode("set_settings", wakeChat, "ask", "ask mode after the woken turn ended");
   if (await page.getByRole("alert").count()) throw new Error(`the woken turn's end showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
   await restartAchilles("allow");

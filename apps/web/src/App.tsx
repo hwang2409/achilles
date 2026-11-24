@@ -575,7 +575,7 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, createM
   const autoApprove = page.approval_mode === "allow";
   const foldMarkers = (autoApprove || createMode.enabled) && <span className="flex gap-1 @min-[760px]:hidden max-[385px]:hidden">{autoApprove && <Badge variant="outline" role="img" aria-label="auto-approve is on" title="auto-approve is on">Auto</Badge>}{createMode.enabled && <Badge variant="outline" role="img" aria-label="create mode is on" title="create mode is on">Create</Badge>}</span>;
   const routeLabel = page.route === "/" ? "Home" : page.title;
-  return <header data-chat-header="" data-approval-mode={page.approval_mode ?? "ask"} className="@container flex h-12 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 min-[761px]:h-14 min-[761px]:px-6 max-[760px]:pl-[60px]">
+  return <header data-chat-header="" className="@container flex h-12 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 min-[761px]:h-14 min-[761px]:px-6 max-[760px]:pl-[60px]">
     <div className="flex min-w-0 flex-1 items-center gap-2">
       <span className="hidden max-w-[35%] shrink-0 truncate text-xs text-muted-foreground sm:block" title={routeLabel}>{docked ? <>Pages <span aria-hidden="true">/</span> {routeLabel}</> : `${routeLabel} /`}</span>
       {titleNode}
