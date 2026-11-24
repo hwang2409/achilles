@@ -44,30 +44,14 @@
 .vim-guidance [data-part="composer-status"] { flex: 1; min-width: 0; }
 .vim-guidance [data-part="composer-hint"] { display: block; white-space: nowrap; }
 
-[data-part="composer"] .vim-mode-chip {
-  flex: none;
-  min-width: 62px;
-  height: 20px;
-  padding: 0 8px;
-  color: var(--g1-fg-3);
-  border: 1px solid var(--g1-control-border);
-  border-radius: var(--g1-radius-chip);
-  font: 500 var(--g1-type-meta)/18px var(--achilles-ui-font, var(--g1-font-ui));
-  text-align: center;
-}
-.vim-mode-chip:is([data-mode="normal"], [data-mode="visual"]) { background: var(--g1-selected); }
+[data-part="composer"] .vim-mode-chip { flex: none; min-width: 6ch; color: var(--g1-muted); }
 .vim-composer:not([data-focused]) .cm-fat-cursor,
 .vim-composer:not([data-focused]) .cm-cursor { display: none; }
-.vim-composer:not([data-focused]) .vim-mode-chip {
-  border: 1px solid var(--fulcrum-border);
-  background: transparent;
-  color: var(--fulcrum-muted);
-}
 .vim-pending {
   flex: none;
   min-width: 3ch;
   color: var(--fulcrum-fg);
-  font-size: 12px;
+  font-size: inherit;
   text-align: right;
 }
 

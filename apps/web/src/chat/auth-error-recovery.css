@@ -16,7 +16,6 @@
 .chat-auth-error-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--recovery-gap); }
 .chat-auth-error-actions button, .chat-auth-error-actions a { min-height: 52px; max-width: 100%; padding: 6px 20px; text-align: left; overflow-wrap: anywhere; }
 .chat-auth-error-actions button:first-child:not(:disabled) { background: var(--g1-primary); color: var(--g1-primary-text); border-color: var(--g1-primary); font-weight: 700; }
-.chat-auth-error-actions button:not(:disabled):hover { border-color: var(--fulcrum-fg); }
 .chat-auth-error-actions button:disabled { color: var(--fulcrum-muted); cursor: not-allowed; }
 .chat-auth-error-actions a { width: fit-content; display: inline-flex; align-items: center; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-accent); text-decoration: underline; }
 @container (width < 600px) {

@@ -2,13 +2,13 @@
   position: relative; z-index: 1;
   flex: none; min-width: 0;
   padding: var(--g1-space-1) var(--g1-space-4); border-bottom: 1px solid var(--g1-border);
-  font-size: 12px; white-space: nowrap; box-sizing: border-box;
+  font-size: inherit; white-space: nowrap; box-sizing: border-box;
 }
 .page-chat-head strong, .page-chat-choice-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page-chat-title-row { display: flex; align-items: center; gap: 8px; }
-.page-chat-head strong { font-size: 14px; font-weight: 600; }
+.page-chat-head strong { font-size: inherit; font-weight: 600; }
 .page-chat-readouts { padding-inline: var(--g1-space-2); overflow: hidden; text-overflow: ellipsis; }
-.page-chat-new-reason { padding: var(--g1-space-1) var(--g1-space-4); color: var(--g1-muted); font-size: var(--g1-type-meta); }
+.page-chat-new-reason { padding: var(--g1-space-1) var(--g1-space-4); color: var(--g1-muted); font-size: inherit; }
 .page-chat-switcher { display: flex; align-items: center; gap: var(--g1-space-2); flex: 1; min-width: 0; text-align: start; padding-inline-start: 0; border-inline-start-width: 0; }
 .page-chat-title-row > button { min-width: 44px; min-height: 44px; }
 .page-chat-icon { flex: none; font-size: 18px; }
@@ -17,7 +17,7 @@
   position: absolute; inset: calc(100% + 2px) 16px auto auto; width: min(360px, calc(100% - 32px));
   box-sizing: border-box; max-height: min(360px, calc(100cqh - 94px)); overflow: auto; overscroll-behavior: contain;
   background: var(--fulcrum-bg); color: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border);
-  white-space: normal; box-shadow: var(--g1-shadow-overlay);
+  white-space: normal;
 }
 .page-chat-popup[data-kind="modes"] { width: min(326px, calc(100% - 32px)); }
 .page-chat-choice, .page-chat-mode, .page-chat-more {
@@ -25,7 +25,7 @@
   padding: 6px 10px; border: 0; border-bottom: 1px solid var(--fulcrum-border); border-left: 2px solid transparent;
   background: transparent; color: var(--fulcrum-fg); text-align: left;
 }
-.page-chat-choice-title { flex: 1; font-size: 13px; }
+.page-chat-choice-title { flex: 1; font-size: inherit; }
 .page-chat-choice time { color: var(--fulcrum-muted); white-space: nowrap; }
 .page-chat-choice[aria-selected="true"] { border-left-color: var(--fulcrum-accent); background: var(--g1-accent-tint); }
 .page-chat-choice:hover, .page-chat-mode:hover, .page-chat-more:hover { background: var(--fulcrum-surface); }

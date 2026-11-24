@@ -7,15 +7,14 @@ import { approvalIntent, createRoute, surfaceHref, surfaceRoutes, type SurfaceRo
 
 const groups = [...new Set(surfaceRoutes.flatMap((route) => route.group ?? []))];
 
-type PlaceCount = { total?: string; waiting?: number };
+type PlaceCount = { waiting?: number };
 
 function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: SurfaceRoute; count?: PlaceCount }) {
-  const total = count?.total;
   const waiting = count?.waiting || undefined;
   return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={route.label}>
     {route !== createRoute && <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={route.icon} /></svg>}
     <span>{route.label}</span>
-    {(total || waiting) && <small aria-hidden="true">{waiting && <span className="waiting-count">{waiting}</span>}{waiting && total && " · "}{total}</small>}
+    {waiting && <small aria-hidden="true" className="waiting-count">{waiting}</small>}
   </a>;
 }
 
