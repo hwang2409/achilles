@@ -15,7 +15,7 @@
 .surface-search .chat-search:hover { background: color-mix(in srgb, var(--g1-fg) 8%, transparent); }
 .surface-search .chat-search > kbd { display: none; }
 /* the ⌕ glyph is drawn as the rail's 16px line icon (same path as the palette button), so it matches the nav icons */
-.surface-search .chat-search > span { flex: none; width: 16px; height: 16px; font-size: 0; background: var(--g1-fg); opacity: .3; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.2'%3E%3Cpath d='M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l3.5 3.5'/%3E%3C/svg%3E") center / 16px no-repeat; }
+.surface-search .chat-search > span { flex: none; width: 16px; height: 16px; font-size: 0; background: var(--nav-icon); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.2'%3E%3Cpath d='M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l3.5 3.5'/%3E%3C/svg%3E") center / 16px no-repeat; }
 .surface-search .chat-search input::placeholder { color: color-mix(in srgb, var(--g1-fg) 60%, transparent); }
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; }
 /* the hint ends at the row padding, where "off" and the rename pencil end */
@@ -29,10 +29,10 @@
 .place-link { display: flex; align-items: center; gap: var(--g1-space-2); min-height: var(--g1-nav-row-height); padding: 0 var(--g1-space-2); border-radius: var(--g1-radius-control); color: color-mix(in srgb, var(--g1-fg) 60%, transparent); font-size: inherit; font-weight: 500; line-height: 1.25; }
 .place-link .waiting-count { margin-left: auto; color: var(--fulcrum-warn); }
 .place-link .waiting-count::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: 4px; vertical-align: .1em; background: currentColor; }
-.place-link svg { display: block; flex: none; color: var(--g1-fg); opacity: .3; }
+.place-link svg { display: block; flex: none; color: var(--nav-icon); }
 .place-link:hover { background: var(--g1-hover); color: var(--g1-fg); }
 .place-link[aria-current="page"] { background: var(--g1-selected); color: var(--g1-fg); }
-.place-link[aria-current="page"] svg { opacity: 1; }
+.place-link[aria-current="page"] svg { color: var(--g1-fg); }
 .sidebar :is(a, button):focus-visible { outline-offset: -2px; }
 .sidebar > footer { flex: none; display: flex; gap: 4px; padding: var(--g1-space-1) var(--g1-sidebar-padding); }
 .sidebar > footer > button { flex: 1; display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-height: 40px; min-width: 0; padding: 0 var(--g1-space-2); border: 0; color: var(--g1-muted); font-size: inherit; }
@@ -77,8 +77,7 @@
   .sidebar-collapsed .surface-search .palette-button { position: static; min-width: 0; height: auto; min-height: 42px; place-items: center; padding: 0; }
   .sidebar-collapsed .surface-search .palette-button > span { display: flex; }
   .sidebar-collapsed :is(.new-chat, .palette-button) svg { color: var(--fulcrum-muted); }
-  /* in the rail the icon is the whole label, so it does not fade */
-  .sidebar-collapsed .sidebar :is(.place-link svg, .new-chat > span) { opacity: 1; }
+  /* in the rail the icon is the whole label, so it uses the muted text color, not the faded nav icon */
   .sidebar-collapsed .place-link:not([aria-current="page"]) svg { color: var(--fulcrum-muted); }
   .sidebar-collapsed .surface-search .palette-button > kbd { display: none; }
   .sidebar-collapsed .sidebar > footer { padding-inline: 6px; }
