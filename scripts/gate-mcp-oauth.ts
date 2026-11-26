@@ -164,7 +164,9 @@ async function settleDrop(tab: Page, wire: ReturnType<typeof observeWire>) {
     await tab.getByText(/connection lost · sign-in result unknown/).waitFor(options);
     await child.getByRole("button", { name: "deny fixture" }).click(options);
     wire.resume();
-    await state(tab, "failed").waitFor(options);
+    // multi_controller: an attempt belongs to the socket that started it, and zeta ends it when that socket closes.
+    // the reconnected tab reads `idle` and makes no claim about a saved credential.
+    await state(tab, "idle").waitFor(options);
   } finally { wire.resume(); await child.close(); }
 }
 
