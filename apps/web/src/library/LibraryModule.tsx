@@ -171,7 +171,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     if (saved && saved.name !== row.name) setSaved(null);
   }
 
-  // Library tabs stay observers; pressing new or edit takes the controller slot only if it is free.
+  // a tab that fell back to observer (zeta was full) takes control on new or edit, if a slot is free.
   function withControl(then: () => void) {
     if (!write || taking || !write.allowed) return;
     setSaved(null);

@@ -14,10 +14,10 @@ type Problem = { message: string; retry: boolean };
 const tabs: Tab[] = ["memory", "inbox"];
 /** Runs one read as controller, taking control first on an observer tab: see `Connection.withControl`. */
 export type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;
-/** What a reveal needs from the page: the current role, the borrow, and the reveals a dropped socket cut short. */
+/** What a reveal needs from the page: the current role, the take-control call, and the reveals a dropped socket cut short. */
 export type Control = { observer: boolean; withControl: WithControl; dropped: Set<string> };
-// `borrowing`: one borrow at a time. While it runs, every reveal keeps its observer presentation and waits.
-type Borrow = Control & { borrowing: boolean };
+// `taking`: one take-control at a time. While it runs, every reveal keeps its observer presentation and waits.
+type Takeover = Control & { taking: boolean };
 // the selected project's name is looked up by paging the list; past this many pages it shows as unknown.
 const NAME_PAGES = 20;
 const dropped: Problem = { message: "connection dropped; show again", retry: true };
@@ -57,10 +57,10 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
     setPath(href);
   };
   const projects = usePages(client, (reader, cursor, signal) => readProjects(reader, cursor, { signal }), [actions?.refresh], projectReads(client));
-  const [borrowing, setBorrowing] = useState(false);
-  const borrow: Borrow = { ...control, observer: control.observer || borrowing, borrowing: borrowing || !!actions?.working, withControl: async (read) => {
-    setBorrowing(true);
-    try { return await control.withControl(read); } finally { setBorrowing(false); }
+  const [taking, setTaking] = useState(false);
+  const takeover: Takeover = { ...control, observer: control.observer || taking, taking: taking || !!actions?.working, withControl: async (read) => {
+    setTaking(true);
+    try { return await control.withControl(read); } finally { setTaking(false); }
   } };
   const route = parse(path);
   // an unknown view segment shows memory: say so in the address too.
@@ -102,10 +102,10 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
           {tabs.map((tab) => <span key={tab}>{link(hrefOf(route.id, tab), tab === "memory" ? "Memory" : "Inbox", tab === route.tab)}</span>)}
         </nav>
       </div>
-      <ControlNote control={borrow} />
+      <ControlNote control={takeover} />
       {route.tab === "memory"
-        ? <MemoryTab key={route.id} client={client} projectId={route.id} control={borrow} projectName={name} actions={actions} refresh={actions?.refresh ?? 0} />
-        : <InboxTab key={route.id} client={client} projectId={route.id} control={borrow} names={lookup.names} />}
+        ? <MemoryTab key={route.id} client={client} projectId={route.id} control={takeover} projectName={name} actions={actions} refresh={actions?.refresh ?? 0} />
+        : <InboxTab key={route.id} client={client} projectId={route.id} control={takeover} names={lookup.names} />}
     </div>
   </ModuleFrame>;
 }
@@ -131,7 +131,7 @@ function useProjectLookup(client: ZetaClient, id: string | null, listed: Project
           cursor = page.nextCursor;
           if (cursor === null || page.rows.some((row) => row.id === id)) break;
         }
-      } catch { return; } // failed or cut short by a borrow: it stays "reading" and runs again on the next client
+      } catch { return; } // failed or cut short by taking control: it stays "reading" and runs again on the next client
       if (abort.signal.aborted) return;
       setSearched({ id, rows, state: rows.some((row) => row.id === id) ? "found" : cursor === null ? "missing" : "unknown" });
     })();
@@ -149,7 +149,7 @@ function usePages<T extends { id: string }>(client: ZetaClient, load: (client: Z
   const [view, setView] = useState<{ rows: T[]; cursor: string | null; oldFormat: boolean } | Problem | null>(null);
   const [more, setMore] = useState<"idle" | "loading" | Problem>("idle");
   const live = useRef<AbortController | null>(null);
-  // `client` is not a dependency: a borrow of control swaps the socket, and the same rows stay valid. The swap closes
+  // `client` is not a dependency: taking control swaps the socket, and the same rows stay valid. The swap closes
   // the old socket, so a read it cut short stays loading and runs again on the next client.
   const current = useRef(client);
   const resume = useRef<(() => void) | null>(null);
@@ -219,11 +219,11 @@ function Paged<T extends { id: string }>({ view, noun, empty, children }: { view
 const kindLabel = { brief: "Brief", decision: "Decisions", state: "State", backlog: "Backlog", changelog: "Changelog", legacy: "Documents" } satisfies Record<MemoryKind, string>;
 
 /** One line under the tabs for a tab that is not in control, so Memory and Inbox start at the same height. */
-const ControlNote = ({ control }: { control: Borrow }) => control.observer
+const ControlNote = ({ control }: { control: Takeover }) => control.observer
   ? <p id={CONTROL_NOTE} className="projects-note">Zeta lets only a controlling tab read full text. This read takes control first.</p> : null;
 
 function MemoryTab({ client, projectId, projectName, control, actions, refresh }: {
-  client: ZetaClient; projectId: string; projectName: string; control: Borrow; actions?: MemoryActions; refresh: number;
+  client: ZetaClient; projectId: string; projectName: string; control: Takeover; actions?: MemoryActions; refresh: number;
 }) {
   const view = usePages(client, (reader, cursor, signal) => readMemory(reader, projectId, cursor, { signal }), [projectId, refresh]);
   const oldFormat = view.state === "data" && view.oldFormat;
@@ -236,7 +236,7 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
   const lastOpened = useRef<HTMLButtonElement>(null);
   const selected = selecting && selection.refresh === refresh ? selection.ids : new Set<string>();
   const canWrite = !!actions && !oldFormat && memoryWriteAccess(client, !control.observer);
-  const waiting = control.borrowing || !!actions?.working;
+  const waiting = control.taking || !!actions?.working;
   const feedback = actions?.feedback?.projectId === projectId ? actions.feedback : null;
   const active = view.state === "data" ? view.rows.filter((row) => selected.has(row.id)) : [];
   const start = (event: MouseEvent<HTMLButtonElement>, action: MemoryAction, rows: MemoryRow[], receipt?: MemoryReceipt) => {
@@ -306,7 +306,7 @@ function MemoryTab({ client, projectId, projectName, control, actions, refresh }
   </section>;
 }
 
-function InboxTab({ client, projectId, control, names }: { client: ZetaClient; projectId: string; control: Borrow; names: ReadonlyMap<string, ProjectRow> }) {
+function InboxTab({ client, projectId, control, names }: { client: ZetaClient; projectId: string; control: Takeover; names: ReadonlyMap<string, ProjectRow> }) {
   const view = usePages(client, (reader, cursor, signal) => readInbox(reader, projectId, cursor, { signal }), [projectId]);
   return <section className="projects-tab" aria-label="inbox">
     {view.state === "data" && view.rows.length > 0 && <p className="projects-note">newest first · titles and senders only · a message loads when you open it, is not cached, and never goes in the address</p>}
@@ -336,7 +336,7 @@ const longBody = (text: string) => text.length > 2000 || text.split("\n").length
  * One explicit read per click. As an observer, the click takes control first and keeps it. The
  * text lives only in this instance's state: hiding it or leaving drops it.
  */
-function Reveal({ id, noun, context, client, control, load, markdown }: { markdown?: boolean; id: string; noun: string; context?: string; client: ZetaClient; control: Borrow; load: (client: ZetaClient, signal: AbortSignal) => Promise<Body> }) {
+function Reveal({ id, noun, context, client, control, load, markdown }: { markdown?: boolean; id: string; noun: string; context?: string; client: ZetaClient; control: Takeover; load: (client: ZetaClient, signal: AbortSignal) => Promise<Body> }) {
   // a drop remounts this view: say why the text closed instead of resetting silently.
   const [shown, setShown] = useState<Shown>(() => control.dropped.delete(id) ? { state: "failed", problem: dropped } : null);
   const pending = useRef<AbortController | null>(null);
@@ -349,8 +349,8 @@ function Reveal({ id, noun, context, client, control, load, markdown }: { markdo
     else if (!shown && hidden.current) button.current?.focus(); // "hide" unmounts itself: focus the button that shows it again
     hidden.current = false;
   }, [shown]);
-  // another reveal's borrow is live: one borrow at a time, so this one waits.
-  const waiting = control.borrowing && shown?.state !== "loading";
+  // another reveal is taking control: one at a time, so this one waits.
+  const waiting = control.taking && shown?.state !== "loading";
 
   async function show() {
     if (shown?.state === "loading" || waiting) return;
@@ -360,8 +360,8 @@ function Reveal({ id, noun, context, client, control, load, markdown }: { markdo
     let next: Shown;
     try {
       if (control.observer) {
-        const borrowed = await control.withControl((reader) => load(reader, abort.signal));
-        next = "refused" in borrowed ? { state: "refused", reason: borrowed.refused } : { state: "data", body: borrowed.value };
+        const result = await control.withControl((reader) => load(reader, abort.signal));
+        next = "refused" in result ? { state: "refused", reason: result.refused } : { state: "data", body: result.value };
       } else next = { state: "data", body: await load(client, abort.signal) };
     } catch (error) {
       if (error instanceof ZetaError && error.kind === "closed") control.dropped.add(id);

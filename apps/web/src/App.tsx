@@ -200,8 +200,7 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
-    // both the controller and the observer hello were refused: zeta's controller and observer slots are full, or a
-    // client in the other mode (legacy single controller) holds it. the page retries by itself with backoff.
+    // both the controller and the observer hello were refused: zeta has no free slot. the page retries by itself with backoff.
     case "controller_taken": return "zeta has no free slot for this tab: too many tabs or apps are connected. close one, and this page reconnects by itself.";
     default: return null;
   }

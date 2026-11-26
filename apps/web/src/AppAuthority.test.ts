@@ -776,7 +776,7 @@ const rows: Record<WriteSurfaceId, Row> = {
   "mcp.auth-logout": mcpOAuth("logout"),
   "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
-    // the settings place browses as an observer; confirming the change borrows control for the one update.
+    // a controller tab sends the one update; a fallback observer tab (zeta full) is refused before it sends.
     await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
     const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
     await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));

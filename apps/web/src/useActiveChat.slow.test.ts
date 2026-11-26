@@ -1143,7 +1143,8 @@ test.each([
   }
 });
 
-test("a default attach names its chat in the url, so a reload reopens this tab's chat, not the page's newest", async () => {
+test("a default attach names its chat in the url, so a reload or reconnect reopens this tab's chat, not the page's newest", async () => {
+  let chats = [chat];
   const replaced: string[] = [];
   const pushed: string[] = [];
   const location = { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
@@ -1156,18 +1157,27 @@ test("a default attach names its chat in the url, so a reload reopens this tab's
       const url = String(input);
       if (url === "/api/pages/home") return Response.json(page);
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
-      if (url.startsWith("/api/chats?")) return Response.json({ chats: [chat], next: null });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats, next: null });
       if (url === "/api/chats/chat" && init?.method === "PATCH") return new Response(null, { status: 204 });
       throw new Error(`unexpected fetch ${url}`);
     },
   });
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
-  const zeta = client();
-  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
-  await act(async () => { mounted = render(createElement(Harness)); });
+  const resumed: string[] = [];
+  const recording = () => {
+    const zeta = client();
+    return { ...zeta, request: (method: string, params?: { session_id?: string }) => { if (method === "resume") resumed.push(params?.session_id ?? ""); return zeta.request(method); } };
+  };
+  const Harness = ({ zeta }: { zeta: unknown }) => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness, { zeta: recording() })); });
   await flushUntil(() => active.state.phase === "ready");
   expect(replaced, "the default attach left the url without ?chat=").toEqual(["/?chat=chat"]);
   expect(location.search).toBe("?chat=chat");
   expect(pushed, "a default attach adds no history entry").toEqual([]);
+  // another tab's chat is now the page's newest; a reconnect (a new client) must still resume this tab's chat
+  chats = [{ ...chat, session_id: "other", title: "other" }, chat];
+  await act(async () => { mounted!.rerender(createElement(Harness, { zeta: recording() })); });
+  await flushUntil(() => resumed.length === 2 && active.state.phase === "ready");
+  expect(resumed.at(-1), "the reconnect resumed the page's newest chat, not the url's").toBe("chat");
 });

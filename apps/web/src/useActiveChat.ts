@@ -595,7 +595,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setAttachSlow(false);
     applyActive(token, { kind: "state", update: (current) => current.phase === "ready" || (retrying && current.phase === "empty") ? current : { phase: "loading" } });
     const slowTimer = clock.setTimeout(() => { if (owner.current.current(token)) setAttachSlow(true); }, ATTACH_SLOW_MS);
-    void attachPage(client, key, landing || startFresh ? null : selectedId, owner.current, creation.current, token, false, !landing && canWrite ? applyPendingCreateMode : undefined, async (next) => {
+    // the url is the tab's chat: a default attach wrote ?chat= without selecting it, and a reconnect must reattach that chat
+    void attachPage(client, key, landing || startFresh ? null : selectedId ?? selectedFromUrl(), owner.current, creation.current, token, false, !landing && canWrite ? applyPendingCreateMode : undefined, async (next) => {
       if (!owner.current.current(token)) throw new StaleAttachment();
       if (creation.current.status(next.page.id).pending) publishReady(next, token, readAt);
       else applyActive(token, { kind: "snapshot", state: next, readAt });
