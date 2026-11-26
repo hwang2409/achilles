@@ -10,7 +10,7 @@ const copy = {
   busy: "zeta is busy. nothing was written; try again later.",
   unavailable: "zeta could not read the current project or configuration. nothing was written.",
   invalid: "zeta refused the name or fields. nothing was written.",
-  refused: "nothing was written. a chat tab keeps control while it is open; try again after it finishes or closes.",
+  refused: "nothing was written. too many tabs control zeta, or another app does. close one, then try again.",
   unsupported: "update zeta to manage mcp connections here. nothing was written.",
   conflict: "another connection change is in progress. nothing was sent.",
   cancelled: "this change was cancelled before it was applied.",

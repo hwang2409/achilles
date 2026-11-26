@@ -25,7 +25,7 @@ type Login = { target: LoginTarget } & (
 type Popup = Pick<Window, "opener" | "closed" | "close"> & { location: Pick<Location, "replace"> };
 type Attempt = {
   target: LoginTarget; popup: Popup | null; client: ZetaClient | null; timer?: ReturnType<typeof setTimeout>;
-  unsubscribe?: () => void; borrowed?: boolean; abort: AbortController; settling?: boolean;
+  unsubscribe?: () => void; abort: AbortController; settling?: boolean;
 };
 const record = (value: unknown) => value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
 function outcome(wire: unknown): Terminal | { state: "pending" } {
@@ -58,7 +58,7 @@ function sendToPopup(popup: Popup, wire: unknown): boolean {
 }
 
 export function createAccountLogin(
-  connection: Pick<Connection, "client" | "state" | "takeControl" | "releaseControl">,
+  connection: Pick<Connection, "client" | "state" | "takeControl">,
   open: () => Popup | null = () => window.open("about:blank", "_blank"),
   pollMs = 750,
 ) {
@@ -95,7 +95,6 @@ export function createAccountLogin(
         if (reread && connection.client === controller) catalog = await readAccounts(controller, undefined, options(attempt));
       } catch { /* The receipt is independent of whether the catalog could be refreshed. */ }
       attempt.abort.abort();
-      if (attempt.borrowed) await connection.releaseControl();
     }
     if (active !== attempt) return;
     active = null;
@@ -156,7 +155,7 @@ export function createAccountLogin(
     snapshot: () => snapshot,
     catalog: () => refreshed,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    async start({ provider, account }: LoginTarget, borrow = true) {
+    async start({ provider, account }: LoginTarget) {
       if (active || (provider !== "claude" && provider !== "codex")) return;
       const target = account === undefined ? { provider } : { provider, account };
       // The catalog supplies named targets; copy only the validated identity to this attempt.
@@ -170,16 +169,13 @@ export function createAccountLogin(
         attempt.popup.opener = null;
       } catch { return await settle(attempt, { state: "blocked" }); }
       publish({ state: "starting", target });
-      const refusal = borrow ? await connection.takeControl() : null;
-      if (active !== attempt) {
-        if (borrow && !refusal && connection.state.phase === "connected" && connection.state.authority === "controller") await connection.releaseControl();
-        return;
-      }
+      // an observer tab (zeta was full at load) takes control first and keeps it; a controller sends at once
+      const refusal = await connection.takeControl();
+      if (active !== attempt) return;
       if (refusal) return await settle(attempt, { state: "failed", detail: refusal });
       const client = connection.client;
       if (!client || connection.state.phase !== "connected" || connection.state.authority !== "controller") return await settle(attempt, { state: "unknown" });
       attempt.client = client;
-      attempt.borrowed = borrow;
       attempt.unsubscribe = client.onClose(() => void settle(attempt, { state: "unknown" }, false));
       await dispatchStart(attempt);
     },

@@ -122,11 +122,10 @@ async function requestWrite(client: ZetaClient, method: typeof mcpMethods[McpAct
 }
 
 /** One global flight: the revision spans user, project, and trust. A new socket is only used to read, never to retry a write. */
-export function createMcpOwner({ live, acquire, release, supports = supportsRequest, canRead, wait = waitFor, liveObserver = live }: {
+export function createMcpOwner({ live, acquire, supports = supportsRequest, canRead, wait = waitFor, liveObserver = live }: {
   live: () => ZetaClient | null;
   liveObserver?: () => ZetaClient | null;
   acquire: () => Promise<ZetaClient | null>;
-  release: () => Promise<void>;
   supports?: typeof supportsRequest;
   canRead?: (client: ZetaClient) => boolean;
   wait?: typeof waitFor;
@@ -174,8 +173,7 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
   async function withAcquiredControl<T>(signal: AbortSignal, perform: (client: ZetaClient) => Promise<T>): Promise<T | McpOutcome> {
     const client = await acquire();
     if (!client) return { status: "refused" };
-    try { return signal.aborted ? CANCELLED : await perform(client); }
-    finally { await release().catch(() => {}); }
+    return signal.aborted ? CANCELLED : await perform(client);
   }
   async function confirmCurrent(client: ZetaClient, target: ReviewedMcpTarget, signal: AbortSignal): Promise<McpOutcome | null> {
     if (live() !== client) return { status: "refused" };

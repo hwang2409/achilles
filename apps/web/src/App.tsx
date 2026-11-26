@@ -203,12 +203,9 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
-    // zeta allows one controller; this fires for any other controller connection (a second achilles
-    // tab, or another client such as gamma, fulcrum, or the cli), and also when a reload's own
-    // cleanup has not finished within zeta's 10s handoff deadline, even with no other tab open.
-    // zeta never promotes an observer to controller, so there is no take-over to offer; the page
-    // retries by itself with backoff until the slot frees.
-    case "controller_taken": return "another client is using zeta (only one can control it at a time), maybe achilles in another tab. close it, and this page reconnects by itself.";
+    // both the controller and the observer hello were refused: zeta's controller and observer slots are full, or a
+    // client in the other mode (legacy single controller) holds it. the page retries by itself with backoff.
+    case "controller_taken": return "zeta has no free slot for this tab: too many tabs or apps are connected. close one, and this page reconnects by itself.";
     default: return null;
   }
 }
@@ -219,7 +216,8 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const observerConnected = connectionState.phase === "connected" && connectionState.authority === "observer";
   // the approval a click took control for: a new client remounts the timeline, so it lives here, not in the card.
   const tookControl = useRef<TookControl>(null);
-  const readOnlyReason = READ_ONLY_REASON;
+  // a disconnected tab is read-only too, but not because zeta is full
+  const readOnlyReason = connectionState.phase === "connected" ? READ_ONLY_REASON : "zeta is not connected. this tab reconnects by itself.";
   const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite, homeAlias, createRoute.path);
   const landing = location.pathname === createRoute.path;
   const ready = active.state.phase === "ready" ? active.state : null;
@@ -592,7 +590,7 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRenam
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
   not_running: "start zeta, and this page connects by itself.",
-  controller_taken: "zeta is busy elsewhere",
+  controller_taken: "zeta is full",
   auth_failed: "zeta refused this page",
   incompatible: "zeta version mismatch",
 };

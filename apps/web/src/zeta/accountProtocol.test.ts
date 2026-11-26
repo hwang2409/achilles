@@ -63,7 +63,7 @@ test("legacy session read accepts flat results without retaining credential deta
 
 test("observer refusal and absent legacy session send no account_list", async () => {
   const observer = fixture({ result: catalog([]) }, true, "observer");
-  await expect(observer.read()).rejects.toThrow("another tab controls zeta");
+  await expect(observer.read()).rejects.toThrow("too many tabs control zeta");
   expect(observer.requests).toEqual([]);
   const legacy = fixture({ result: { accounts: [] } }, false);
   await expect(legacy.read()).rejects.toThrow("start a chat");
@@ -71,7 +71,7 @@ test("observer refusal and absent legacy session send no account_list", async ()
 });
 
 test.each([
-  ["observer", -32008, "another tab controls zeta"],
+  ["observer", -32008, "this tab is read-only: too many tabs control zeta"],
   ["invalid params", -32602, "zeta did not accept the account request"],
   ["store unavailable", -32005, "zeta's account store is unavailable"],
   ["unexpected", -32000, "could not read accounts from zeta"],

@@ -113,6 +113,7 @@ export function AgentsModule({ client, connecting, retry }: { client: ZetaClient
   return <section className="module-frame agents-frame">
     <header className="agents-head ui-page-header"><h1>Agents</h1>{report && <span>{client ? "reported" : "offline · reported"} <time dateTime={new Date(report.reportedAt).toISOString()}>{stamp(report.reportedAt)}</time></span>}</header>
     <ShellDockSlot />
+    <p className="agents-notice">control a chat's agents from its tab.</p>
     {!report ? <div className="module-body">
       {!client ? connecting ? <ModuleState kind="loading" title="connecting to zeta" /> : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: retry }} />
         : unsupported ? <ModuleState kind="unsupported" title={unavailable} />

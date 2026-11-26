@@ -75,7 +75,7 @@ function catalog(wire: unknown, idle: boolean): AccountCatalog {
 }
 
 type AccountClient = Pick<ZetaClient, "request" | "features"> & { authority?: "controller" | "observer" };
-const observerRefusal = () => new AccountReadError("another tab controls zeta. try again after it releases control.");
+const observerRefusal = () => new AccountReadError("this tab is read-only: too many tabs control zeta. close one, then try again.");
 
 export async function readAccounts(client: AccountClient, sessionId?: string, options?: Parameters<ZetaClient["request"]>[2]): Promise<AccountCatalog> {
   if (client.authority === "observer") throw observerRefusal();

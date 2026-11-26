@@ -34,8 +34,6 @@ export type LibraryWrite = {
   edits: Map<LibraryKind, EditDraft>;
   /** The one library writer, held by the router so a save survives a remount. */
   writer: LibraryWriter;
-  /** Gives back the controller slot taken for an editor, once that editor closes. */
-  releaseControl: () => void;
 };
 
 const rowKey = (row: CatalogRow) => `${row.scope}/${row.name}`;
@@ -196,7 +194,6 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     if (draft) write?.writer.close(draft.form);
     write?.drafts.delete(draftKey);
     setCreating(false);
-    write?.releaseControl();
   }
 
   function startEdit(row: CatalogRow, opened: EditDraft["base"]) {
@@ -216,7 +213,6 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     if (draft) write?.writer.close(draft.form);
     write?.edits.delete(kind);
     setEditing(null);
-    write?.releaseControl();
   }
 
   function showCreated(name: string) {
