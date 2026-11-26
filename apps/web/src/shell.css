@@ -1,5 +1,5 @@
 /* design-v4 shell: the transcript and composer own the center pane's scroll boundary. */
-.app-shell { height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: 280px minmax(0, 1fr); background: var(--fulcrum-bg); }
+.app-shell { height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: var(--sidebar-width, 280px) minmax(0, 1fr); background: var(--fulcrum-bg); }
 .brand-mark { position: relative; width: 20px; height: 20px; flex: none; background: var(--g1-primary); }
 
 /* nav icons sit quieter than their labels; light needs a higher mix than dark to read the same */
@@ -30,7 +30,7 @@
 .chat-row:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 
 .brand-row strong { font-size: inherit; font-weight: var(--g1-weight-title); }
-.brand-row button { width: 40px; height: 40px; margin-left: auto; color: var(--fulcrum-muted); }
+.brand-row > button { width: 40px; height: 40px; margin-left: auto; color: var(--fulcrum-muted); }
 .brand-mark::after { content: ""; position: absolute; inset: 6px; background: var(--g1-primary-text); }
 .sidebar .new-chat { justify-content: flex-start; border: 0; color: color-mix(in srgb, var(--g1-fg) 60%, transparent); background: transparent; }
 .sidebar .new-chat > span { display: flex; color: var(--nav-icon); }
@@ -189,10 +189,13 @@
 }
 .shell-header { display: contents; }
 .menu-button, .drawer-scrim, .drawer-scrim[hidden] { display: none; }
-/* the collapsed rail is a desktop-only layout; the mobile drawer never collapses (see @media (max-width: 760px), (max-height: 500px) below) */
-@media (min-width: 761px) and (min-height: 501px) {
-  .app-shell.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
-}
+/* the drag handle straddles the sidebar's right border; it is rendered only for the desktop grid */
+.app-shell { position: relative; }
+.sidebar-resizer { position: absolute; inset-block: 0; left: calc(var(--sidebar-width, 280px) - 3px); z-index: 5; width: 6px; cursor: col-resize; touch-action: none; }
+.sidebar-resizer::after { content: ""; position: absolute; inset-block: 0; left: 2px; width: 2px; background: transparent; transition: background 120ms ease-out; }
+.sidebar-resizer:is(:hover, :focus-visible)::after { background: var(--g1-border); transition-delay: 150ms; }
+.sidebar-resizer:active::after { background: var(--fulcrum-accent); transition-delay: 0s; }
+.sidebar-resizer:focus-visible { outline: 0; }
 
 @media (max-width: 760px), (max-height: 500px) {
   .app-shell { display: block; }

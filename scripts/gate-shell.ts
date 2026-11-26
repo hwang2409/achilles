@@ -80,11 +80,20 @@ export async function gateShell(
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole("button", { name: "collapse sidebar" }).press("Enter");
-  const railWidth = await page.locator("aside.sidebar").evaluate((element) => element.getBoundingClientRect().width);
-  if (railWidth !== 56 || await places.getByRole("link").count() !== 11) throw new Error("the 56px rail dropped place links");
-  await capture("v5-railed-chat-1280x900-light.png");
-  await page.getByRole("button", { name: "expand sidebar" }).press("Enter");
+  const sidebarWidth = () => page.locator("aside.sidebar").evaluate((element) => element.getBoundingClientRect().width);
+  const resizer = page.getByRole("separator", { name: "resize sidebar" });
+  const grip = (await resizer.boundingBox())!;
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(360, grip.y + 300, { steps: 4 });
+  await page.mouse.up();
+  if (await sidebarWidth() !== 360 || await places.getByRole("link").count() !== 11) throw new Error(`dragging the sidebar edge to 360px gave ${await sidebarWidth()}px`);
+  await capture("v5-wide-sidebar-chat-1280x900-light.png");
+  await page.reload();
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
+  if (await sidebarWidth() !== 360) throw new Error("the dragged sidebar width did not survive a reload");
+  await resizer.dblclick();
+  if (await sidebarWidth() !== 280) throw new Error("double-clicking the sidebar edge did not reset it to 280px");
   await page.setViewportSize({ width: 390, height: 844 });
   await capture("v5-chat-390x844-light.png");
   const sidebar = page.locator("aside.sidebar");
@@ -119,8 +128,8 @@ export async function gateShell(
     throw new Error("open drawer left the main pane interactive");
   if (!(await sidebar.evaluate((element) => element.contains(document.activeElement))))
     throw new Error("opening the drawer did not move focus into it");
-  if (await sidebar.getByRole("button", { name: /collapse sidebar|expand sidebar/ }).count())
-    throw new Error("the drawer must not expose the desktop collapse control at narrow widths");
+  if (await page.getByRole("separator", { name: "resize sidebar" }).count())
+    throw new Error("the drawer must not expose the desktop resize handle at narrow widths");
   await page.keyboard.press("Tab");
   if (!(await sidebar.evaluate((element) => element.contains(document.activeElement))))
     throw new Error("drawer tab escaped into the obscured main pane");
@@ -343,8 +352,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(tab.locator(".run-state.state-running"), "waitFor", { state: "hidden" });
   await toggle.click();
   await gateWait.playwright(tab.locator('.create-split button[aria-pressed="false"]'), "waitFor");
-  await tab.getByRole("button", { name: "collapse sidebar" }).click();
-  await capture("chat-off-rail", 1280);
+  await capture("chat-off", 1280);
 
 }
 

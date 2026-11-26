@@ -3,24 +3,25 @@
 .sidebar-destinations { display: contents; }
 
 /* connection status as a quiet mark: muted when connected, warning while zeta is away */
-.brand-row > .surface-connection { flex: none; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-left: auto; border-radius: 50%; background: var(--g1-warn-fill); }
+.brand-row > .surface-connection { flex: none; width: var(--g1-status-mark); height: var(--g1-status-mark); border-radius: 50%; background: var(--g1-warn-fill); }
 .brand-row > .surface-connection[data-connected="true"] { background: var(--g1-border); }
-.surface-actions, .surface-search { flex: none; display: grid; gap: var(--g1-space-2); margin: 0 var(--g1-sidebar-padding); }
+.surface-actions { flex: none; display: grid; gap: var(--g1-space-2); margin: 0 var(--g1-sidebar-padding); }
 .surface-actions { padding-block: var(--g1-space-2) var(--g1-space-1); row-gap: 0; }
 .surface-actions > .new-chat { display: flex; align-items: center; min-width: 0; min-height: var(--g1-nav-row-height); gap: var(--g1-space-2); padding: 0 var(--g1-space-2); font-size: inherit; }
 .surface-actions kbd, .surface-actions small { margin-left: auto; color: var(--fulcrum-muted); font-size: inherit; }
 .surface-actions b { font-weight: 500; }
-.surface-search { position: relative; }
-.surface-search .chat-search { background: color-mix(in srgb, var(--g1-fg) 5%, transparent); min-height: var(--g1-nav-row-height); display: flex; align-items: center; gap: var(--g1-space-2); padding-inline: var(--g1-space-2) 44px; border: 0; border-radius: var(--g1-radius-control); font-size: inherit; font-weight: 500; }
+/* the search sits in the brand row beside the name, so it is a compact field that takes the free width */
+.surface-search { position: relative; flex: 1; min-width: 0; margin-left: var(--g1-space-1); }
+.surface-search .search-skeleton { min-height: 28px; }
+.surface-search .chat-search { background: color-mix(in srgb, var(--g1-fg) 5%, transparent); min-height: 28px; display: flex; align-items: center; gap: 6px; padding-inline: 6px 40px; border: 0; border-radius: var(--g1-radius-control); font-size: inherit; font-weight: 500; }
 .surface-search .chat-search:hover { background: color-mix(in srgb, var(--g1-fg) 8%, transparent); }
-.surface-search .chat-search > kbd { display: none; }
-/* the ⌕ glyph is drawn as the rail's 16px line icon (same path as the palette button), so it matches the nav icons */
-.surface-search .chat-search > span { flex: none; width: 16px; height: 16px; font-size: 0; background: var(--nav-icon); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.2'%3E%3Cpath d='M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l3.5 3.5'/%3E%3C/svg%3E") center / 16px no-repeat; }
+/* the ⌕ glyph is drawn as a 14px line icon in the nav icon color, so it matches the nav icons */
+.surface-search .chat-search > span { flex: none; width: 14px; height: 14px; font-size: 0; background: var(--nav-icon); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.2'%3E%3Cpath d='M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l3.5 3.5'/%3E%3C/svg%3E") center / 14px no-repeat; }
 .surface-search .chat-search input::placeholder { color: color-mix(in srgb, var(--g1-fg) 60%, transparent); }
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; }
-/* the hint ends at the row padding, where "off" and the rename pencil end */
-.surface-search .palette-button { position: absolute; right: 0; top: 0; display: grid; place-items: center end; height: var(--g1-nav-row-height); min-height: 0; min-width: 44px; padding: 0 var(--g1-space-2); color: var(--fulcrum-muted); border-color: transparent; }
-.surface-search .palette-button > span { display: none; }
+/* the ⌘K hint sits inside the field's right end and opens the palette */
+.surface-search .palette-button { position: absolute; inset-block: 0; right: 0; display: grid; place-items: center end; min-height: 0; min-width: 40px; padding: 0 6px; color: var(--fulcrum-muted); border-color: transparent; background: transparent; }
+.surface-search .palette-button > kbd { font: inherit; font-size: calc(1em - 1px); font-variant-numeric: tabular-nums; }
 .place-nav { flex: none; margin: var(--g1-space-3) var(--g1-sidebar-padding); }
 .chat-group h2 { font-size: calc(1em - 1px); font-weight: 600; color: var(--g1-muted); }
 .place-nav section + section { margin-top: var(--g1-space-4); }
@@ -34,10 +35,6 @@
 .place-link[aria-current="page"] { background: var(--g1-selected); color: var(--g1-fg); }
 .place-link[aria-current="page"] svg { color: var(--g1-fg); }
 .sidebar :is(a, button):focus-visible { outline-offset: -2px; }
-.sidebar > footer { flex: none; display: flex; gap: 4px; padding: var(--g1-space-1) var(--g1-sidebar-padding); }
-.sidebar > footer > button { flex: 1; display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-height: 40px; min-width: 0; padding: 0 var(--g1-space-2); border: 0; color: var(--g1-muted); font-size: inherit; }
-.collapse-label { display: block; }
-.collapse-label::first-letter { text-transform: uppercase; }
 
 .module-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* no block padding: a 32px action fits the 44px bar, so every route header is the same height */
@@ -66,28 +63,9 @@
 .module-skeleton i:nth-child(2) { width: min(36ch, 75%); }
 .module-skeleton i:nth-child(3) { width: min(24ch, 55%); }
 
-@media (min-width: 761px) and (min-height: 501px) {
-  .surface-search { position: sticky; top: 0; z-index: 3; }
-  .sidebar-scroll { scroll-padding-top: 36px; }
-  .sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
-  .sidebar-collapsed .sidebar-scroll { scrollbar-width: none; }
-  .sidebar-collapsed .sidebar :is(.brand-row strong, .surface-connection, .new-chat b, .surface-search .chat-search, .search-skeleton, .place-link span, .place-link small, .chat-list, .collapse-label) { display: none; }
-  .sidebar-collapsed :is(.surface-actions, .surface-search, .place-nav) { margin-inline: 6px; }
-  .sidebar-collapsed :is(.place-link, .surface-actions > .place-link, .new-chat) { justify-content: center; min-height: 42px; padding: 0; }
-  .sidebar-collapsed .surface-search .palette-button { position: static; min-width: 0; height: auto; min-height: 42px; place-items: center; padding: 0; }
-  .sidebar-collapsed .surface-search .palette-button > span { display: flex; }
-  .sidebar-collapsed :is(.new-chat, .palette-button) svg { color: var(--fulcrum-muted); }
-  /* in the rail the icon is the whole label, so it uses the muted text color, not the faded nav icon */
-  .sidebar-collapsed .place-link:not([aria-current="page"]) svg { color: var(--fulcrum-muted); }
-  .sidebar-collapsed .surface-search .palette-button > kbd { display: none; }
-  .sidebar-collapsed .sidebar > footer { padding-inline: 6px; }
-  .sidebar-collapsed .collapse-button { justify-content: center; padding: 0; }
-}
-
 @media (max-width: 760px), (max-height: 500px) {
   :root { --g1-page-gutter: var(--g1-space-4); }
   .main-pane { isolation: isolate; }
-  .brand-row > .surface-connection { margin-left: 0; }
   .brand-row > .drawer-close { width: 44px; height: 44px; flex: none; }
   .surface-actions { display: grid; }
   .surface-actions > :is(.new-chat, .place-link) { flex: 1; min-height: 44px; }
