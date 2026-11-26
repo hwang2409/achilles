@@ -39,6 +39,8 @@ export type ComposerAdapterProps = ComposerProps & {
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
   questionWaiting?: boolean;
   commandOutput?: ReactNode;
+  /** the chat's modes and model, shown in the composer bar even when the composer is read-only */
+  controls?: ReactNode;
 };
 
 /** `deliveryId`: send with this id (a retry of a held row), not a new one */

@@ -149,26 +149,15 @@ export async function gateShell(
     await page.evaluate(() => { document.documentElement.style.zoom = ""; });
     await page.emulateMedia({ reducedMotion: "no-preference" });
   }
-  if (await page.locator(".page-chat-head").count()) {
-    await page.locator(".page-chat-bar").click();
-    const overflow = page.getByRole("button", { name: "page chat options" });
-    await overflow.click();
-    const modeMenu = page.getByRole("menu", { name: "page chat options" });
-    if (await modeMenu.getByRole("menuitemcheckbox").count() !== 2) throw new Error("docked chat menu must expose exactly the two mode changes");
-    await capture("09-narrow-chat-menu-review-390x844.png");
-    await page.keyboard.press("Escape");
-    if (await modeMenu.count()) throw new Error("escape did not close the docked chat menu");
-    await page.keyboard.press("Escape");
-  } else {
-    const overflow = page.getByRole("button", { name: "chat options" });
-    await overflow.click();
-    if (!(await page.locator(".header-menu").getByRole("button", { name: /create mode/ }).isVisible())) throw new Error("narrow chat menu did not expose create mode");
-    if (!(await page.locator(".header-menu .approval-mode").isVisible())) throw new Error("narrow chat menu did not expose approval mode");
-    if (!(await page.locator(".header-menu").getByRole("button", { name: "history" }).isVisible())) throw new Error("narrow chat menu did not expose history");
-    await capture("09-narrow-chat-menu-review-390x844.png");
-    await page.keyboard.press("Escape");
-    if (await page.locator(".header-menu").count()) throw new Error("escape did not close the narrow chat menu");
+  // the chat's modes live in the composer at every width, never behind a menu
+  const docked = await page.locator(".page-chat-head").count() > 0;
+  if (docked) await page.locator(".page-chat-bar").click();
+  for (const surface of ["composer.create-mode", "composer.auto-approve"]) {
+    if (!(await page.locator(`[data-part="composer-modes"] [data-write-surface="${surface}"]`).isVisible())) throw new Error(`narrow composer did not show ${surface}`);
   }
+  if (await page.locator(".chat-header [aria-pressed], .page-chat-head [role=menuitemcheckbox]").count()) throw new Error("a chat header still has a mode control");
+  await capture("09-narrow-chat-modes-390x844.png");
+  if (docked) await page.getByRole("button", { name: "close page chat" }).click();
   await page.setViewportSize({ width: 1440, height: 900 });
 
   return secondSessionId;
@@ -334,15 +323,15 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(tab.locator(`[data-session-id="${sessionId}"]`).first(), "waitFor", { state: "visible" });
   const sends = requests.filter(({ method }) => method === "send" || method === "steer");
   if (registrations.length !== 1 || registrations[0].pageId !== home.id || requests.filter(({ method }) => method === "new_session").length !== sessionBaseline + 1 || JSON.stringify(mode) !== '[{"enabled":true},{"enabled":true}]' || !(await readHome()).create_mode || sends.length !== 1 || sends[0].params?.session_id !== sessionId || sends[0].params?.text !== draft || !/^[0-9a-f-]{36}$/.test(sends[0].params?.delivery_id ?? "")) throw new Error("build did not deliver exactly once to its registered home chat in create mode");
-  const toggle = tab.getByRole("button", { name: "toggle create mode for this page" });
-  if (await toggle.getAttribute("aria-pressed") !== "true") throw new Error("contextual switch did not reflect build mode");
+  const toggle = tab.locator('[data-write-surface="composer.create-mode"]');
+  if (await toggle.getAttribute("aria-checked") !== "true") throw new Error("composer switch did not reflect build mode");
   await capture("chat-on", 1440);
   await tab.setViewportSize({ width: 390, height: 844 });
   await capture("chat-on", 390);
   await tab.setViewportSize({ width: 1280, height: 900 });
   await gateWait.playwright(tab.locator(".run-state.state-running"), "waitFor", { state: "hidden" });
   await toggle.click();
-  await gateWait.playwright(tab.locator('.create-split button[aria-pressed="false"]'), "waitFor");
+  await gateWait.playwright(tab.locator('[data-write-surface="composer.create-mode"][aria-checked="false"]'), "waitFor");
   await tab.getByRole("button", { name: "collapse sidebar" }).click();
   await capture("chat-off-rail", 1280);
 

@@ -6,17 +6,7 @@ import { NavIcon } from "./surface/SurfaceNav";
 import { WRITE_SURFACE } from "./writeSurfaces";
 import "./page-chat-header.css";
 
-type Mode = {
-  checked: boolean;
-  action?: () => void;
-  reason?: string;
-  pending?: string;
-  error?: string | null;
-  savedAt?: Date;
-};
-type Popup = "chats" | "modes";
-
-export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, onSelect, newChat, newReason, approval, create, close, closeRef }: {
+export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, onSelect, newChat, newReason, close, closeRef }: {
   pageId: string;
   sessionId: string | null;
   title: string;
@@ -25,45 +15,36 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
   onSelect: (chat: Chat) => void;
   newChat?: () => void;
   newReason?: string;
-  approval: Mode;
-  create: Mode;
   close?: () => void;
   closeRef: Ref<HTMLButtonElement>;
 }) {
   const catalog = useContext(PageChatCatalog)!;
   const chats = catalog.chats.filter((chat) => chat.page_id === pageId);
   const count = `${chats.length} ${chats.length === 1 ? "chat" : "chats"}`;
-  const [popup, setPopup] = useState<Popup | null>(null);
-  const [confirmation, setConfirmation] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const switcher = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLButtonElement>(null);
-  const confirm = useRef<HTMLButtonElement>(null);
   const rows = () => Array.from(panel.current?.querySelectorAll<HTMLElement>("[data-popup-row]") ?? []);
   const dismiss = (restore = false) => {
-    if (restore) (popup === "chats" ? switcher : menu).current?.focus();
-    setConfirmation(null);
-    setPopup(null);
+    if (restore) switcher.current?.focus();
+    setOpen(false);
   };
-  const open = (next: Popup) => {
-    if (popup === next) return dismiss(true);
-    if (next === "chats") catalog.clearSearch();
-    setConfirmation(null);
-    setPopup(next);
+  const toggle = () => {
+    if (open) return dismiss(true);
+    catalog.clearSearch();
+    setOpen(true);
   };
   useLayoutEffect(() => {
-    if (!popup || !panel.current) return;
+    if (!open || !panel.current) return;
     const items = rows();
     const first = items.find((item) => item.matches('[aria-selected="true"]'))
       ?? items.find((item) => !item.matches('[aria-disabled="true"]')) ?? items[0];
     if (!panel.current.contains(document.activeElement) || document.activeElement === panel.current) (first ?? panel.current).focus();
-  }, [popup, chats.length, catalog.loading, catalog.error]);
-  useLayoutEffect(() => { if (confirmation !== null) confirm.current?.focus(); }, [confirmation]);
+  }, [open, chats.length, catalog.loading, catalog.error]);
   useEffect(() => {
-    if (!popup) return;
+    if (!open) return;
     const outside = (event: Event) => {
-      if (event.target instanceof Node && event.target.isConnected && !panel.current?.contains(event.target)
-        && !switcher.current?.contains(event.target) && !menu.current?.contains(event.target)) {
+      if (event.target instanceof Node && event.target.isConnected && !panel.current?.contains(event.target) && !switcher.current?.contains(event.target)) {
         // Click runs after the browser's pointer focus change. Don't move focus away from the chosen control.
         const active = document.activeElement;
         dismiss(!restorableFocus(active) || panel.current?.contains(active));
@@ -71,21 +52,17 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     };
     document.addEventListener("click", outside);
     return () => document.removeEventListener("click", outside);
-  }, [popup]);
-  const finishConfirmation = () => {
-    if (confirmation !== null) rows()[confirmation]?.focus();
-    setConfirmation(null);
-  };
+  }, [open]);
   const keys = (event: KeyboardEvent) => {
-    if (!popup || event.defaultPrevented) return;
+    if (!open || event.defaultPrevented) return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      if (confirmation !== null) finishConfirmation(); else dismiss(true);
+      dismiss(true);
       return;
     }
-    if (event.key === "Tab" && confirmation === null) { dismiss(true); return; }
-    if (confirmation !== null || !["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    if (event.key === "Tab") { dismiss(true); return; }
+    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const items = rows();
     const at = items.indexOf(document.activeElement as HTMLElement);
@@ -94,23 +71,17 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     items[index]?.focus();
   };
   const select = (chat: Chat) => { dismiss(true); onSelect(chat); };
-  const modes = [
-    { ...approval, id: WRITE_SURFACE.pageChatAutoApprove, label: "run tools without asking", enable: "run tools without asking", disable: "ask before running tools", on: "tools run without asking", off: "ask before running tools" },
-    { ...create, id: WRITE_SURFACE.pageChatCreateMode, label: "create mode", enable: "allow this chat to change the page layout", disable: "limit this chat to changing page data", on: "create mode on", off: "data only" },
-  ];
-  const reason = (mode: Mode) => mode.reason ?? mode.pending;
   return <>
-    <div className="page-chat-head" data-approval-mode={approval.checked ? "allow" : "ask"} data-create-mode={create.checked ? "on" : "off"} data-popup={popup ?? undefined} onKeyDown={keys}>
+    <div className="page-chat-head" data-popup={open ? "chats" : undefined} onKeyDown={keys}>
       <div className="page-chat-title-row">
-        <button className="ui-button page-chat-switcher" type="button" ref={switcher} aria-label={`${title}, ${count}`} aria-haspopup="listbox" aria-expanded={popup === "chats"} aria-controls={popup === "chats" ? "page-chat-choices" : undefined} onClick={() => open("chats")}>
+        <button className="ui-button page-chat-switcher" type="button" ref={switcher} aria-label={`${title}, ${count}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? "page-chat-choices" : undefined} onClick={toggle}>
           <strong id="page-chat-title" title={title}>{title}</strong><NavIcon d="M4 6l4 4 4-4" />
         </button>
         <button className="ui-icon-button page-chat-icon" type="button" aria-label="new page chat" data-write-surface={WRITE_SURFACE.pageChatNew} title={newReason ?? "new page chat"} aria-describedby={newReason ? "page-chat-new-reason" : !newChat ? "tab-authority-description" : undefined} disabled={!newChat} onClick={newChat}><span aria-hidden="true">+</span></button>
-        <button className="ui-icon-button page-chat-icon" type="button" ref={menu} aria-label="page chat options" aria-haspopup="menu" aria-expanded={popup === "modes"} aria-controls={popup === "modes" ? "page-chat-modes" : undefined} onClick={() => open("modes")}><span aria-hidden="true">⋯</span></button>
         {close && <button className="ui-icon-button page-chat-icon page-chat-close" type="button" ref={closeRef} aria-label="close page chat" onClick={close}><span aria-hidden="true">×</span></button>}
       </div>
       <div className={`page-chat-readouts ui-status state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</div>
-      {popup === "chats" && <div className="page-chat-popup" data-kind="chats" ref={panel} tabIndex={-1}>
+      {open && <div className="page-chat-popup" data-kind="chats" ref={panel} tabIndex={-1}>
         <div className="page-chat-popup-note" id="page-chat-count">{count} on this page</div>
         <div role="listbox" id="page-chat-choices" aria-labelledby="page-chat-count" aria-busy={catalog.loading}>
           {chats.map((chat) => <ChatChoice key={chat.session_id} chat={chat} current={chat.session_id === sessionId} onSelect={select} />)}
@@ -119,25 +90,6 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
           : catalog.loading ? <div className="page-chat-popup-note" role="status">loading chats…</div>
           : !chats.length && <div className="page-chat-popup-note" role="status">no chats for this page{newChat ? " · use + to start one" : ""}</div>}
         {catalog.next && !catalog.loading && !catalog.error && <button className="page-chat-popup-note page-chat-more" type="button" tabIndex={-1} data-popup-row onClick={catalog.more}>load older chats</button>}
-      </div>}
-      {popup === "modes" && <div className="page-chat-popup" data-kind="modes" ref={panel} tabIndex={-1}>
-        <div role="menu" id="page-chat-modes" aria-label="page chat options">
-          {modes.map((mode, index) => <div key={mode.id} role="none">
-            <button type="button" className="page-chat-mode" role="menuitemcheckbox" data-popup-row data-write-surface={mode.id} tabIndex={-1} aria-checked={mode.checked}
-              aria-disabled={Boolean(reason(mode) || !mode.action)} title={reason(mode)} aria-describedby={reason(mode) ? `${mode.id}-reason` : undefined}
-              onClick={() => { if (!reason(mode) && mode.action) setConfirmation(index); }}>
-              <span className="page-chat-mode-check" aria-hidden="true">{mode.checked ? "✓" : ""}</span>{mode.label}
-            </button>
-            {reason(mode) && <div id={`${mode.id}-reason`} className="page-chat-popup-note" role={mode.pending ? "status" : undefined}>{reason(mode)}</div>}
-            {mode.error && <div className="page-chat-popup-note page-chat-error" role="alert">{mode.error}</div>}
-            {mode.savedAt && <div className="page-chat-popup-note" role="status">{mode.checked ? mode.on : mode.off} · saved <time dateTime={mode.savedAt.toISOString()}>{timeLabel(mode.savedAt.toISOString())}</time></div>}
-          </div>)}
-        </div>
-        {confirmation !== null && <div className="page-chat-confirm" role="region" aria-labelledby="page-chat-effect">
-          <p id="page-chat-effect">{modes[confirmation].checked ? modes[confirmation].disable : modes[confirmation].enable}?</p>
-          <button ref={confirm} type="button" onClick={() => { const mode = modes[confirmation]; finishConfirmation(); if (!reason(mode)) mode.action?.(); }}>confirm</button>
-          <button type="button" onClick={finishConfirmation}>keep current</button>
-        </div>}
       </div>}
     </div>
     {newReason && <div className="page-chat-new-reason" id="page-chat-new-reason">{newReason}</div>}

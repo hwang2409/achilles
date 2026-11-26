@@ -248,7 +248,7 @@ export function approvalModeWaiter(frames: () => Frame[], waitFor: WaitFor): Awa
 export async function assertServerAskWins(page: Page, id: string, frames: () => Frame[], awaitApprovalMode: AwaitApprovalMode): Promise<void> {
   await awaitApprovalMode("session_settings", id, "ask", "server-forced ask session");
   if (settingsWrites(frames(), id)) throw new Error("server-forced ask session sent a no-op set_settings frame");
-  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("server-forced ask session showed the auto-approve marker");
+  if (await page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]').count()) throw new Error("server-forced ask session showed the auto-approve marker");
 }
 
 export async function gateCreationApprovalDefaults(page: Page, frames: () => Frame[], awaitApprovalMode: AwaitApprovalMode, gateWait: GateWait): Promise<void> {
@@ -258,7 +258,7 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   const allowId = await sessionId(page);
   if (!allowId) throw new Error("default-on new chat did not expose a session id");
   await awaitApprovalMode("set_settings", allowId, "allow", "default-on new chat");
-  await gateWait.playwright(page.getByLabel("auto-approve", { exact: true }), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]'), "waitFor", { state: "visible" });
 
   await openSettings(page, gateWait);
   const approvalDefault = page.getByRole("switch", { name: "auto-approve default" });
@@ -272,7 +272,7 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   if (!askId) throw new Error("default-off new chat did not expose a session id");
   await awaitApprovalMode("session_settings", askId, "ask", "default-off new chat");
   if (settingsWrites(frames(), askId)) throw new Error("default-off new chat sent a set_settings frame");
-  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("default-off new chat showed the auto-approve marker");
+  if (await page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]').count()) throw new Error("default-off new chat showed the auto-approve marker");
 
   await openSettings(page, gateWait);
   // turning the default on goes through a confirm
@@ -287,6 +287,6 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   if (await sessionId(page) !== askId) throw new Error("reopening after changing the default changed the chat id");
   await awaitApprovalMode("session_settings", askId, "ask", "reopened default-off chat");
   if (settingsWrites(frames(), askId) !== writesBeforeReopen) throw new Error("reopening after changing the default sent set_settings");
-  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reopened ask chat showed the auto-approve marker");
+  if (await page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]').count()) throw new Error("reopened ask chat showed the auto-approve marker");
   console.log("settings approval gate passed: default allow, default ask, and reopen preservation");
 }

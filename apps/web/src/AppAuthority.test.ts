@@ -191,7 +191,6 @@ const insert = { description: "Add a book", name: "add_book", operation: "insert
 const records = { tool: insert, page: { layout: { blocks: [{ type: "form", title: "add book", tool: insert.name }, { type: "list", title: "books", collection: "books" }] } } };
 const docked: Options = { ...records, attached: true };
 const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row => ({ kind: "visible", options, check: async (app, authority, writes) => {
-  if (id !== "page-chat.new") await click(select(app, '[aria-label="page chat options"]'));
   const control = select(app, tag(id));
   expect(disabled(control)).toBe(authority === "observer");
   if (authority === "observer") {
@@ -200,7 +199,6 @@ const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row =
   }
   await click(control);
   if (authority === "controller") {
-    if (id !== "page-chat.new") await click(app.getByRole("button", { name: "confirm", exact: true }));
     didWrite(writes, write);
   }
 } });
@@ -761,9 +759,8 @@ const rows: Record<WriteSurfaceId, Row> = {
   "settings.reset": setting("settings.reset", "size", "", true),
   "shell.new-chat": button(tag("shell.new-chat"), "new_session"),
   "page-chat.new": dockedWrite("page-chat.new", "new_session"),
-  "page-chat.auto-approve": dockedWrite("page-chat.auto-approve", "set_settings", { ...docked, rpc: { set_settings: (params) => ({ result: { approval_mode: params.approval_mode } }) } }),
-  "page-chat.create-mode": dockedWrite("page-chat.create-mode", "POST /api/pages/page/create-mode"),
-  "header.create": button(`${tag("header.create")}`, "POST /api/pages/page/create-mode", { attached: true }),
+  "composer.auto-approve": button(tag("composer.auto-approve"), "set_settings", { attached: true, rpc: { set_settings: (params) => ({ result: { approval_mode: params.approval_mode } }) } }),
+  "composer.create-mode": button(tag("composer.create-mode"), "POST /api/pages/page/create-mode", { attached: true }),
   "composer.send": composer("send"),
   "composer.steer": composer("steer", running),
   "composer.abort": composer("abort", running),
@@ -797,7 +794,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     if (authority === "controller") didWrite(writes, "new_session");
   } },
   "history.restore": { kind: "visible", options: { page: { create_mode: true }, http: (path) => path.endsWith("/versions") ? Response.json({ layout: [1, 2].map((version) => ({ version, created_at: "2026-01-01", block_types: [], active: version === 2 })), tools: [] }) : undefined }, check: async (app, authority, writes) => {
-    await click(select(app, '.chat-actions > button:not([data-write-surface]):not(.header-overflow)'));
+    await click(select(app, '.chat-actions > button:not([data-write-surface])'));
     const restore = select(app, tag("history.restore"));
     expect(disabled(restore)).toBe(authority === "observer");
     await click(restore);
@@ -1120,9 +1117,7 @@ test("a library tab reconnects as observer once its editor closed, and as contro
 });
 
 const requestApprovalChange = async (app: RenderResult) => {
-  await click(select(app, '[aria-label="page chat options"]'));
-  await click(select(app, tag("page-chat.auto-approve")));
-  await click(app.getByRole("button", { name: "confirm", exact: true }));
+  await click(select(app, tag("composer.auto-approve")));
 };
 
 const turnedOn = { result: { revision: `sha256:${"c".repeat(64)}`, settings: { telemetry: { enabled: true, source: "builtin", editable: true } }, settings_malformed: false } };
@@ -1173,12 +1168,11 @@ test("tool approval waits for the turn end and reports the authoritative result"
     await requestApprovalChange(app);
     expect(writes).not.toContain("set_settings");
     expect(app.getByText("waiting for the turn to finish…")).toBeTruthy();
-    expect(select(app, tag("page-chat.auto-approve")).getAttribute("aria-checked")).toBe("true");
+    expect(select(app, tag("composer.auto-approve")).getAttribute("aria-checked")).toBe("true");
     busy = false;
     await act(async () => { emit({ jsonrpc: "2.0", method: "event", params: { event: "agent_end", session_id: "session" } }); });
     expect(writes).toContain("set_settings");
-    expect(select(app, tag("page-chat.auto-approve")).getAttribute("aria-checked")).toBe("false");
-    expect(app.getByText(/ask before running tools · saved/)).toBeTruthy();
+    expect(select(app, tag("composer.auto-approve")).getAttribute("aria-checked")).toBe("false");
   });
 });
 
@@ -1195,9 +1189,8 @@ test("tool approval errors leave the old setting and a stale chat never writes",
     try {
       await requestApprovalChange(app);
       expect(app.getByText("could not change tool approval; try again")).toBeTruthy();
-      expect(select(app, tag("page-chat.auto-approve")).getAttribute("aria-checked")).toBe("true");
-      await click(select(app, tag("page-chat.auto-approve")));
-      await click(app.getByRole("button", { name: "confirm", exact: true }));
+      expect(select(app, tag("composer.auto-approve")).getAttribute("aria-checked")).toBe("true");
+      await click(select(app, tag("composer.auto-approve")));
       expect(app.getByText("saving…")).toBeTruthy();
       await click(select(app, '[aria-haspopup="listbox"]'));
       await click(app.getByRole("option", { name: /Other fixture chat/ }));
@@ -1206,5 +1199,32 @@ test("tool approval errors leave the old setting and a stale chat never writes",
       expect(select(app, "#page-chat-title").textContent).toBe("Other fixture chat");
       expect(app.queryByText("could not change tool approval; try again")).toBeNull();
     } finally { release(settings); }
+  });
+});
+
+test("the composer holds the chat's modes and model; the header and sidebar have no mode controls", async () => {
+  await withApp("controller", { attached: true, rpc: { session_settings: () => ({ result: { model: "fixture-model", approval_mode: "allow" } }) } }, async (app) => {
+    const modes = select(app, '[data-part="composer"] [data-part="composer-modes"]');
+    expect(modes.querySelector(tag("composer.create-mode"))?.getAttribute("role")).toBe("switch");
+    expect(modes.querySelector(tag("composer.auto-approve"))?.getAttribute("aria-checked")).toBe("true");
+    expect(modes.querySelector('[data-part="composer-model"]')?.textContent).toBe("fixture-model");
+    expect(app.container.querySelector(".chat-header [aria-pressed], .chat-header .approval-mode, .create-split button")).toBeNull();
+  });
+});
+
+test("a server that forces tool approval holds the composer switch off and says why", async () => {
+  await withApp("controller", { attached: true, page: { approval_mode: "ask" }, rpc: { session_settings: () => ({ result: { model: "fixture-model", approval_mode: "ask" } }) } }, async (app, writes) => {
+    const toggle = select(app, tag("composer.auto-approve"));
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(disabled(toggle)).toBe(true);
+    expect(toggle.getAttribute("title")).toBe("this server requires tool approval");
+    await click(toggle);
+    expect(writes).not.toContain("set_settings");
+  });
+});
+
+test("a new chat's composer shows zeta's default model", async () => {
+  await withApp("controller", { rpc: { state_settings: () => ({ result: { model: "default-model", provider: null, approval_mode: null, max_depth: 1 } }) } }, async (app) => {
+    expect((await app.findByText("default-model", { selector: '[data-part="composer-model"]' })).textContent).toBe("default-model");
   });
 });

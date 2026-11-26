@@ -99,6 +99,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
             aria-label={label}
           />
         </div>
+        {props.controls && <div data-part="composer-bar">{props.controls}</div>}
       </div>
     );
 
@@ -131,6 +132,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
         />
       </div>
       <div data-part="composer-bar">
+        {props.controls}
         <p
           data-part="composer-status"
           data-tone={tone}

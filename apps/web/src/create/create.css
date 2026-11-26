@@ -1,7 +1,5 @@
 .create-split { display: flex; min-height: var(--g1-nav-row-height); }
 .create-split > .place-link { flex: 1; padding-inline: var(--g1-space-2); min-height: 100%; }
-.create-split button { border: 0; color: var(--fulcrum-muted); font-size: inherit; white-space: nowrap; min-width: 0; padding-inline: var(--g1-space-2); }
-.create-split button[aria-pressed="true"] { color: var(--fulcrum-accent); }
 .create-heading { min-height: 44px; flex: none; border-bottom: 1px solid var(--fulcrum-border); display: flex; align-items: center; padding: 0 var(--g1-page-gutter); font-size: inherit; }
 .create-landing a { color: inherit; text-decoration: none; }
 .create-scroll { min-height: 0; overflow: auto; flex: 1; }
@@ -40,13 +38,8 @@
 .create-landing li b { font-size: inherit; }
 .create-landing section ul > li { border-bottom: 1px solid var(--g1-rule); }
 .create-landing .build-meta, .create-made small { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
-@media (min-width: 761px) and (min-height: 501px) {
-  .sidebar-collapsed .create-split button { display: none; }
-}
 @media (max-width: 760px), (max-height: 500px) {
   .create-split { flex: 1; min-height: 44px; }
-  .create-split button { min-width: 44px; }
-  .create-split button span { display: none; }
   .create-heading { min-height: 48px; padding-inline: 16px; }
   .create-landing { padding: var(--g1-space-4); }
   .create-landing textarea { font-size: 16px; }
@@ -58,8 +51,8 @@
 .build-status .build-needs-you, .create-landing li[data-state="needs you"]:not([data-last-known]) > a { color: var(--fulcrum-warn); }
 .create-split .build-status-nav { padding-inline: 8px; border-left: 1px solid var(--fulcrum-border); }
 @media (min-width: 761px) and (min-height: 501px) {
-  /* the same 28px row as every sidebar row; with the page toggle, the summary takes its own row inside the control, so it never overlaps the search field */
-  .create-split > :is(.place-link, button) { min-height: var(--g1-nav-row-height); }
+  /* the same 28px row as every sidebar row; the summary takes its own row inside the control, so it never overlaps the search field */
+  .create-split > .place-link { min-height: var(--g1-nav-row-height); }
   .create-split:has(.build-status-nav) { flex-wrap: wrap; }
   .create-split .build-status-nav { order: 1; flex-basis: 100%; min-height: 40px; border: 1px solid var(--fulcrum-border); }
 }
