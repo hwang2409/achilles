@@ -142,10 +142,8 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
     await holder.getByRole("button", { name: "new chat", exact: true }).waitFor(opts);
     const tab = await open("stdio");
     let confirm = await review(tab, "starts the configured local child process");
-    if (!feature || methods.length || roles.join() !== "observer") throw new Error("probe opened without feature or borrowed control during review");
-    await confirm.click(opts);
-    await tab.getByRole("alert").filter({ hasText: "a chat tab keeps control" }).waitFor(opts);
-    if (methods.length) throw new Error("probe sent while a chat owned control");
+    // every tab is its own zeta controller, next to an open chat tab; the review itself sends nothing.
+    if (!feature || methods.length || roles.join() !== "controller") throw new Error("probe opened without feature, not as a controller, or sent during review");
     await holder.close();
     await dialog(tab).getByRole("button", { name: "keep without testing" }).click(opts);
     confirm = await review(tab, "starts the configured local child process");
@@ -185,7 +183,7 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
     await lost.page.close();
     await Bun.write(join(root, "release"), "go");
     await dropped.getByRole("alert").filter({ hasText: "result unknown" }).waitFor(opts);
-    await until("observer reconnect after probe drop", () => roles.at(-1) === "observer");
+    await until("controller reconnect after probe drop", () => roles.at(-1) === "controller");
     await dropped.locator(".mcp-offline").waitFor({ state: "hidden", ...opts });
     await reaped("slow");
     const next = await desktop.newPage();
@@ -196,7 +194,7 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
       if (calls.join() !== allowlist.join()) throw new Error("probe did not initialize and list only");
     }
     if ((await log("broken")).trim() !== "initialize" || await log("untrusted") || privateLeak || refreshed) throw new Error("failure, trust, or wire privacy proof failed");
-    console.log("MCP tests: stdio and HTTP counts, failure, no-call, reap and socket-close, observer refusal, untrusted no-send, drop without retry and control release verified");
+    console.log("MCP tests: stdio and HTTP counts, failure, no-call, reap and socket-close, untrusted no-send, drop without retry verified");
     return WRITE_SURFACE.mcpTest;
   } finally {
     await Bun.write(join(root, "release"), "cleanup");

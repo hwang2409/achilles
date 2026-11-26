@@ -70,13 +70,14 @@ async function capture(tab: Page, dir: string | undefined, index: number) {
 function observeWire() {
   const mutations: string[] = [], statuses: string[] = [];
   let feature = false;
-  let observer: WebSocketRoute | undefined;
+  let current: WebSocketRoute | undefined;
   let drop = false;
   let leaked = false;
   let launch = "";
   return {
     mutations, statuses, negotiated: () => feature,
-    dropObserver: async () => { drop = true; await observer?.close({ code: 1011, reason: "fixture disconnect" }); },
+    // every tab is a controller: drop its one socket, and hold the reconnect offline until `resume`.
+    dropSocket: async () => { drop = true; await current?.close({ code: 1011, reason: "fixture disconnect" }); },
     resume: () => { drop = false; },
     getLaunch: () => launch,
     checkLeak: () => leaked,
@@ -88,8 +89,8 @@ function observeWire() {
         const { method, params } = JSON.parse(String(message));
         if (method === "hello") {
           role = params.role;
-          if (role === "observer") observer = page;
-          if (role === "observer" && drop) { paused = true; void page.close({ code: 1011, reason: "fixture offline" }); return; }
+          current = page;
+          if (drop) { paused = true; void page.close({ code: 1011, reason: "fixture offline" }); return; }
           paused = false;
         }
         if (method === methods.status) statuses.push(role);
@@ -159,7 +160,7 @@ async function cancel(tab: Page, dir: string | undefined) {
 async function settleDrop(tab: Page, wire: ReturnType<typeof observeWire>) {
   const child = await popup(tab);
   try {
-    await wire.dropObserver();
+    await wire.dropSocket();
     await tab.getByText(/connection lost · sign-in result unknown/).waitFor(options);
     await child.getByRole("button", { name: "deny fixture" }).click(options);
     wire.resume();
@@ -167,16 +168,16 @@ async function settleDrop(tab: Page, wire: ReturnType<typeof observeWire>) {
   } finally { wire.resume(); await child.close(); }
 }
 
-export async function refuseMcpOAuth(browser: Browser, origin: string) {
+// every tab is its own zeta controller: a connections tab starts and cancels a sign-in while another tab's chat turn runs.
+export async function mcpOAuthBesideRunningChat(browser: Browser, origin: string) {
   const context = await browser.newContext();
   const wire = observeWire();
   try {
     const tab = await context.newPage();
     await wire.install(tab);
     await tab.goto(`${origin}${oauthPath}`, options);
-    await (await startReview(tab)).click(options);
-    await tab.getByRole("alert").filter({ hasText: "a chat tab keeps control" }).waitFor(options);
-    if (wire.mutations.length) throw new Error("OAuth sent while a chat held control");
+    await cancel(tab, undefined);
+    if (wire.mutations.join() !== [methods.start, methods.cancel].map(method => `controller:${method}`).join()) throw new Error(`OAuth beside a running chat sent ${wire.mutations.join()}`);
   } finally { await context.close(); }
 }
 
@@ -224,7 +225,7 @@ export async function gateMcpOAuth(browser: Browser, origin: string, home: strin
     await wire.install(zoomTab);
     await zoomTab.goto(`${origin}${oauthPath}`, options);
     await logout(zoomTab, dir);
-    if (!wire.negotiated() || !wire.statuses.length || wire.statuses.some(role => role !== "observer")) throw new Error("OAuth status did not use a negotiated observer socket");
+    if (!wire.negotiated() || !wire.statuses.length || wire.statuses.some(role => role !== "controller")) throw new Error("OAuth status did not use the tab's negotiated controller socket");
     if (wire.mutations.join() !== [methods.start, methods.start, methods.cancel, methods.start, methods.logout].map(method => `controller:${method}`).join() || wire.checkLeak()) throw new Error("OAuth requests were duplicated or not private");
     return [WRITE_SURFACE.mcpAuthStart, WRITE_SURFACE.mcpAuthCancel, WRITE_SURFACE.mcpAuthLogout];
   } finally {
