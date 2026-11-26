@@ -2,8 +2,8 @@
 .sessions-frame :is(a, button, input):focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .sessions-frame button:not(:disabled, [aria-disabled="true"]):hover { background-color: var(--g1-hover); }
 .sessions-frame button:disabled { color: var(--fulcrum-muted); cursor: default; }
-/* the time column has a fixed width: each row is its own grid, so a max-content column moved every other column per row */
-.sessions-split { --sessions-columns: minmax(0, 1fr) minmax(0, .6fr) 5rem 9ch; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.06fr); flex: 1; min-height: 0; }
+/* the time column has a fixed width, 10ch so locale labels like "12:45 p.m." fit: each row is its own grid, so a max-content column moved every other column per row */
+.sessions-split { --sessions-columns: minmax(0, 1fr) minmax(0, .6fr) 5rem 10ch; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.06fr); flex: 1; min-height: 0; }
 .sessions-catalog, .sessions-detail { min-width: 0; overflow: auto; scrollbar-width: thin; }
 .sessions-catalog { border-right: 1px solid var(--fulcrum-border); }
 .sessions-filters { padding: 14px var(--g1-page-gutter) 12px; }
@@ -65,7 +65,7 @@
 .sessions-timeline.transcript { overflow: visible; }
 .sessions-more { margin-block: 8px; }
 @media (max-width: 760px), (max-height: 500px) {
-  .sessions-split { display: block; overflow: auto; --sessions-columns: minmax(0, 1fr) 5rem 9ch; }
+  .sessions-split { display: block; overflow: auto; --sessions-columns: minmax(0, 1fr) 5rem 10ch; }
   .sessions-catalog { border-right: 0; }
   .sessions-split[data-detail="true"] .sessions-catalog, .sessions-split[data-detail="false"] .sessions-detail, .sessions-row > span:nth-child(2) { display: none; }
   .sessions-filters input { font-size: max(16px, 1em); }
