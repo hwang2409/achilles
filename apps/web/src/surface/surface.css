@@ -6,12 +6,13 @@
 .brand-row > .surface-connection { flex: none; width: var(--g1-status-mark); height: var(--g1-status-mark); border-radius: 50%; background: var(--g1-warn-fill); }
 .brand-row > .surface-connection[data-connected="true"] { background: var(--g1-border); }
 .surface-actions { flex: none; display: grid; gap: var(--g1-space-2); margin: 0 var(--g1-sidebar-padding); }
-.surface-actions { padding-block: var(--g1-space-2) var(--g1-space-1); row-gap: 0; }
-.surface-actions > .new-chat { display: flex; align-items: center; min-width: 0; min-height: var(--g1-nav-row-height); gap: 6px; padding: 0 var(--g1-space-2); font-size: inherit; }
+/* one 12px gap between every group: the brand row ends 8px below the search pill, plus 4px here */
+.surface-actions { padding-block: var(--g1-space-1) 0; row-gap: 0; }
+.surface-actions > .new-chat { display: flex; align-items: center; min-width: 0; min-height: var(--g1-nav-row-height); gap: var(--g1-space-2); padding: 0 var(--g1-space-2); font-size: inherit; }
 .surface-actions kbd, .surface-actions small { margin-left: auto; color: var(--fulcrum-muted); font-size: inherit; }
 .surface-actions b { font-weight: 500; }
 /* the search sits in the brand row beside the name, so it is a compact field that takes the free width */
-.surface-search { position: relative; flex: 1; min-width: 0; margin-left: var(--g1-space-1); }
+.surface-search { position: relative; flex: 1; min-width: 0; }
 .surface-search .search-skeleton { min-height: 28px; }
 .surface-search .chat-search { background: color-mix(in srgb, var(--g1-fg) 5%, transparent); min-height: 28px; display: flex; align-items: center; gap: 6px; padding-inline: 6px 40px; border: 0; border-radius: var(--g1-radius-control); font-size: inherit; font-weight: 500; }
 .surface-search .chat-search:hover { background: color-mix(in srgb, var(--g1-fg) 8%, transparent); }
@@ -20,14 +21,14 @@
 .surface-search .chat-search input::placeholder { color: color-mix(in srgb, var(--g1-fg) 60%, transparent); }
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; }
 /* the ⌘K hint sits inside the field's right end and opens the palette */
-.surface-search .palette-button { position: absolute; inset-block: 0; right: 0; display: grid; place-items: center end; min-height: 0; min-width: 40px; padding: 0 6px; color: var(--fulcrum-muted); border-color: transparent; background: transparent; }
+.surface-search .palette-button { position: absolute; inset-block: 0; right: 0; display: grid; place-items: center end; min-height: 0; min-width: 40px; padding: 0 var(--g1-space-2); color: var(--fulcrum-muted); border-color: transparent; background: transparent; }
 .surface-search .palette-button > kbd { font: inherit; font-size: calc(1em - 1px); font-variant-numeric: tabular-nums; }
 .place-nav { flex: none; margin: var(--g1-space-3) var(--g1-sidebar-padding); }
 .chat-group h2 { font-size: calc(1em - 1px); font-weight: 600; color: var(--g1-muted); }
 .place-nav section + section { margin-top: var(--g1-space-3); }
 .place-link > span::first-letter { text-transform: uppercase; }
 .place-link > span { display: block; }
-.place-link { display: flex; align-items: center; gap: 6px; min-height: var(--g1-nav-row-height); padding: 0 var(--g1-space-2); border-radius: var(--g1-radius-control); color: color-mix(in srgb, var(--g1-fg) 60%, transparent); font-size: inherit; font-weight: 500; line-height: 1.25; }
+.place-link { display: flex; align-items: center; gap: var(--g1-space-2); min-height: var(--g1-nav-row-height); padding: 0 var(--g1-space-2); border-radius: var(--g1-radius-control); color: color-mix(in srgb, var(--g1-fg) 60%, transparent); font-size: inherit; font-weight: 500; line-height: 1.25; }
 .place-link .waiting-count { margin-left: auto; color: var(--fulcrum-warn); }
 .place-link .waiting-count::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: 4px; vertical-align: .1em; background: currentColor; }
 .place-link svg { display: block; flex: none; color: var(--nav-icon); }
