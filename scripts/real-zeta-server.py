@@ -655,8 +655,8 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     ServeControl._event = held_event
     original_send = DeliveryRequests.send
 
-    async def held_send(instance, params, features):
-        outcome = await original_send(instance, params, features)
+    async def held_send(instance, use, params, features):
+        outcome = await original_send(instance, use, params, features)
         if params.get("text") == "steer while running":
             await hold(control, "fallback_send_barrier")
         return outcome
