@@ -1738,7 +1738,20 @@ class PageStore:
             ).fetchall()
         return {
             "active_revision": next((r["version"] for r in rows if r["digest"]), None),
-            "revisions": [dict(r) for r in rows],
+            "revisions": [
+                {
+                    key: r[key]
+                    for key in (
+                        "version",
+                        "digest",
+                        "artifact_size",
+                        "diagnostics",
+                        "runtime_error",
+                        "created_at",
+                    )
+                }
+                for r in rows
+            ],
         }
 
     def set_runtime_error(self, page_id: str, revision: int, error: str) -> None:

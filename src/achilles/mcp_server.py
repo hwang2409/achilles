@@ -424,6 +424,7 @@ def build_mcp(store: PageStore):
             ):
                 return _inspect_error()
             summary = await anyio.to_thread.run_sync(store.inspect_page, target["id"])
+            summary["code"] = await anyio.to_thread.run_sync(store.inspect_code, target["id"])
             return _inspect_result(summary)
         except ValidationError as exc:
             return _safe_error(exc)

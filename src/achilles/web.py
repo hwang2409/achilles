@@ -215,6 +215,8 @@ def create_app() -> Starlette:
 
         html = (
             "<!doctype html><meta charset='utf-8'><div id='root'></div>"
+            "<script>addEventListener('error',e=>parent.postMessage({runtimeError:String(e.message)},'*'));"
+            "addEventListener('unhandledrejection',e=>parent.postMessage({runtimeError:String(e.reason)},'*'));</script>"
             f"<script type='module' src='/api/pages/{row['id']}/"
             f"artifact/{code['digest']}'></script>"
         )
@@ -239,6 +241,17 @@ def create_app() -> Starlette:
         return FileResponse(
             store.root / "bundles" / f"{code['digest']}.js", media_type="text/javascript"
         )
+
+    async def runtime_error(request):
+        page_id = await require_page_bearer(request)
+        body = await request.json()
+        await anyio.to_thread.run_sync(
+            store.set_runtime_error,
+            page_id,
+            int(body.get("revision", 0)),
+            str(body.get("error", "runtime error")),
+        )
+        return JSONResponse({"ok": True})
 
     async def credential(request):
         if not _same_origin(request):
@@ -574,6 +587,7 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/chats", register_chat, methods=["POST"]),
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
+            Route("/api/pages/{id}/runtime-error", runtime_error, methods=["POST"]),
             Route("/api/pages/{id}/frame", page_frame),
             Route("/api/pages/{id}/artifact/{digest}", page_artifact),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
