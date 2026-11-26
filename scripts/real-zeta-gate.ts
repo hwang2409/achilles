@@ -807,7 +807,8 @@ with _database() as db:
             const row = element.querySelector(".telemetry-actions")!.getBoundingClientRect();
             return { scrollTop: element.scrollTop, stepTop: step.top, stepBottom: step.bottom, rowTop: row.top, visible: step.top >= Math.max(0, pane.top) && step.bottom <= Math.min(innerHeight, pane.bottom, row.top) };
           });
-          if (viewport.width === 360 && (!geometry.visible || (viewport.height === 740 && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
+          // no observer banner above it now (the tab controls zeta), so at 360x740 the steps can fit without scrolling.
+          if (viewport.width === 360 && !geometry.visible) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
           await captureRecovery(`${size}-bottom`);
           await notice.evaluate(element => { element.scrollTop = 0; });
         }
