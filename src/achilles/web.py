@@ -197,7 +197,47 @@ def create_app() -> Starlette:
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
                 "layout": await anyio.to_thread.run_sync(store.layout, row["id"]),
                 "create_mode": bool(row["create_mode"]),
+                "code": await anyio.to_thread.run_sync(store.page_code, row["id"]),
             }
+        )
+
+    async def page_frame(request):
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
+        if row is None:
+            raise HTTPException(404, "page not found")
+        code = await anyio.to_thread.run_sync(store.page_code, row["id"])
+        if not code:
+            raise HTTPException(404, "page has no compiled revision")
+        artifact = store.root / "bundles" / f"{code['digest']}.js"
+        if not artifact.is_file():
+            raise HTTPException(404, "page artifact not found")
+        from starlette.responses import HTMLResponse
+
+        html = (
+            "<!doctype html><meta charset='utf-8'><div id='root'></div>"
+            f"<script type='module' src='/api/pages/{row['id']}/"
+            f"artifact/{code['digest']}'></script>"
+        )
+        return HTMLResponse(
+            html,
+            headers={
+                "content-security-policy": (
+                    "default-src 'self' https:; script-src 'self' https:; "
+                    "connect-src https: http:; frame-ancestors 'self'"
+                ),
+                "cache-control": "no-store",
+            },
+        )
+
+    async def page_artifact(request):
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
+        if row is None:
+            raise HTTPException(404, "page not found")
+        code = await anyio.to_thread.run_sync(store.page_code, row["id"])
+        if not code or code["digest"] != request.path_params["digest"]:
+            raise HTTPException(404, "artifact not found")
+        return FileResponse(
+            store.root / "bundles" / f"{code['digest']}.js", media_type="text/javascript"
         )
 
     async def credential(request):
@@ -388,6 +428,23 @@ def create_app() -> Starlette:
 
     async def records(request):
         page_id = request.path_params["id"]
+        if request.method == "POST":
+            token = request.headers.get("authorization", "")
+            principal = (
+                await anyio.to_thread.run_sync(store.authenticate, token[7:])
+                if token.startswith("Bearer ")
+                else None
+            )
+            if principal is None or principal["id"] != page_id:
+                raise HTTPException(403, "forbidden")
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise HTTPException(400, "record must be an object")
+            return JSONResponse(
+                await anyio.to_thread.run_sync(
+                    store.insert_record, page_id, request.path_params["collection"], body
+                )
+            )
         token = request.headers.get("authorization", "")
         if not token.startswith("Bearer "):
             raise HTTPException(401, "missing bearer")
@@ -517,13 +574,15 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/chats", register_chat, methods=["POST"]),
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
+            Route("/api/pages/{id}/frame", page_frame),
+            Route("/api/pages/{id}/artifact/{digest}", page_artifact),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
             Route("/api/pages/{id}/tools", page_tools),
             Route("/api/pages/{id}/tools/{name}/invoke", invoke_tool, methods=["POST"]),
             Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
             Route("/api/pages/{id}/versions", versions),
             Route("/api/pages/{id}/layout/restore", restore_layout, methods=["POST"]),
-            Route("/api/pages/{id}/records/{collection}", records),
+            Route("/api/pages/{id}/records/{collection}", records, methods=["GET", "POST"]),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),

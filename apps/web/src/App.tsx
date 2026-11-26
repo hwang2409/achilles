@@ -26,6 +26,7 @@ import { draftStore } from "./draftStore";
 import { HistoryDialog } from "./page/HistoryDialog";
 import { useRecordWrites } from "./page/RecordForm";
 import { PageView } from "./page/PageView";
+import { PageFrame } from "./page/PageFrame";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
@@ -450,7 +451,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
-        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
+        {hasBlocks && {activePage.code ? <PageFrame pageId={activePage.id} credential={(ready ?? empty)!.credential} revision={activePage.code.version} /> : <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}}
         <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetClosed ? " page-chat-sheet-closed" : ""}`}>
         {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>Page chat</span>{state !== "idle" && <span className="page-chat-bar-state">{stateLabel}</span>}<span aria-hidden="true">⌃</span></button>}
         {pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}

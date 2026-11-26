@@ -256,6 +256,26 @@ def build_mcp(store: PageStore):
         create_status = "ON" if page["create_mode"] else "OFF"
         tools: list[Tool] = [
             Tool(
+                name="write_page",
+                description=(
+                    "write and compile a React/TypeScript page; writes are immediate and audit "
+                    "as actor page."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string"},
+                        "dependencies": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "expected_revision": {"type": ["integer", "null"]},
+                    },
+                    "required": ["source", "dependencies"],
+                    "additionalProperties": False,
+                },
+            ),
+            Tool(
                 name="inspect_page",
                 description=(
                     f"this chat is on the page at route {page['route']!r} "
@@ -369,6 +389,26 @@ def build_mcp(store: PageStore):
             )
         return ListToolsResult(tools=tools)
 
+    async def write_page(page, args) -> CallToolResult:
+        try:
+            result = await anyio.to_thread.run_sync(
+                store.write_page,
+                page["id"],
+                args.get("source", ""),
+                args.get("dependencies", {}),
+                args.get("expected_revision"),
+            )
+        except ValidationError as exc:
+            return CallToolResult(
+                isError=True,
+                content=[
+                    TextContent(
+                        type="text", text=json.dumps({"error": exc.code, "diagnostics": exc.hint})
+                    )
+                ],
+            )
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(result))])
+
     async def inspect_page(page, args) -> CallToolResult:
         try:
             validate_schema(args, INSPECT_PAGE_SCHEMA)
@@ -420,6 +460,8 @@ def build_mcp(store: PageStore):
                 isError=True, content=[TextContent(type="text", text="forbidden")]
             )
         args = params.arguments or {}
+        if params.name == "write_page":
+            return await write_page(page, args)
         if params.name == "inspect_page":
             return await inspect_page(page, args)
         if params.name in BUILTIN_TOOL_NAMES:
