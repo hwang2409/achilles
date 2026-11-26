@@ -11,16 +11,20 @@
 [data-part="message"] [data-part="md-list"] { margin: 0 0 12px; padding-left: 20px; }
 [data-part="message"] ul[data-part="md-list"] { padding-left: 0; list-style: none; }
 [data-part="message"] ol[data-part="md-list"] { padding-left: 28px; }
-[data-part="message"] ul[data-part="md-list"] > [data-part="md-list-item"] { position: relative; padding-left: 16px; margin: 0 0 4px; }
+[data-part="message"] ul[data-part="md-list"] > [data-part="md-list-item"] { position: relative; padding-left: 16px; margin: 0; }
 [data-part="message"] ul[data-part="md-list"] > [data-part="md-list-item"]::before { content: "–"; position: absolute; left: 0; color: var(--fulcrum-muted); }
-[data-part="message"] ol[data-part="md-list"] > [data-part="md-list-item"] { padding-left: 4px; margin: 0 0 4px; }
+[data-part="message"] ol[data-part="md-list"] > [data-part="md-list-item"] { padding-left: 4px; margin: 0; }
+/* items sit closer than paragraphs, and the last one adds nothing to the list's own 12px */
+[data-part="message"] [data-part="md-list-item"] + [data-part="md-list-item"] { margin-top: 4px; }
 [data-part="message"] [data-part="md-blockquote"] { margin: 0 0 12px; padding-left: 16px; border-left: 2px solid var(--fulcrum-border); color: var(--fulcrum-muted); font-style: italic; }
 [data-part="message"] [data-part="md-link"] { color: var(--g1-link); text-decoration: underline; text-underline-offset: 3px; }
 [data-part="message"] [data-part="md-code-inline"] {
-  padding: 0 5px;
+  /* sized to the prose around it, with line-height 1 so a chip never makes its line taller */
+  padding: .1em .3em;
   border: 0;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--fulcrum-fg) 7%, transparent);
-  font: 13px/20px var(--achilles-code-font, var(--g1-font-mono));
+  font: .875em/1 var(--achilles-code-font, var(--g1-font-mono));
 }
 [data-part="message"] [data-part="code-fence"] {
   margin: 0 0 12px;

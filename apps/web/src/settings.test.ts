@@ -25,16 +25,17 @@ describe("parseSettings", () => {
   test("replaces old named palettes but still applies v1 font and size choices", () => {
     const palettes = ["github-light", "github-dark", "gruvbox-light", "gruvbox-dark", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "one-dark"];
     for (const theme of palettes) expect(parseSettings(JSON.stringify({ theme })).theme).toBe("auto");
-    const ui = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "-apple-system"], ["geist", "--g1-font-ui"]] as const;
+    const ui = [["jetbrains-mono", "JetBrains Mono", "-0.02em"], ["ibm-plex-sans", "IBM Plex Sans", "0"], ["inter", "Inter", "-0.01em"], ["system", "-apple-system", "-0.01em"], ["geist", "--g1-font-ui", "0"]] as const;
     const code = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "--g1-font-mono"]] as const;
     const root = document.documentElement;
     const original = root.style.cssText;
     try {
-      for (const [uiFont, uiFamily] of ui) for (const [codeFont, codeFamily] of code) for (const size of [13, 14, 15, 16]) {
+      for (const [uiFont, uiFamily, tracking] of ui) for (const [codeFont, codeFamily] of code) for (const size of [13, 14, 15, 16]) {
         const saved = parseSettings(JSON.stringify({ v: 1, theme: "nord", uiFont, codeFont, size }));
         expect(saved).toMatchObject({ theme: "auto", uiFont, codeFont, size });
         applySettings(saved);
         expect(root.style.getPropertyValue("--achilles-ui-font")).toContain(uiFamily);
+        expect(root.style.getPropertyValue("--achilles-ui-tracking")).toBe(tracking);
         expect(root.style.getPropertyValue("--achilles-code-font")).toContain(codeFamily);
         expect(root.style.getPropertyValue("--achilles-ui-size")).toBe(`${size}px`);
       }

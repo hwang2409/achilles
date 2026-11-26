@@ -3,7 +3,7 @@
   --fulcrum-measure: var(--g1-content-max);
 }
 [data-part="message"], [data-part="item"][data-kind="user"] {
-  font-size: var(--g1-type-chat);
+  font-size: var(--achilles-ui-size, var(--g1-type-chat));
   line-height: var(--g1-leading-chat);
 }
 [data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
@@ -65,6 +65,8 @@ summary[data-part="tool-header"]:focus-visible { outline-offset: 2px; }
 /* the verb is the same muted sans word in a tool row and an approval card */
 :is([data-part="tool"], [data-part="approval"]) [data-part="tool-name"] { color: var(--g1-muted); font-family: var(--achilles-ui-font, var(--g1-font-ui)); font-weight: 400; }
 [data-part="tool-summary"] { color: var(--g1-muted); }
+/* the mono target and error line use the code size, so a mono face does not read wider than the sans verb beside it */
+[data-part="tool-header"] > :is([data-part="tool-summary"], .compact-tool-error) { font-size: .875em; }
 [data-part="tool"] [data-part="tool-summary"] { color: var(--g1-fg); }
 [data-part="tool-status"] { font-size: inherit; }
 /* a finished call is quiet: muted word, the green mark stays */
