@@ -56,12 +56,13 @@ export function parseSettings(value: string | null): Settings {
   };
 }
 
-const uiFontValues: Record<UiFont, string> = {
-  "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
-  "ibm-plex-sans": '"IBM Plex Sans", system-ui, sans-serif',
-  inter: '"Inter", system-ui, sans-serif',
-  geist: "var(--g1-font-ui)",
-  system: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+// tracking is per face: a font drawn for text sizes wants none, wide or loosely spaced faces want a little less
+const uiFontValues: Record<UiFont, { family: string; tracking: string }> = {
+  "jetbrains-mono": { family: '"JetBrains Mono", var(--g1-font-mono)', tracking: "-0.02em" },
+  "ibm-plex-sans": { family: '"IBM Plex Sans", system-ui, sans-serif', tracking: "0" },
+  inter: { family: '"Inter", system-ui, sans-serif', tracking: "-0.01em" },
+  geist: { family: "var(--g1-font-ui)", tracking: "0" },
+  system: { family: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', tracking: "-0.01em" },
 };
 const codeFontValues: Record<CodeFont, string> = {
   "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
@@ -91,7 +92,8 @@ export function applySettings(settings: Settings): void {
   }
   root.dataset.codeFont = settings.codeFont;
   root.dataset.density = settings.density;
-  root.style.setProperty("--achilles-ui-font", uiFontValues[settings.uiFont]);
+  root.style.setProperty("--achilles-ui-font", uiFontValues[settings.uiFont].family);
+  root.style.setProperty("--achilles-ui-tracking", uiFontValues[settings.uiFont].tracking);
   root.style.setProperty("--achilles-code-font", codeFontValues[settings.codeFont]);
   root.style.setProperty("--achilles-ui-size", `${settings.size}px`);
 }

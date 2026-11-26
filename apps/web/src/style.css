@@ -2,7 +2,7 @@
   font-family: var(--achilles-ui-font, var(--g1-font-ui));
   font-size: var(--achilles-ui-size, var(--g1-type-chat));
   line-height: var(--g1-leading-chat);
-  letter-spacing: .01em;
+  letter-spacing: var(--achilles-ui-tracking, 0);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
@@ -20,6 +20,8 @@ small { font-size: inherit; }
 button, input, textarea, select { color: inherit; font: inherit; }
 /* bare <code> otherwise falls back to the browser's Courier */
 code { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+/* code faces are spaced for code: the UI tracking never reaches them */
+:where(code, pre, kbd, samp, [data-part="tool"], [data-part="approval"], [data-part="delivery-note"], [data-part="run-end-marker"]) { letter-spacing: normal; }
 .sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 button, input, textarea, select { border-radius: var(--g1-radius-control); }
 :where(button, .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }
