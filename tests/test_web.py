@@ -1093,7 +1093,7 @@ def test_discovery_allows_browser_same_origin(monkeypatch, tmp_path: Path) -> No
     )
     static = tmp_path / "dist"
     static.mkdir()
-    (static / "index.html").write_text("<html><head></head><body></body></html>")
+    (static / "index.html").write_text("<html><body></body></html>")
     monkeypatch.setattr(web, "_static_root", lambda: static)
     monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
     client = TestClient(

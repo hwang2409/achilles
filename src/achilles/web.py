@@ -661,7 +661,11 @@ def _asset(request):
 def _app(request):
     html = _static_file(_static_root(), "index.html").read_text()
     marker = '<meta name="achilles-shell" content="' + request.app.state.shell_token + '">'
-    return HTMLResponse(html.replace("<head>", "<head>" + marker, 1))
+    if "<head>" in html:
+        html = html.replace("<head>", "<head>" + marker, 1)
+    else:
+        html = marker + html
+    return HTMLResponse(html)
 
 
 def _text(value: str) -> str:
