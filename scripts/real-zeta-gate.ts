@@ -574,6 +574,8 @@ with _database() as db:
   const agentsHome = join(temp, "agents-zeta");
   const agentsDiscovery = join(agentsHome, "agents-ws.json");
   await mkdir(agentsHome, { mode: 0o700 });
+  // the agent gate opens a chat on this zeta, so it must trust achilles' page tools
+  await Bun.write(join(agentsHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
   const agentsServer = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/agent-controls-server.py")], {
     ...env, ZETA_HOME: agentsHome, ZETA_ACCOUNT_HOME: agentsHome, ZETA_PROOF_DISCOVERY: agentsDiscovery,
   });

@@ -35,7 +35,7 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
   try {
     await main.goto(`${origin}/#new-chat`);
     const composer = main.getByRole("textbox", { name: "message" });
-    await composer.fill("hold a synthetic parent turn");
+    await composer.fill("hold a synthetic parent turn", { timeout: 30_000 });
     await composer.press("Enter");
     // the fixture provider holds the parent turn open: spawn is refused while it runs
     const stop = main.getByRole("button", { name: "stop the running turn" });
