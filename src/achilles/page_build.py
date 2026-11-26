@@ -96,9 +96,9 @@ def _run_container(
             stderr=subprocess.PIPE,
         )
         readers = [threading.Thread(target=read_stdout), threading.Thread(target=read_stderr)]
-        for reader in readers:
-            reader.start()
         try:
+            for reader in readers:
+                reader.start()
             returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             process.kill()
