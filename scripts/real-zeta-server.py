@@ -14,6 +14,7 @@ from zeta.mcp.server_actor import MCPServerActor
 from zeta.protocol.types import MessageRole, TextContent, ToolCall
 from zeta.providers.completion import owned_completion
 from zeta.runtime.loop.agent import AgentLoop
+from zeta.server.control import ServeControl
 from zeta.server.delivery import DeliveryRequests
 from zeta.server.handlers.registry import HANDLERS
 from zeta.server.protocol import MethodDescriptor
@@ -636,21 +637,22 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, inspect_turn_release.set)
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR2, page_open_turn_release.set)
-    original_event = server.control._event
+    original_event = ServeControl._event
 
-    async def held_event(event, *args, **kwargs):
+    async def held_event(control_pair, event, *args, **kwargs):
         document = read_control(control) or {}
         if (
             event.type.name == "TURN_START"
             and document.get("hold_turn_start")
             and "turn_start_barrier" not in document
         ):
-            server.control._turn_end_published = False
+            control_pair._turn_end_published = False
             # longer than the gate's 30 s wait, so the gate reports its own timeout first
             await hold(control, "turn_start_barrier", seconds=35)
-        await original_event(event, *args, **kwargs)
+        await original_event(control_pair, event, *args, **kwargs)
 
-    server.control._event = held_event
+    # every session pair has its own ServeControl, so patch the class
+    ServeControl._event = held_event
     original_send = DeliveryRequests.send
 
     async def held_send(instance, params, features):
