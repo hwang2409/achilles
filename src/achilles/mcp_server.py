@@ -291,6 +291,8 @@ def build_mcp(store: PageStore):
                 annotations=ToolAnnotations(readOnlyHint=True),
             ),
         ]
+        if not page["create_mode"]:
+            tools.pop(0)
         if page["create_mode"]:
             tools.extend(
                 [
