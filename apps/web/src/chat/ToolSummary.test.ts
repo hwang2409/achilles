@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act } from "react";
 import React from "react";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { formatToolArguments, summarizeToolOutput, ToolSummaryBody, toolArgumentSummary } from "./ToolSummary";
+import { displayPath, formatToolArguments, summarizeToolOutput, ToolSummaryBody, toolArgumentSummary } from "./ToolSummary";
 import { RunProvider, type ToolBodyProps, type ToolItem } from "@fulcrum/react";
 import { createRunStore } from "@fulcrum/core";
 import { CompactTool } from "./CompactTool";
@@ -63,6 +63,44 @@ describe("tool summaries", () => {
     const huge = JSON.parse(JSON.stringify(Object.fromEntries(Array.from({ length: 1_024 }, (_, index) => [`key_${index}`, { deep: { value: "x" } }]))));
     expect(() => toolArgumentSummary(item(huge))).not.toThrow();
     expect(toolArgumentSummary(item(huge)).length).toBeLessThanOrEqual(260);
+  });
+
+  test.each([
+    ["read", { path: "/w/src/app/config.py", limit: 20 }, "src/app/config.py"],
+    ["Edit", { old_string: "a", new_string: "b", file_path: "/w/src/main.py" }, "src/main.py"],
+    ["write", { content: "x", path: "/elsewhere/notes.md" }, "/elsewhere/notes.md"],
+    ["bash", { command: "cd /w && wc -l /w/src/*.py /wx/a.py", timeout: 5 }, "cd /w && wc -l /w/src/*.py /wx/a.py"],
+    ["bash", { command: "ls /data/w/x && echo '/w/a b'" }, "ls /data/w/x && echo '/w/a b'"],
+    ["grep", { pattern: "TODO", path: "/w/src" }, "TODO"],
+    ["websearch", { query: "orca ui" }, "orca ui"],
+    ["fetch", { url: "https://example.com/a" }, "https://example.com/a"],
+  ])("shows only the primary argument of %s", (name, args, expected) => {
+    expect(toolArgumentSummary({ ...item(args), tool_call: { id: "call", name, arguments: args } }, "/w/")).toBe(expected);
+  });
+
+  test("falls back to key summaries for unknown tools and missing primaries", () => {
+    expect(toolArgumentSummary(item({ status: "done", path: "/w/a" }), "/w")).toBe("status done · path /w/a");
+    expect(toolArgumentSummary({ ...item({ limit: 2 }), tool_call: { id: "call", name: "read", arguments: { limit: 2 } } })).toBe("limit 2");
+  });
+
+  test("never makes a path relative to a sibling dir, keeps home dirs absolute, and keeps the file name when cut", () => {
+    expect(displayPath("/w/abc/x.py", "/w/a")).toBe("/w/abc/x.py");
+    expect(displayPath("/w", "/w")).toBe(".");
+    expect(displayPath("/home/bob/.ssh/config", "/w")).toBe("/home/bob/.ssh/config");
+    const long = displayPath("/Users/me/.zeta/scratch/achilles/orca-look/home-ux-final/cwd/src/app/config.py", null);
+    expect(long.length).toBeLessThanOrEqual(56);
+    expect(long).toStartWith("/Users/me/");
+    expect(long).toEndWith("/src/app/config.py");
+    expect(long).toContain("…");
+    const giant = displayPath(`/${"d".repeat(300)}/${"f".repeat(300)}.py`, null);
+    expect(giant.length).toBeLessThanOrEqual(56);
+    expect(giant).toEndWith(".py");
+  });
+
+  test("keeps the caps for hostile primary arguments", () => {
+    const summary = toolArgumentSummary({ ...item({}), tool_call: { id: "call", name: "bash", arguments: { command: `echo ${"x".repeat(5_000)}\u0000\n` } } });
+    expect(summary.length).toBeLessThanOrEqual(200);
+    expect(summary).not.toMatch(/[\u0000-\u001f]/);
   });
 
   test("marks omitted scalar array values", () => {

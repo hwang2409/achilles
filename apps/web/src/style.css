@@ -2,6 +2,7 @@
   font-family: var(--achilles-ui-font, var(--g1-font-ui));
   font-size: var(--achilles-ui-size, var(--g1-type-chat));
   line-height: var(--g1-leading-chat);
+  letter-spacing: .01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
@@ -17,6 +18,8 @@ body { margin: 0; }
 h1, h2, h3, h4 { font-size: var(--g1-type-title); }
 small { font-size: inherit; }
 button, input, textarea, select { color: inherit; font: inherit; }
+/* bare <code> otherwise falls back to the browser's Courier */
+code { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 .sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 button, input, textarea, select { border-radius: var(--g1-radius-control); }
 :where(button, .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }
@@ -29,6 +32,8 @@ button, input, textarea, select { border-radius: var(--g1-radius-control); }
 :where(.ui-empty) { padding: var(--g1-space-4) 0; }
 :where(.ui-empty) p { margin: var(--g1-space-2) 0; color: var(--g1-muted); text-wrap: pretty; }
 :where(.ui-meta, .ui-status) { color: var(--g1-muted); font-size: inherit; font-variant-numeric: tabular-nums; }
+/* page header actions look like the chat header actions: borderless, 32px, hover fill */
+.ui-page-header .ui-button:not(.ui-button-primary) { border-color: transparent; padding-inline: var(--g1-space-2); }
 :where(.ui-page-header) h1 { font-size: inherit; font-weight: var(--g1-weight-title); line-height: 20px; }
 @media (max-width: 760px), (pointer: coarse) { :where(.ui-button, .ui-icon-button) { min-height: var(--g1-touch-height); } :where(.ui-icon-button) { min-width: var(--g1-touch-height); } }
 :where(input:not([type="checkbox"], [type="radio"]), textarea, select) {

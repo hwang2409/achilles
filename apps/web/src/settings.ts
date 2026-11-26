@@ -4,7 +4,7 @@ export const SETTINGS_KEY = "achilles-settings";
 export const AUTO_THEME = "auto";
 export const themeChoices = [AUTO_THEME, "g1-light", "g1-dark"] as const;
 export type ThemeChoice = (typeof themeChoices)[number];
-export type UiFont = "jetbrains-mono" | "ibm-plex-sans" | "inter" | "system";
+export type UiFont = "geist" | "jetbrains-mono" | "ibm-plex-sans" | "inter" | "system";
 export type CodeFont = "jetbrains-mono" | "ibm-plex-mono" | "system-mono";
 export type Density = "comfortable" | "compact";
 
@@ -22,7 +22,7 @@ export type Settings = {
 export const defaultSettings: Settings = {
   v: 1,
   theme: AUTO_THEME,
-  uiFont: "system",
+  uiFont: "geist",
   codeFont: "system-mono",
   size: 15,
   density: "comfortable",
@@ -30,7 +30,7 @@ export const defaultSettings: Settings = {
   autoApproveDefault: true,
 };
 
-const uiFonts: readonly UiFont[] = ["jetbrains-mono", "ibm-plex-sans", "inter", "system"];
+const uiFonts: readonly UiFont[] = ["geist", "jetbrains-mono", "ibm-plex-sans", "inter", "system"];
 const codeFonts: readonly CodeFont[] = ["jetbrains-mono", "ibm-plex-mono", "system-mono"];
 const densities: readonly Density[] = ["comfortable", "compact"];
 const sizes: readonly Settings["size"][] = [13, 14, 15, 16];
@@ -60,7 +60,8 @@ const uiFontValues: Record<UiFont, string> = {
   "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
   "ibm-plex-sans": '"IBM Plex Sans", system-ui, sans-serif',
   inter: '"Inter", system-ui, sans-serif',
-  system: "var(--g1-font-ui)",
+  geist: "var(--g1-font-ui)",
+  system: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 };
 const codeFontValues: Record<CodeFont, string> = {
   "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',

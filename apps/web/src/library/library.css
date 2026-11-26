@@ -6,7 +6,7 @@
 /* the selected row bolds only its name, so the description keeps its weight */
 .library :is(a, button)[aria-current] { background: var(--g1-selected); }
 .library-group button[aria-current] > :first-child { font-weight: 600; }
-.library-bar :is(a, button), .library-back { min-height: 40px; }
+.library-bar :is(a, button), .library-back { min-height: var(--g1-control-height); }
 .library-snapshot { font-size: inherit; }
 .library-snapshot span { color: var(--fulcrum-warn); }
 .library-snapshot button { padding-inline: 10px; }
@@ -15,7 +15,7 @@
 .library-layout { flex: 1; display: grid; grid-template-columns: minmax(245px, 37%) minmax(0, 1fr); }
 .library-list { border-right: 1px solid var(--fulcrum-border); min-width: 0; }
 .library-filter { padding: 12px var(--g1-page-gutter); border-bottom: 1px solid var(--g1-rule); }
-.library-filter input { flex: 1; min-width: 0; padding: 0 var(--g1-space-2); min-height: 40px; color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
+.library-filter input { flex: 1; min-width: 0; padding: 0 var(--g1-space-2); min-height: var(--g1-control-height); color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
 .library-filter input::placeholder { color: var(--g1-fg-3); opacity: 1; }
 .library-filter span { white-space: nowrap; font-size: inherit; color: var(--fulcrum-muted); }
 .library-group h2 { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; margin: 0; padding: 12px var(--g1-page-gutter) 6px; font-size: inherit; font-weight: 500; color: var(--fulcrum-muted); }
@@ -59,7 +59,7 @@
   .library-layout[data-detail="false"] .library-detail { display: none; }
 }
 .library-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; }
-.library-more button, .library-text button { min-height: 40px; padding-inline: 10px; border: 1px solid var(--fulcrum-border); }
+.library-more button, .library-text button { min-height: var(--g1-control-height); padding-inline: 10px; border: 1px solid var(--fulcrum-border); }
 .library-more span, .library-error { color: var(--fulcrum-danger); }
 .library-error { margin: 0; }
 .library-text-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -83,7 +83,8 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 @media (pointer: coarse) {
   .library :is(.library-text button, .library-more button, .library-skipped summary) { min-height: 44px; }
 }
-.library-snapshot .library-new { border: 1px solid var(--g1-control-border); white-space: nowrap; }
+/* the header action is borderless, like refresh beside it and the page header actions */
+.library-snapshot .library-new { border-color: transparent; white-space: nowrap; }
 .library-control { flex-basis: 100%; margin: 0; font-size: inherit; color: var(--fulcrum-warn); text-align: right; }
 .library-saved { padding: 10px 24px; border-bottom: 1px solid var(--g1-rule); font-size: inherit; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; }
 .library-saved p { margin: 0; grid-column: 1; overflow-wrap: anywhere; }
@@ -98,14 +99,14 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor-row > label:has(input:disabled) { color: var(--fulcrum-muted); }
 .library-editor-row small { font-size: inherit; color: var(--fulcrum-muted); }
 .library-editor-row small[data-invalid] { color: var(--fulcrum-danger); }
-.library-editor :where(input:not([type="radio"]), textarea) { min-height: 40px; padding: 6px var(--g1-space-2); color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
+.library-editor :where(input:not([type="radio"]), textarea) { min-height: var(--g1-control-height); padding: 6px var(--g1-space-2); color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
 .library-editor input:disabled { color: var(--fulcrum-muted); }
 .library-editor textarea { min-height: 16lh; resize: vertical; font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: inherit; font-variant-ligatures: none; }
 .library-editor :is(input, textarea, button):focus-visible, .library-editor-status:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 .library-editor-status:empty, .library-editor-saved:empty { display: none; }
 .library-editor-saved { margin: 0; font-size: inherit; }
 .library-editor-status ul { margin: 0; padding-left: 18px; }
-.library-editor-status button, .library-editor-actions button { min-height: 40px; padding-inline: 12px; border: 1px solid var(--fulcrum-border); }
+.library-editor-status button, .library-editor-actions button { min-height: var(--g1-control-height); padding-inline: 12px; border: 1px solid var(--fulcrum-border); }
 .library-editor-status div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .library-editor-status div p { flex-basis: 100%; }
 .library-editor-actions { display: flex; justify-content: flex-end; gap: 8px; position: sticky; bottom: 0; padding-block: 8px; background: var(--fulcrum-bg); }
@@ -113,7 +114,7 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor button[aria-disabled="true"] { color: var(--fulcrum-muted); cursor: default; }
 .library-editor h2 small { margin-left: 8px; font-size: inherit; font-weight: normal; color: var(--fulcrum-muted); }
 .library-editor .library-flag button { margin-left: 8px; min-height: 32px; padding-inline: 10px; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
-.library-editor-row .library-dismiss { justify-self: start; min-height: 40px; padding-inline: 12px; border: 1px solid var(--fulcrum-border); }
+.library-editor-row .library-dismiss { justify-self: start; min-height: var(--g1-control-height); padding-inline: 12px; border: 1px solid var(--fulcrum-border); }
 /* the prompt wraps inside its own box, so both buttons stay on one row */
 .library-editor-actions { flex-wrap: wrap; }
 .library-editor-actions[role="group"] { align-items: center; flex-wrap: nowrap; }

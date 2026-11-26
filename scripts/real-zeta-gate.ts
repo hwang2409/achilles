@@ -3255,9 +3255,9 @@ with _database() as db:
         overflow: head.scrollWidth > head.clientWidth,
         ellipsized: title.scrollWidth > title.clientWidth && title.clientHeight < 30 && getComputedStyle(title).textOverflow === "ellipsis",
         oneBaseline: controls.every((button) => Math.abs(button.getBoundingClientRect().top + button.clientHeight / 2 + button.clientTop - (rowBox.top + rowBox.height / 2)) <= 1),
-        // desktop controls share the 40 px control height; narrow screens keep 44 px touch targets
-        target: innerWidth <= 760 ? 44 : 40,
-        touchTargets: controls.length === (innerWidth <= 760 ? 4 : 3) && controls.every((button) => button.getBoundingClientRect().width >= (innerWidth <= 760 ? 44 : 40) && button.getBoundingClientRect().height === (innerWidth <= 760 ? 44 : 40)),
+        // desktop controls share the 32 px control height; narrow screens keep 44 px touch targets
+        target: innerWidth <= 760 ? 44 : 32,
+        touchTargets: controls.length === (innerWidth <= 760 ? 4 : 3) && controls.every((button) => button.getBoundingClientRect().width >= (innerWidth <= 760 ? 44 : 32) && button.getBoundingClientRect().height === (innerWidth <= 760 ? 44 : 32)),
       };
     });
     if (dimensions.height !== dimensions.target + 9 || dimensions.overflow || !dimensions.ellipsized || !dimensions.oneBaseline || !dimensions.touchTargets) throw new Error(`page chat header geometry: ${JSON.stringify(dimensions)}`);
