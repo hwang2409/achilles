@@ -699,7 +699,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
         return await original_call_tool(actor, tool_name, *args, **kwargs)
 
     def held_history(original):
-        async def handler(client, request_id, params):
+        async def handler(client, request_id, params, controller):
             # the reloaded page's first history read waits until the reply is published, rowless
             document = read_control(control) or {}
             if (
@@ -707,7 +707,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 and "reload_history_barrier" not in document
             ):
                 await hold(control, "reload_history_barrier")
-            return await original(client, request_id, params)
+            return await original(client, request_id, params, controller)
 
         return handler
 
