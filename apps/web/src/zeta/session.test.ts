@@ -11,7 +11,7 @@ describe("applyApprovalMode", () => {
       throw new Error(`unexpected ${method}`);
     } };
 
-    expect(await applyApprovalMode(client as never, "s", "allow")).toEqual({ approvalMode: "ask", pending: true });
+    expect(await applyApprovalMode(client as never, "s", "allow")).toEqual({ approvalMode: "ask", model: "offline", pending: true });
     expect(methods).toEqual(["session_settings", "status"]);
   });
 
@@ -22,7 +22,7 @@ describe("applyApprovalMode", () => {
       return { model: "offline", approval_mode: "allow" };
     } };
 
-    expect(await applyApprovalMode(client as never, "s", "allow")).toEqual({ approvalMode: "allow", pending: false });
+    expect(await applyApprovalMode(client as never, "s", "allow")).toEqual({ approvalMode: "allow", model: "offline", pending: false });
     expect(methods).toEqual(["session_settings"]);
   });
 });
@@ -58,6 +58,7 @@ describe("openHomeSession", () => {
 
     const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow");
     expect(result.approvalMode).toBe("ask");
+    expect(result.model).toBe("offline");
     expect(methods).toEqual(["status", "resume", "session_settings"]);
   });
 
