@@ -187,7 +187,8 @@ async function observerToken(stack: EvalStack, hidden: string[]) {
 async function pageBinding(stack: EvalStack, pageId: string, hidden: string[], signal: AbortSignal) {
   const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}`, {}, signal); if (!response.ok) throw new Error(`page ${pageId} is unavailable`);
   const page = await response.json() as { id: string; workspace: string };
-  const credentialResponse = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${page.id}/credential`, {}, signal); if (!credentialResponse.ok) throw new Error(`page credential failed (${credentialResponse.status})`);
+  const headers = await shellRequestHeaders(stack.achillesOrigin, signal);
+  const credentialResponse = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${page.id}/credential`, { headers }, signal); if (!credentialResponse.ok) throw new Error(`page credential failed (${credentialResponse.status})`);
   const credential = (await credentialResponse.json() as { credential: string }).credential; hidden.push(credential, `Bearer ${credential}`); return { page, credential };
 }
 
