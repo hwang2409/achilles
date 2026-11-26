@@ -39,8 +39,18 @@ export function createAccountSwitch(connection: Pick<Connection, "client" | "sta
     const receipt = (checked = false): SwitchResult => ({ status: "committed", receipt:
       `${chat.title}: ${checked ? "current account confirmed as" : "switched to"} ${to}. the failed request was not retried.` as ReviewText });
     let catalog: Account[] | null = null;
+    // a new socket has no chat until the chat tab resumes it again: wait for that before reading.
+    const reattached = async (client: ZetaClient) => {
+      const deadline = Date.now() + options.timeoutMs;
+      while (live() === client && Date.now() < deadline) {
+        if ((await activeAccountChat(client))?.id === chat.id) return client;
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      return null;
+    };
     const settle = async (): Promise<SwitchResult> => {
-      const client = await waitForController();
+      const controller = await waitForController();
+      const client = controller && await reattached(controller).catch(() => null);
       const rows = client && await read(client).catch(() => null);
       if (!rows) return UNKNOWN;
       catalog = rows;
