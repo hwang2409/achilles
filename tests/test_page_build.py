@@ -1,13 +1,71 @@
 import base64
+import io
 import json
 import os
+import subprocess
+import threading
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 import achilles.page_build as page_build
 from achilles.page_build import PageBuildError, build_page
+
+
+class _Output(io.BytesIO):
+    def __init__(self, value: bytes, finished: threading.Event):
+        super().__init__(value)
+        self.finished = finished
+
+    def read(self, size: int = -1) -> bytes:
+        value = super().read(size)
+        if not value:
+            self.finished.set()
+        return value
+
+
+class _Process:
+    def __init__(self, stdout: bytes = b"", stderr: bytes = b"", *, times_out: bool = False):
+        self.stdout_finished = threading.Event()
+        self.stderr_finished = threading.Event()
+        self.stdout = _Output(stdout, self.stdout_finished)
+        self.stderr = _Output(stderr, self.stderr_finished)
+        self.returncode: int | None = None
+        self.times_out = times_out
+        self.killed = False
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self.times_out and not self.killed:
+            raise subprocess.TimeoutExpired("docker", timeout)
+        assert self.stdout_finished.wait(1)
+        assert self.stderr_finished.wait(1)
+        self.returncode = -9 if self.killed else 0
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
+        self.stdout_finished.set()
+        self.stderr_finished.set()
+        self.returncode = -9
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+
+def _fake_containers(monkeypatch, outputs: list[tuple[bytes, bytes]]):
+    calls: list[list[str]] = []
+    processes: list[_Process] = []
+
+    def popen(command, **_kwargs):
+        calls.append(command)
+        stdout, stderr = outputs[len(processes)]
+        process = _Process(stdout, stderr)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(page_build.subprocess, "Popen", popen)
+    monkeypatch.setattr(page_build.subprocess, "run", lambda *_args, **_kwargs: None)
+    return calls, processes
 
 
 def test_build_rejects_host_path_dependencies(tmp_path: Path) -> None:
@@ -27,21 +85,15 @@ def test_build_requires_container_isolation(monkeypatch, tmp_path: Path) -> None
 
 
 def test_build_uses_network_only_for_scriptless_install(monkeypatch, tmp_path: Path) -> None:
-    calls: list[list[str]] = []
-
-    def run(command, **_kwargs):
-        calls.append(command)
-        if len(calls) == 3:
-            result = {
-                "artifact": base64.b64encode(b"safe bundle").decode(),
-                "lockfile": "safe lock",
-                "resolved_dependencies": {"react": "19.0.0", "react-dom": "19.0.0"},
-            }
-            return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(result))
-        return SimpleNamespace(returncode=0, stderr="", stdout="")
-
+    result = {
+        "artifact": base64.b64encode(b"safe bundle").decode(),
+        "lockfile": "safe lock",
+        "resolved_dependencies": {"react": "19.0.0", "react-dom": "19.0.0"},
+    }
+    calls, _ = _fake_containers(
+        monkeypatch, [(b"", b""), (b"", b""), (json.dumps(result).encode(), b"")]
+    )
     monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
-    monkeypatch.setattr(page_build.subprocess, "run", run)
 
     build_page(tmp_path, "home", "export default 1", {})
 
@@ -60,35 +112,70 @@ def test_build_uses_network_only_for_scriptless_install(monkeypatch, tmp_path: P
     assert not any("docker.sock" in mount for mount in mounts)
 
 
+def test_oversized_output_is_bounded_and_removes_container(monkeypatch, tmp_path: Path) -> None:
+    removed: list[str] = []
+    process = _Process(b"x" * 1024)
+    monkeypatch.setattr(page_build.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        page_build.subprocess,
+        "run",
+        lambda command, **_kwargs: removed.append(command[-1]),
+    )
+
+    with pytest.raises(PageBuildError, match="collector output exceeds 32 bytes"):
+        page_build._run_container(
+            "docker",
+            tmp_path,
+            None,
+            ["collect"],
+            network="none",
+            step="collector",
+            stdout_limit=32,
+            timeout=1,
+        )
+
+    assert process.stdout.tell() == 33
+    assert process.killed
+    assert len(removed) == 1 and removed[0].startswith("page-build-")
+
+
+def test_timed_out_step_removes_container(monkeypatch, tmp_path: Path) -> None:
+    removed: list[str] = []
+    process = _Process(times_out=True)
+    monkeypatch.setattr(page_build.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        page_build.subprocess,
+        "run",
+        lambda command, **_kwargs: removed.append(command[-1]),
+    )
+
+    with pytest.raises(PageBuildError, match="bundle exceeded the 0.01 second limit"):
+        page_build._run_container(
+            "docker",
+            tmp_path,
+            None,
+            ["bundle"],
+            network="none",
+            step="bundle",
+            timeout=0.01,
+        )
+
+    assert process.killed
+    assert len(removed) == 1 and removed[0].startswith("page-build-")
+
+
 def test_host_never_reads_symlinked_build_outputs(monkeypatch, tmp_path: Path) -> None:
     sentinel = tmp_path / "sentinel"
     sentinel.write_text("HOST-SECRET-SHOULD-NOT-LEAK")
-    calls = 0
-
-    def run(command, **_kwargs):
-        nonlocal calls
-        calls += 1
-        workspace = Path(
-            next(value for value in command if "dst=/workspace" in value).split(",")[1][4:]
-        )
-        if calls == 2:
-            (workspace / "page.js").write_bytes(b"container-collected bundle")
-            (workspace / "bun.lock").symlink_to(sentinel)
-            for name in ("react", "react-dom"):
-                package = workspace / "node_modules" / name / "package.json"
-                package.parent.mkdir(parents=True, exist_ok=True)
-                package.write_text(json.dumps({"version": "19.0.0"}))
-        if calls == 3:
-            result = {
-                "artifact": base64.b64encode(b"container-collected bundle").decode(),
-                "lockfile": "container-collected lock",
-                "resolved_dependencies": {"react": "19.0.0", "react-dom": "19.0.0"},
-            }
-            return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(result))
-        return SimpleNamespace(returncode=0, stderr="", stdout="")
-
+    collected = {
+        "artifact": base64.b64encode(b"container-collected bundle").decode(),
+        "lockfile": "container-collected lock",
+        "resolved_dependencies": {"react": "19.0.0", "react-dom": "19.0.0"},
+    }
+    calls, _ = _fake_containers(
+        monkeypatch, [(b"", b""), (b"", b""), (json.dumps(collected).encode(), b"")]
+    )
     monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
-    monkeypatch.setattr(page_build.subprocess, "run", run)
 
     result = build_page(tmp_path / "build", "home", "export default 1", {})
     artifact = (tmp_path / "build/bundles" / f"{result['digest']}.js").read_bytes()

@@ -1145,6 +1145,18 @@ def test_forged_browser_headers_cannot_read_shell_secrets(monkeypatch, tmp_path:
     assert "secret" not in discovery_response.text + credential_response.text
 
 
+def test_non_ascii_shell_secret_is_forbidden() -> None:
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={"origin": "http://127.0.0.1:5190", "host": "127.0.0.1:5190"},
+    )
+
+    response = client.get("/api/pages/home/credential", headers={"x-achilles-shell": b"\xe9"})
+
+    assert response.status_code == 403
+
+
 @pytest.mark.parametrize("port", [True, "8765", 0, 65536])
 def test_discovery_rejects_invalid_port(monkeypatch, tmp_path: Path, port: object) -> None:
     discovery = tmp_path / "discovery.json"

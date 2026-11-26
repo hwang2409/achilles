@@ -56,8 +56,8 @@ def _same_origin(request) -> bool:
 
 
 def _shell_authorized(request) -> bool:
-    supplied = request.headers.get("x-achilles-shell", "")
-    expected = request.app.state.shell_token
+    supplied = request.headers.get("x-achilles-shell", "").encode()
+    expected = request.app.state.shell_token.encode()
     return _same_origin(request) and secrets.compare_digest(supplied, expected)
 
 
