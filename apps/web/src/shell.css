@@ -1,16 +1,21 @@
 /* design-v4 shell: the transcript and composer own the center pane's scroll boundary. */
 .app-shell { height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: var(--sidebar-width, 280px) minmax(0, 1fr); background: var(--fulcrum-bg); }
-.brand-mark { position: relative; width: 20px; height: 20px; flex: none; background: var(--g1-primary); }
+/* the 20px mark centers on the 16px nav icon column (-2px each side), so the name lands on the nav label column */
+.brand-mark { position: relative; width: 20px; height: 20px; flex: none; margin-inline: -2px; background: var(--g1-primary); }
 
 /* nav icons sit quieter than their labels; light needs a higher mix than dark to read the same */
 .sidebar { --nav-icon: light-dark(color-mix(in srgb, var(--g1-fg) 48%, transparent), color-mix(in srgb, var(--g1-fg) 30%, transparent)); min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--g1-border); background: var(--g1-sidebar); overflow: hidden; z-index: 4; font-size: calc(var(--achilles-ui-size, var(--g1-type-chat)) - 2px); }
 /* each date group is one rounded card a touch lighter than the sidebar (orca's grouped sidebar cards); its head is the card's label.
-   card margin 8 + border 1 + padding 2 + row inset 5 = 16, so card text lands on the nav icon column and ends where "off" and ⌘K end */
-.chat-group { --chat-row-inset: 5px; --chat-group-fill: light-dark(color-mix(in srgb, var(--g1-bg) 60%, var(--g1-sidebar)), color-mix(in srgb, var(--g1-fg) 4%, var(--g1-sidebar))); margin: 0 var(--g1-sidebar-padding) var(--g1-space-2); padding: 0 2px 2px; border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); background: var(--chat-group-fill); }
+   card margin 8 + border 1 + padding 2 + row inset 5 = 16, so card text lands on the nav icon column and ends where "off" and ⌘K end.
+   the card radius is the row radius plus the 3px (border + padding) between them, so the corners are concentric */
+.chat-group { --chat-row-inset: 5px; --chat-group-fill: light-dark(color-mix(in srgb, var(--g1-bg) 60%, var(--g1-sidebar)), color-mix(in srgb, var(--g1-fg) 4%, var(--g1-sidebar))); margin: 0 var(--g1-sidebar-padding) var(--g1-space-2); padding: 0 2px 2px; border: 1px solid var(--g1-border); border-radius: calc(var(--g1-radius-control) + 3px); background: var(--chat-group-fill); }
 .chat-group h2 { position: sticky; top: var(--g1-nav-row-height); z-index: 1; height: var(--g1-nav-row-height); box-sizing: border-box; margin: 0; padding: 0 var(--chat-row-inset); background: var(--chat-group-fill); line-height: var(--g1-nav-row-height); }
 .chat-group h2::first-letter, .list-head > span::first-letter { text-transform: uppercase; }
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.brand-row { flex: 0 0 44px; display: flex; align-items: center; gap: var(--g1-space-2); padding: 0 var(--g1-sidebar-inset); }
+/* surfaces end where the nav pills end (8px from the edge) and text starts where nav text starts (16px), so the brand
+   row reads: mark on the icon column, name on the label column, status dot beside the name, search pill to the pill edge */
+.brand-row { flex: 0 0 44px; display: flex; align-items: center; gap: var(--g1-space-2); padding: 0 var(--g1-sidebar-padding) 0 var(--g1-sidebar-inset); }
+.brand-row > :is(.surface-search, .drawer-close) { order: 1; }
 .list-head { width: 100%; min-height: var(--g1-nav-row-height); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--g1-sidebar-inset); border: 0; font-size: calc(1em - 1px); font-weight: 600; color: var(--g1-muted); }
 .chat-row { position: relative; display: grid; grid-template-columns: minmax(50%, 1fr) auto; column-gap: var(--g1-space-2); align-items: baseline; min-height: var(--g1-nav-row-height); padding: 2px var(--chat-row-inset); border-radius: var(--g1-radius-control); align-content: center; }
 .chat-row:hover { background: var(--g1-hover); }
@@ -73,7 +78,8 @@
 .skip-link:focus { transform: translateY(0); }
 
 .chat-header { container-type: inline-size; height: 44px; flex: 0 0 44px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--g1-page-gutter); border-bottom: 1px solid var(--g1-border); }
-.chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
+/* baseline, not center: the title is a 40px-tall line and the crumb a text line, and centering them set the title 1px low */
+.chat-heading { display: flex; flex: 1 1 auto; align-items: baseline; gap: 8px; min-width: 0; font-size: 14px; }
 /* the crumb keeps its width (the title gives way first) until it passes 40% of the bar; its "/" is its own span, so it never clips */
 .chat-heading span { order: 0; flex: 0 0 auto; max-width: 40%; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own

@@ -40,7 +40,8 @@
   align-items: center;
   justify-content: space-between;
   height: 28px;
-  padding: 0 8px 0 12px;
+  /* the language label starts on the code column (16px) and the copy word ends 16px in, like the code's right gap */
+  padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--fulcrum-border);
   color: var(--fulcrum-muted);
   font-size: inherit;

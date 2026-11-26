@@ -8,7 +8,7 @@
   padding: 6px;
   container-type: inline-size;
   border: 1px solid color-mix(in srgb, var(--g1-fg) 10%, transparent);
-  border-radius: var(--g1-radius-chat);
+  border-radius: 23px; /* concentric with the 32px round send button: 16 + 6 padding + 1 border */
   background: color-mix(in srgb, var(--g1-panel) 60%, var(--g1-bg));
   box-shadow: var(--g1-shadow-xs);
 }
@@ -55,14 +55,21 @@
 }
 /* the chat's modes and model sit at the start of the bar, the same 24px chips as the vim mode chip; an on mode
    takes the accent and a filled dot, so state never rests on color alone */
-[data-part="composer-modes"] { display: flex; flex: 0 1 auto; align-items: center; gap: 4px; min-width: 0; }
+/* -8px pulls the first chip's 8px padding outside the bar, so its dot sits on the field's text column (like nav pills) */
+[data-part="composer-modes"] { display: flex; flex: 0 1 auto; align-items: center; gap: 4px; min-width: 0; margin-inline-start: -8px; }
 [data-part="composer-mode-item"] { display: contents; }
 [data-part="composer"] [data-part="composer-mode"] {
-  display: inline-flex; flex: none; align-items: center; gap: 6px; height: 24px; min-height: 24px; padding: 0 8px;
-  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  position: relative; display: inline-flex; flex: none; align-items: center; gap: 6px; height: 24px; min-height: 24px; padding: 0 8px;
+  /* a pill: 11px from the card's bottom edge, so 12px keeps it concentric with the card's 23px corner */
+  border: 1px solid transparent; border-radius: 12px; background: transparent;
   color: var(--g1-muted); font-size: 12px; line-height: 1; white-space: nowrap;
   transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
+/* a 40px tall hit area around the 24px chip; 2px each side stays inside the 4px gap, so neighbors never overlap */
+[data-part="composer"] [data-part="composer-mode"]::after { content: ""; position: absolute; inset: -8px -2px; }
+/* style.css sizes every composer button to the ui size, and fulcrum makes them 600 and at least 72px wide; this lifts the chip back to the
+   12px regular text the chip rule above asks for, the same as the vim chip and the model label beside it */
+.main-pane [data-part="composer"] [data-part="composer-mode"] { min-width: 0; font-size: 12px; font-weight: 400; }
 [data-part="composer"] [data-part="composer-mode"]:not([aria-disabled="true"]):hover { color: var(--g1-fg); }
 [data-part="composer"] [data-part="composer-mode"][aria-checked="true"] {
   border-color: color-mix(in srgb, var(--fulcrum-accent) 30%, transparent);
@@ -89,7 +96,8 @@
 }
 
 @media (max-width: 760px), (max-height: 500px) {
-  .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: calc(12px + env(safe-area-inset-bottom)); border-radius: 29px; /* the 44px button: 22 + 7 */ }
   .main-pane [data-part="composer"] :is([data-part="composer-submit"], [data-part="composer-stop"]) { min-width: 44px; min-height: 44px; }
   .main-pane [data-part="composer"] [data-part="composer-mode"] { height: 44px; min-height: 44px; }
+  .main-pane [data-part="composer"] [data-part="composer-mode"]::after { display: none; }
 }
