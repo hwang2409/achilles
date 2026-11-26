@@ -100,7 +100,7 @@ export async function gateTranscript(
   if (
     !typography.font.includes("IBM Plex Sans") || !typography.proseFont.includes("IBM Plex Sans") || typography.size !== "16px" ||
     typography.lineHeight !== "21.6px" || !typography.codeFont.includes("IBM Plex Mono") ||
-    typography.proseSize !== "15px" || typography.proseLineHeight !== "24px" || Math.abs(typography.rowWidth - typography.expectedWidth) > 1
+    typography.proseSize !== "15px" || typography.proseLineHeight !== "22.5px" || Math.abs(typography.rowWidth - typography.expectedWidth) > 1
   )
     throw new Error(`transcript did not apply configured typography: ${JSON.stringify(typography)}`);
   await capture("markdown-rendered-1440x900.png");

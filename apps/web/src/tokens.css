@@ -34,7 +34,7 @@
   --g1-font-mono: "SF Mono", SFMono-Regular, ui-monospace, "Cascadia Code", Menlo, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
   --g1-type-kbd: 11px;
   --g1-type-chat: 15px;
-  --g1-leading-chat: 1.6;
+  --g1-leading-chat: 1.5;
   --g1-type-title: 20px;
   --g1-weight-title: 600;
   --g1-radius-container: 10px;
@@ -60,7 +60,7 @@
   --g1-space-10: 40px;
   --g1-sidebar-padding: var(--g1-space-2);
   --g1-sidebar-inset: calc(var(--g1-sidebar-padding) + var(--g1-space-2));
-  --g1-nav-row-height: var(--g1-space-8);
+  --g1-nav-row-height: var(--g1-space-7);
   --g1-page-gutter: var(--g1-space-6);
   --g1-page-padding: var(--g1-space-6) var(--g1-page-gutter);
   --g1-list-row-height: 52px;
