@@ -7,7 +7,7 @@ const task = "inspect a synthetic child run";
 const spawnButton = '[data-write-surface="agents.spawn"]';
 const cancelButton = '[data-write-surface="agents.cancel"]';
 
-// drives agent controls from the chat tab that holds the parent session: header "Agents" → spawn; sub-agent row → cancel.
+// drives agent controls from the chat tab that holds the parent session: header "Agents" → spawn → select the run → cancel.
 export async function gateAgentControls(browser: Browser, origin: string, discovery: Discovery,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>, screenshots?: string) {
   const main = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -73,15 +73,10 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await review.getByRole("checkbox", { name: "i reviewed the scope" }).check();
     await review.getByRole("button", { name: "spawn agent" }).click();
     await main.getByText(/spawned run as/).waitFor();
-    await again.getByRole("button", { name: new RegExp(task) }).waitFor();
+    await again.getByRole("button", { name: new RegExp(task) }).click();
     await capture(main, "chat-agents-1440");
-    await again.getByRole("button", { name: "close", exact: true }).click();
-    await again.waitFor({ state: "hidden" });
-    // the transcript's sub-agent row opens the same dialog on that run
-    await main.locator('button[data-part="sub-agent"]').first().click();
     const detail = main.locator("dialog.chat-agents");
     const cancel = detail.locator(cancelButton);
-    await cancel.waitFor();
     const name = async (tab: Page) => (await tab.locator("dialog.confirmation-dialog .confirmation-proof strong").innerText()).trim();
     await cancel.click();
     await capture(main, "cancel-review-1440");
@@ -94,18 +89,13 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await cancel.click();
     if ((await review.boundingBox())?.height !== 844) throw new Error("390 cancel review is not full height");
     await capture(main, "cancel-review-390");
-    const zoom = await browser.newPage({ viewport: { width: 195, height: 422 }, deviceScaleFactor: 2 });
-    try {
-      await zoom.route("**/api/zeta/discovery", route => route.fulfill({ json: discovery }));
-      await zoom.goto(`${origin}/?chat=${encodeURIComponent(root)}`);
-      const zoomAgents = await openAgents(zoom);
-      await zoomAgents.getByRole("button", { name: new RegExp(task) }).click();
-      await zoomAgents.locator(cancelButton).click();
-      await zoom.getByRole("textbox", { name: /^type/ }).fill(await name(zoom));
-      await Bun.sleep(350);
-      await capture(zoom, "cancel-review-390-200pct");
-    } finally { await zoom.close(); }
+    // 200% zoom of a 390 px screen lays out at 195 css px; a second tab cannot open the same chat, so resize this one
     await review.getByRole("textbox", { name: /^type/ }).fill(await name(main));
+    await main.setViewportSize({ width: 195, height: 422 });
+    await Bun.sleep(350);
+    await capture(main, "cancel-review-390-200pct");
+    await main.setViewportSize({ width: 390, height: 844 });
+    await Bun.sleep(350);
     await review.getByRole("button", { name: "cancel run" }).click();
     await main.getByText("cancellation requested.", { exact: false }).waitFor();
     await waitFor(async () => {
@@ -119,7 +109,7 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     if (frames.length !== 2 || spawn?.role !== "controller" || spawn.method !== "child_run_spawn" || spawn.params.session_id !== root || spawn.params.background !== true ||
       done?.role !== "controller" || done.method !== "child_run_cancel" || done.params.session_id !== root || done.params.reason !== "user_cancelled")
       throw new Error(`agent control frames do not match confirmed requests from the chat tab: ${JSON.stringify(frames)}`);
-    console.log("agent controls from the chat tab: busy refusal; child_run_spawn → sub-agent row → child_run_cancel → canceled");
+    console.log("agent controls from the chat tab: busy refusal; child_run_spawn → child_run_cancel → canceled");
     return ["agents.spawn", "agents.cancel"];
   } finally { await main.close(); }
 }

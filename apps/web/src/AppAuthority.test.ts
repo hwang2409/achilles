@@ -136,7 +136,7 @@ const sessionDetail = (metadata: object = {}): Options => ({
   rpc: { status: () => ({ result: { session: null, state: "idle" } }), list_sessions: () => ({ result: { sessions: [{ session_id: "session", name: "Fixture session", project_id: "other-project", parent_session_id: null, in_use: false, ...metadata }], next_offset: null } }) },
 });
 
-type Row = { kind: "visible" | "command" | "passive" | "local-only"; absent?: true; options?: Options; check: (app: RenderResult, authority: Authority, writes: string[], requests: string[]) => Promise<void> };
+type Row = { kind: "visible" | "command" | "passive" | "local-only"; absent?: true; options?: Options; check: (app: RenderResult, authority: Authority, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void> };
 const tag = (id: WriteSurfaceId) => `[data-write-surface="${id}"]`;
 const disabled = (element: HTMLElement) => element.matches(":disabled") || element.getAttribute("aria-disabled") === "true";
 const didWrite = (writes: string[], prefix: string) => expect(writes.some((write) => write.startsWith(prefix)), `${prefix}; got ${JSON.stringify(writes)}`).toBe(true);
@@ -617,8 +617,13 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
         : { session_id: "session", run_id: "fixture-run", reason: "user_cancelled" });
       return { result: { data: { accepted: true, run_id: spawning ? "new-fixture-run" : "fixture-run", state: "cancelling" } } };
     },
-  }, roles), check: async (app, authority, writes) => {
-    await openAgents(app, spawning ? undefined : "fixture-profile fixture task running");
+  }, roles), check: async (app, authority, writes, _requests, emit) => {
+    if (spawning) await openAgents(app);
+    else {
+      // the transcript's sub-agent row opens the dialog on its run
+      await act(async () => { emit({ jsonrpc: "2.0", method: "event", params: { event: "child_idle", session_id: "session", data: { child_instance_id: "fixture-run", description: "fixture task" } } }); });
+      await click(select(app, 'button[data-part="sub-agent"]'));
+    }
     const before = roles.length;
     const written = writes.length;
     expect(roles.at(-1)).toBe(authority);
@@ -945,7 +950,7 @@ test.each(WRITE_SURFACES)("public authority: $id", async ({ id, visibility }) =>
   const row = rows[id]!;
   expect(row.kind === "local-only" ? "visible" : row.kind).toBe(visibility);
   for (const authority of ["observer", "controller"] as const) {
-    await withApp(authority, row.options ?? {}, (app, writes, requests) => row.check(app, authority, writes, requests));
+    await withApp(authority, row.options ?? {}, (app, writes, requests, emit) => row.check(app, authority, writes, requests, emit));
   }
 });
 
