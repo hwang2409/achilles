@@ -159,7 +159,8 @@ export async function attachPage(
       let session: { id: string; name: string | null; approvalMode?: string | null; model: string | null; pending: boolean; rebind: boolean; cwd: string | null } = unresumed;
       if (!observer) {
         try { session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token)); }
-        catch (caught) { if (!(caught instanceof ChatControlledError)) throw caught; controlledElsewhere = true; }
+        // only a chat the url names opens read-only; a default attach held elsewhere is the caller's (it starts a new chat)
+        catch (caught) { if (!(caught instanceof ChatControlledError) || !selectedId) throw caught; controlledElsewhere = true; }
       }
       const reader = observer || controlledElsewhere;
       requireCurrent(owner, token);
