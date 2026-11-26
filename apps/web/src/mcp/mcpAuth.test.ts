@@ -43,7 +43,7 @@ function harness({ blocked = false, startReply = () => pending, status = () => d
       try { return signal.aborted ? unknown as { status: "unknown" } : await send(controller); }
       finally { live = observer; order.push("release"); }
     },
-    supports: () => true, failure: () => null, liveObserver: () => live,
+    supports: () => true, failure: () => null, live: () => live,
     open: () => { order.push("popup"); return blocked ? null : popup as unknown as Window; },
     timers: { set: (run, ms) => { const id = ++next as unknown as ReturnType<typeof setTimeout>; queue.set(id, { run, ms }); return id; },
       clear: ((id: ReturnType<typeof setTimeout>) => { queue.delete(id); }) as typeof clearTimeout },

@@ -58,7 +58,6 @@ export function SurfaceRouter() {
   const [libraryWriter] = useState(() => createLibraryWriter(undefined, () => connection.client));
   const [mcpOwner] = useState(() => createMcpOwner({
     live: () => connection.client,
-    liveObserver: () => connection.state.phase === "connected" && connection.state.authority === "observer" ? connection.client : null,
     acquire: async () => await connection.takeControl() === null && connection.state.phase === "connected"
       && connection.state.authority === "controller" ? connection.client : null,
   }));
@@ -109,7 +108,7 @@ export function SurfaceRouter() {
   } else if (route.id === "agents") {
     content = <AgentsModule client={client} connecting={connecting} retry={() => connection.retryNow()} />;
   } else if (route.id === "connections") {
-    content = <McpModule client={client} observer={connectionState.phase === "connected" && connectionState.authority === "observer"} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
+    content = <McpModule client={client} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
   } else if (route.id === "settings") {
     content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
   } else if (route.id === "accounts") {

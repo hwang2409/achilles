@@ -122,9 +122,8 @@ async function requestWrite(client: ZetaClient, method: typeof mcpMethods[McpAct
 }
 
 /** One global flight: the revision spans user, project, and trust. A new socket is only used to read, never to retry a write. */
-export function createMcpOwner({ live, acquire, supports = supportsRequest, canRead, wait = waitFor, liveObserver = live }: {
+export function createMcpOwner({ live, acquire, supports = supportsRequest, canRead, wait = waitFor }: {
   live: () => ZetaClient | null;
-  liveObserver?: () => ZetaClient | null;
   acquire: () => Promise<ZetaClient | null>;
   supports?: typeof supportsRequest;
   canRead?: (client: ZetaClient) => boolean;
@@ -185,7 +184,7 @@ export function createMcpOwner({ live, acquire, supports = supportsRequest, canR
     // These RPCs do not accept revisions. This check narrows but cannot close the gap.
     return null;
   }
-  const auth = createMcpAuth({ supports, failure: rpcFailure, liveObserver,
+  const auth = createMcpAuth({ supports, failure: rpcFailure, live,
     withControl: (signal, send, attempt) => withAcquiredControl(signal, async (client) => {
       const failure = attempt.action === "cancel" ? null : await confirmCurrent(client, attempt, signal);
       return failure ?? send(client);
