@@ -1,5 +1,6 @@
 // adapted from gamma@6cd69671 src/connection.ts
 import { createClient, webSocketTransport, ZetaError, type ZetaClient, type ZetaDiscovery, type ZetaRole } from "@fulcrum/zeta";
+import { shellHeaders } from "../shell";
 import { ACCOUNT_LIST_IDLE_FEATURE } from "./accounts";
 import { teeRunEnds } from "./turnEnd";
 
@@ -170,7 +171,7 @@ export function createConnection({
   origin,
   readOnly,
   discover = async () => {
-    const response = await fetch("/api/zeta/discovery", { cache: "no-store" });
+    const response = await fetch("/api/zeta/discovery", { headers: shellHeaders(), cache: "no-store" });
     if (response.ok) return await response.json();
     const start = (await response.json().catch(() => null))?.start;
     return typeof start === "string" ? { start } : null;

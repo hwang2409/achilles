@@ -1761,11 +1761,14 @@ class PageStore:
 
     def inspect_code(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
+            page = db.execute(
+                "SELECT active_code_revision FROM page WHERE id=?", (page_id,)
+            ).fetchone()
             rows = db.execute(
                 "SELECT * FROM code_revision WHERE page_id=? ORDER BY version DESC", (page_id,)
             ).fetchall()
         return {
-            "active_revision": next((r["version"] for r in rows if r["digest"]), None),
+            "active_revision": page["active_code_revision"] if page else None,
             "revisions": [
                 {
                     **{

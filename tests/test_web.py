@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import socket
 import sqlite3
 import threading
@@ -1091,17 +1092,53 @@ def test_discovery_allows_browser_same_origin(monkeypatch, tmp_path: Path) -> No
         )
     )
     monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
-    response = TestClient(web.create_app(), client=("127.0.0.1", 1234)).get(
-        "/api/zeta/discovery",
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
         headers={
             "origin": "http://127.0.0.1:5190",
             "host": "127.0.0.1:5190",
             "sec-fetch-site": "same-origin",
         },
     )
+    shell = client.get("/")
+    assert shell.status_code == 200
+    token = re.search(r'<meta name="achilles-shell" content="([^"]+)">', shell.text)
+    assert token is not None
+    response = client.get("/api/zeta/discovery", headers={"x-achilles-shell": token.group(1)})
     assert response.status_code == 200
     assert response.json()["url"] == "ws://127.0.0.1:8765"
     assert response.json()["controller_token"] == "controller-secret"
+
+
+def test_forged_browser_headers_cannot_read_shell_secrets(monkeypatch, tmp_path: Path) -> None:
+    discovery = tmp_path / "discovery.json"
+    discovery.write_text(
+        json.dumps(
+            {
+                "port": 8765,
+                "controller_token": "controller-secret",
+                "observer_token": "observer-secret",
+                "pid": os.getpid(),
+                "origins": ["http://127.0.0.1:5190"],
+            }
+        )
+    )
+    monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={
+            "origin": "http://127.0.0.1:5190",
+            "host": "127.0.0.1:5190",
+            "sec-fetch-site": "same-origin",
+        },
+    )
+    discovery_response = client.get("/api/zeta/discovery")
+    credential_response = client.get("/api/pages/home/credential")
+    assert discovery_response.status_code == 403
+    assert credential_response.status_code == 403
+    assert "secret" not in discovery_response.text + credential_response.text
 
 
 @pytest.mark.parametrize("port", [True, "8765", 0, 65536])

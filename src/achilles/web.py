@@ -4,6 +4,7 @@ import base64
 import binascii
 import json
 import os
+import secrets
 import shlex
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ import anyio
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
@@ -52,6 +53,12 @@ def _same_origin(request) -> bool:
         and origin == f"{request.url.scheme}://{host}"
         and request.headers.get("sec-fetch-site") in (None, "same-origin")
     )
+
+
+def _shell_authorized(request) -> bool:
+    supplied = request.headers.get("x-achilles-shell", "")
+    expected = request.app.state.shell_token
+    return _same_origin(request) and secrets.compare_digest(supplied, expected)
 
 
 def _chat_cursor(updated_at: str, session_id: str) -> str:
@@ -127,7 +134,7 @@ def _discovery(request):
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError
         os.kill(int(document["pid"]), 0)
-        if not _same_origin(request) or origin not in document.get("origins", []):
+        if not _shell_authorized(request) or origin not in document.get("origins", []):
             raise HTTPException(403, "origin is not allowed")
         return JSONResponse(
             {
@@ -171,6 +178,7 @@ class PageAuthMiddleware(BaseHTTPMiddleware):
 
 def create_app() -> Starlette:
     store = PageStore(_home())
+    shell_token = secrets.token_urlsafe(32)
 
     async def page(request):
         key = request.path_params["route"]
@@ -211,8 +219,6 @@ def create_app() -> Starlette:
         artifact = store.root / "bundles" / f"{code['digest']}.js"
         if not artifact.is_file():
             raise HTTPException(404, "page artifact not found")
-        from starlette.responses import HTMLResponse
-
         html = (
             "<!doctype html><meta charset='utf-8'><div id='root'></div>"
             f"<script crossorigin='anonymous' src='/api/pages/{row['id']}/"
@@ -290,8 +296,8 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         return JSONResponse({"ok": True})
 
     async def credential(request):
-        if not _same_origin(request):
-            raise HTTPException(403, "same-origin request required")
+        if not _shell_authorized(request):
+            raise HTTPException(403, "shell request required")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
@@ -633,6 +639,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             Route("/{path:path}", _app),
         ],
     )
+    app.state.shell_token = shell_token
     return PageAuthMiddleware(app, store)
 
 
@@ -652,7 +659,9 @@ def _asset(request):
 
 
 def _app(request):
-    return FileResponse(_static_file(_static_root(), "index.html"))
+    html = _static_file(_static_root(), "index.html").read_text()
+    marker = '<meta name="achilles-shell" content="' + request.app.state.shell_token + '">'
+    return HTMLResponse(html.replace("<head>", "<head>" + marker, 1))
 
 
 def _text(value: str) -> str:
