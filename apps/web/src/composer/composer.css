@@ -65,8 +65,8 @@
   color: var(--g1-muted); font-size: 12px; line-height: 1; white-space: nowrap;
   transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
-/* a 40px tall hit area around the 24px chip; 2px each side stays inside the 4px gap, so neighbors never overlap */
-[data-part="composer"] [data-part="composer-mode"]::after { content: ""; position: absolute; inset: -8px -2px; }
+/* a 32px tall hit area around the 24px chip fills the bar but not the field above it; 2px each side stays inside the 4px gap */
+[data-part="composer"] [data-part="composer-mode"]::after { content: ""; position: absolute; inset: -4px -2px; }
 /* style.css sizes every composer button to the ui size, and fulcrum makes them 600 and at least 72px wide; this lifts the chip back to the
    12px regular text the chip rule above asks for, the same as the vim chip and the model label beside it */
 .main-pane [data-part="composer"] [data-part="composer-mode"] { min-width: 0; font-size: 12px; font-weight: 400; }

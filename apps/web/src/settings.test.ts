@@ -66,3 +66,32 @@ describe("parseSettings", () => {
     expect(parseSettings(JSON.stringify(["gruvbox-light"]))).toEqual(defaultSettings);
   });
 });
+
+describe("index.html pre-paint script", () => {
+  test("paints the same root styles as applySettings for every stored choice", async () => {
+    const html = await Bun.file(`${import.meta.dir}/../index.html`).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    expect(script, "index.html has no inline pre-paint script").toBeDefined();
+    const root = document.documentElement;
+    const original = root.getAttribute("style");
+    const paint = (stored: string | null) => {
+      root.removeAttribute("style");
+      if (stored === null) localStorage.removeItem("achilles-settings"); else localStorage.setItem("achilles-settings", stored);
+      new Function(script!)();
+      const prePaint = root.getAttribute("style");
+      root.removeAttribute("style");
+      applySettings(parseSettings(stored));
+      return [prePaint, root.getAttribute("style")];
+    };
+    try {
+      expect(paint(null)[0]).toBe(paint(null)[1]);
+      for (const uiFont of ["geist", "jetbrains-mono", "ibm-plex-sans", "inter", "system"]) for (const codeFont of ["jetbrains-mono", "ibm-plex-mono", "system-mono"]) {
+        const [prePaint, app] = paint(JSON.stringify({ v: 1, uiFont, codeFont, size: 13 }));
+        expect(prePaint, `${uiFont} / ${codeFont}`).toBe(app);
+      }
+    } finally {
+      localStorage.removeItem("achilles-settings");
+      if (original === null) root.removeAttribute("style"); else root.setAttribute("style", original);
+    }
+  });
+});
