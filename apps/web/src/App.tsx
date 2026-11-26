@@ -420,7 +420,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   } : undefined;
   // the chat's own model; a new chat shows zeta's default, the one it will start with
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
-  const needsDefaultModel = connected && client !== null && !ready?.model;
+  const needsDefaultModel = connected && client !== null && (empty !== null || (ready !== null && !ready.model));
   useEffect(() => {
     if (!needsDefaultModel) return;
     let live = true;
