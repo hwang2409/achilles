@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from .page_build import PageBuildError, build_page
 from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
 
@@ -618,9 +619,18 @@ class PageStore:
         CREATE TABLE IF NOT EXISTS page (
           id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
           zeta_session_id TEXT, active_layout_version INTEGER,
+          active_code_revision INTEGER,
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT,
           created_by_page_id TEXT REFERENCES page(id)
+        );
+        CREATE TABLE IF NOT EXISTS code_revision (
+          page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
+          source TEXT NOT NULL, dependencies TEXT NOT NULL,
+          resolved_dependencies TEXT NOT NULL DEFAULT '{}', lockfile TEXT NOT NULL DEFAULT '',
+          digest TEXT, artifact_size INTEGER, diagnostics TEXT, runtime_error TEXT,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY(page_id, version)
         );
         CREATE TABLE IF NOT EXISTS layout_version (
           page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
@@ -665,6 +675,9 @@ class PageStore:
         if "credential_hash" not in columns:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
+        ensure_column(db, "page", "active_code_revision", "INTEGER")
+        ensure_column(db, "code_revision", "resolved_dependencies", "TEXT NOT NULL DEFAULT '{}'")
+        ensure_column(db, "code_revision", "lockfile", "TEXT NOT NULL DEFAULT ''")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(db, "chat", "purpose", "TEXT NOT NULL DEFAULT 'chat'")
         ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
@@ -987,6 +1000,35 @@ class PageStore:
                 for row in tools
             ],
         }
+
+    def insert_record(
+        self, page_id: str, collection: str, document: dict[str, Any]
+    ) -> dict[str, Any]:
+        record_id = str(document.get("record_id") or secrets.token_hex(12))
+        stamp = now()
+        with self.transaction() as db:
+            db.execute(
+                (
+                    "INSERT INTO page_record(page_id,collection,record_id,version,revision,"
+                    "document,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?)"
+                ),
+                (
+                    page_id,
+                    collection,
+                    record_id,
+                    1,
+                    1,
+                    json.dumps(document, sort_keys=True),
+                    stamp,
+                    stamp,
+                ),
+            )
+            db.execute(
+                "INSERT INTO audit(page_id,action,created_at,actor,record_id) VALUES(?,?,?,?,?)",
+                (page_id, "insert_record", stamp, "page", record_id),
+            )
+        return {**document, "record_id": record_id, "revision": 1}
 
     def records(
         self, page_id: str, collection: str, limit: int = 100
@@ -1616,6 +1658,143 @@ class PageStore:
                 (page_id, "restore_tool", row["digest"], stamp),
             )
         return {"name": name, "version": restored, "restored_from": version}
+
+    def write_page(
+        self,
+        page_id: str,
+        source: str,
+        dependencies: dict[str, str],
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        page = self.page(page_id)
+        if page is None:
+            raise ValidationError("/page", "an existing page", "not_found")
+        current = page["active_code_revision"] or 0
+        if expected_revision is not None and expected_revision != current:
+            raise ValidationError("/expected_revision", "current code revision", "conflict")
+        stamp = now()
+        error_code = "compile_error"
+        try:
+            result = build_page(self.root, page_id, source, dependencies)
+            diagnostics = None
+            digest = result["digest"]
+            size = result["size"]
+        except PageBuildError as exc:
+            result = {
+                "dependencies": dependencies,
+                "resolved_dependencies": {},
+                "lockfile": "",
+            }
+            diagnostics = exc.diagnostics
+            error_code = exc.code
+            digest = None
+            size = None
+        with self.transaction() as db:
+            active = db.execute(
+                "SELECT COALESCE(active_code_revision, 0) FROM page WHERE id=?", (page_id,)
+            ).fetchone()[0]
+            stale = active != current
+            if stale:
+                diagnostics = (
+                    f"build started at revision {current}, but revision {active} is now active"
+                )
+                error_code = "conflict"
+                digest = None
+                size = None
+            version = db.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM code_revision WHERE page_id=?",
+                (page_id,),
+            ).fetchone()[0]
+            db.execute(
+                (
+                    "INSERT INTO code_revision(page_id,version,source,dependencies,"
+                    "resolved_dependencies,lockfile,digest,artifact_size,diagnostics,"
+                    "runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+                ),
+                (
+                    page_id,
+                    version,
+                    source,
+                    json.dumps(result.get("dependencies", dependencies), sort_keys=True),
+                    json.dumps(result.get("resolved_dependencies", {}), sort_keys=True),
+                    result.get("lockfile", ""),
+                    digest,
+                    size,
+                    diagnostics,
+                    None,
+                    stamp,
+                ),
+            )
+            if diagnostics is None:
+                db.execute(
+                    "UPDATE page SET active_code_revision=?,updated_at=? WHERE id=?",
+                    (version, stamp, page_id),
+                )
+            db.execute(
+                "INSERT INTO audit(page_id,action,version_digest,created_at,actor) "
+                "VALUES(?,?,?,?,?)",
+                (page_id, "write_page", digest, stamp, "page"),
+            )
+        if diagnostics:
+            raise ValidationError("/source", "a current valid build", error_code, diagnostics)
+        return {
+            "page_id": page_id,
+            "revision": version,
+            "digest": digest,
+            "size": size,
+            "dependencies": result["dependencies"],
+            "resolved_dependencies": result["resolved_dependencies"],
+            "lockfile": result["lockfile"],
+        }
+
+    def page_code(self, page_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT active_code_revision FROM page WHERE id=?", (page_id,)
+            ).fetchone()
+            if row is None or row[0] is None:
+                return None
+            code = db.execute(
+                "SELECT * FROM code_revision WHERE page_id=? AND version=?", (page_id, row[0])
+            ).fetchone()
+        return dict(code) if code else None
+
+    def inspect_code(self, page_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            page = db.execute(
+                "SELECT active_code_revision FROM page WHERE id=?", (page_id,)
+            ).fetchone()
+            rows = db.execute(
+                "SELECT * FROM code_revision WHERE page_id=? ORDER BY version DESC", (page_id,)
+            ).fetchall()
+        return {
+            "active_revision": page["active_code_revision"] if page else None,
+            "revisions": [
+                {
+                    **{
+                        key: r[key]
+                        for key in (
+                            "version",
+                            "digest",
+                            "artifact_size",
+                            "diagnostics",
+                            "runtime_error",
+                            "lockfile",
+                            "created_at",
+                        )
+                    },
+                    "resolved_dependencies": json.loads(r["resolved_dependencies"]),
+                }
+                for r in rows
+            ],
+        }
+
+    def set_runtime_error(self, page_id: str, revision: int, error: str) -> None:
+        with self.transaction() as db:
+            db.execute(
+                "UPDATE code_revision SET runtime_error=? WHERE page_id=? AND version=?",
+                (error[:4000], page_id, revision),
+            )
 
     def tool_bundle(self, page_id: str, name: str) -> dict[str, Any] | None:
         with self._connect() as db:

@@ -631,3 +631,85 @@ def test_page_list_order_survives_setting_toggles(tmp_path) -> None:
     first, cursor = store.pages(limit=1)
     assert [page["route"] for page in first] == ["/"]
     assert [page["route"] for page in store.pages(limit=1, before=cursor)[0]] == ["/reading"]
+
+
+def _built(source: str = "ok") -> dict:
+    return {
+        "digest": f"digest-{source}",
+        "size": len(source),
+        "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", "nanoid": "^5"},
+        "resolved_dependencies": {"react": "19.0.0", "react-dom": "19.0.0", "nanoid": "5.1.6"},
+        "lockfile": "exact lockfile",
+    }
+
+
+def test_code_build_failure_keeps_previous_revision_active(monkeypatch, tmp_path):
+    import achilles.pages as pages
+    from achilles.page_build import PageBuildError
+
+    store = PageStore(tmp_path)
+    monkeypatch.setattr(pages, "build_page", lambda *_: _built())
+    first = store.write_page("home", "first", {"nanoid": "^5"}, 0)
+    monkeypatch.setattr(
+        pages,
+        "build_page",
+        lambda *_: (_ for _ in ()).throw(PageBuildError("src/Page.tsx:2:3: bad")),
+    )
+
+    with pytest.raises(ValidationError) as failure:
+        store.write_page("home", "broken", {}, 1)
+
+    assert failure.value.hint == "src/Page.tsx:2:3: bad"
+    assert store.page_code("home")["version"] == first["revision"]
+    failed = store.inspect_code("home")["revisions"][0]
+    assert failed["digest"] is None and failed["diagnostics"] == "src/Page.tsx:2:3: bad"
+
+
+def test_overlapping_build_cannot_activate_after_expected_revision_changes(monkeypatch, tmp_path):
+    from threading import Event
+
+    import achilles.pages as pages
+
+    store = PageStore(tmp_path)
+    slow_started, release_slow = Event(), Event()
+
+    def build(_root, _page_id, source, _dependencies):
+        if source == "slow":
+            slow_started.set()
+            assert release_slow.wait(10)
+        return _built(source)
+
+    monkeypatch.setattr(pages, "build_page", build)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        slow = pool.submit(store.write_page, "home", "slow", {}, 0)
+        assert slow_started.wait(10)
+        fast = store.write_page("home", "fast", {}, 0)
+        release_slow.set()
+        with pytest.raises(ValidationError) as failure:
+            slow.result()
+        assert failure.value.hint == "build started at revision 0, but revision 1 is now active"
+
+    assert store.page_code("home")["digest"] == fast["digest"]
+    revisions = store.inspect_code("home")["revisions"]
+    assert revisions[0]["digest"] is None
+    assert (
+        revisions[0]["diagnostics"] == "build started at revision 0, but revision 1 is now active"
+    )
+
+
+def test_code_revision_returns_exact_versions_and_lockfile(monkeypatch, tmp_path):
+    import achilles.pages as pages
+
+    store = PageStore(tmp_path)
+    monkeypatch.setattr(pages, "build_page", lambda *_: _built())
+    result = store.write_page("home", "ok", {"nanoid": "^5"}, 0)
+
+    assert result["resolved_dependencies"]["nanoid"] == "5.1.6"
+    assert result["lockfile"] == "exact lockfile"
+    revision = store.inspect_code("home")["revisions"][0]
+    assert revision["resolved_dependencies"] == {
+        "nanoid": "5.1.6",
+        "react": "19.0.0",
+        "react-dom": "19.0.0",
+    }
+    assert revision["lockfile"] == "exact lockfile"

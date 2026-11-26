@@ -4,6 +4,7 @@ import base64
 import binascii
 import json
 import os
+import secrets
 import shlex
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ import anyio
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
@@ -52,6 +53,12 @@ def _same_origin(request) -> bool:
         and origin == f"{request.url.scheme}://{host}"
         and request.headers.get("sec-fetch-site") in (None, "same-origin")
     )
+
+
+def _shell_authorized(request) -> bool:
+    supplied = request.headers.get("x-achilles-shell", "").encode()
+    expected = request.app.state.shell_token.encode()
+    return _same_origin(request) and secrets.compare_digest(supplied, expected)
 
 
 def _chat_cursor(updated_at: str, session_id: str) -> str:
@@ -127,7 +134,7 @@ def _discovery(request):
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError
         os.kill(int(document["pid"]), 0)
-        if not _same_origin(request) or origin not in document.get("origins", []):
+        if not _shell_authorized(request) or origin not in document.get("origins", []):
             raise HTTPException(403, "origin is not allowed")
         return JSONResponse(
             {
@@ -171,6 +178,7 @@ class PageAuthMiddleware(BaseHTTPMiddleware):
 
 def create_app() -> Starlette:
     store = PageStore(_home())
+    shell_token = secrets.token_urlsafe(32)
 
     async def page(request):
         key = request.path_params["route"]
@@ -197,12 +205,99 @@ def create_app() -> Starlette:
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
                 "layout": await anyio.to_thread.run_sync(store.layout, row["id"]),
                 "create_mode": bool(row["create_mode"]),
+                "code": await anyio.to_thread.run_sync(store.page_code, row["id"]),
             }
         )
 
+    async def page_frame(request):
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
+        if row is None:
+            raise HTTPException(404, "page not found")
+        code = await anyio.to_thread.run_sync(store.page_code, row["id"])
+        if not code:
+            raise HTTPException(404, "page has no compiled revision")
+        artifact = store.root / "bundles" / f"{code['digest']}.js"
+        if not artifact.is_file():
+            raise HTTPException(404, "page artifact not found")
+        html = (
+            "<!doctype html><meta charset='utf-8'><div id='root'></div>"
+            f"<script crossorigin='anonymous' src='/api/pages/{row['id']}/"
+            f"frame-bootstrap.js?revision={code['version']}'></script>"
+            f"<script crossorigin='anonymous' type='module' src='/api/pages/{row['id']}/"
+            f"artifact/{code['digest']}'></script>"
+        )
+        return HTMLResponse(
+            html,
+            headers={
+                "content-security-policy": (
+                    "default-src 'self' https:; script-src 'self' https:; "
+                    "connect-src https: http:; frame-ancestors 'self'; "
+                    "sandbox allow-scripts allow-forms allow-downloads"
+                ),
+                "cache-control": "no-store",
+            },
+        )
+
+    async def frame_bootstrap(request):
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
+        code = await anyio.to_thread.run_sync(store.page_code, row["id"]) if row else None
+        if not code or request.query_params.get("revision") != str(code["version"]):
+            raise HTTPException(404, "page revision not found")
+        identity = json.dumps({"pageId": row["id"], "revision": code["version"]})
+        script = f"""const identity={identity};
+const pending=new Map();let request=0;
+function call(method,collection,document){{return new Promise((resolve,reject)=>{{
+ const requestId=String(++request);pending.set(requestId,{{resolve,reject}});
+ parent.postMessage({{...identity,requestId,method,collection,document}},'*');
+}})}}
+window.achilles={{records:{{list:(collection)=>call('list',collection),insert:(collection,document)=>call('insert',collection,document)}}}};
+addEventListener('message',event=>{{if(event.source!==parent||event.origin===\"null\")return;
+ const item=pending.get(event.data?.requestId);if(!item)return;pending.delete(event.data.requestId);
+ event.data.ok?item.resolve(event.data.result):item.reject(event.data.result);
+}});
+addEventListener('error',event=>parent.postMessage({{...identity,runtimeError:String(event.message)}},'*'));
+addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,runtimeError:String(event.reason)}},'*'));
+"""
+        return Response(
+            script,
+            media_type="text/javascript",
+            headers={
+                "access-control-allow-origin": "*",
+                "cross-origin-resource-policy": "cross-origin",
+                "cache-control": "no-store",
+            },
+        )
+
+    async def page_artifact(request):
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
+        if row is None:
+            raise HTTPException(404, "page not found")
+        code = await anyio.to_thread.run_sync(store.page_code, row["id"])
+        if not code or code["digest"] != request.path_params["digest"]:
+            raise HTTPException(404, "artifact not found")
+        return FileResponse(
+            store.root / "bundles" / f"{code['digest']}.js",
+            media_type="text/javascript",
+            headers={
+                "access-control-allow-origin": "*",
+                "cross-origin-resource-policy": "cross-origin",
+            },
+        )
+
+    async def runtime_error(request):
+        page_id = await require_page_bearer(request)
+        body = await request.json()
+        await anyio.to_thread.run_sync(
+            store.set_runtime_error,
+            page_id,
+            int(body.get("revision", 0)),
+            str(body.get("error", "runtime error")),
+        )
+        return JSONResponse({"ok": True})
+
     async def credential(request):
-        if not _same_origin(request):
-            raise HTTPException(403, "same-origin request required")
+        if not _shell_authorized(request):
+            raise HTTPException(403, "shell request required")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
@@ -394,6 +489,15 @@ def create_app() -> Starlette:
         principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
+        if request.method == "POST":
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise HTTPException(400, "record must be an object")
+            return JSONResponse(
+                await anyio.to_thread.run_sync(
+                    store.insert_record, page_id, request.path_params["collection"], body
+                )
+            )
         collection = request.path_params["collection"]
         field = request.query_params.get("field")
         raw_equals = request.query_params.get("equals")
@@ -517,13 +621,17 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/chats", register_chat, methods=["POST"]),
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
+            Route("/api/pages/{id}/runtime-error", runtime_error, methods=["POST"]),
+            Route("/api/pages/{id}/frame", page_frame),
+            Route("/api/pages/{id}/frame-bootstrap.js", frame_bootstrap),
+            Route("/api/pages/{id}/artifact/{digest}", page_artifact),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
             Route("/api/pages/{id}/tools", page_tools),
             Route("/api/pages/{id}/tools/{name}/invoke", invoke_tool, methods=["POST"]),
             Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
             Route("/api/pages/{id}/versions", versions),
             Route("/api/pages/{id}/layout/restore", restore_layout, methods=["POST"]),
-            Route("/api/pages/{id}/records/{collection}", records),
+            Route("/api/pages/{id}/records/{collection}", records, methods=["GET", "POST"]),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),
@@ -531,6 +639,7 @@ def create_app() -> Starlette:
             Route("/{path:path}", _app),
         ],
     )
+    app.state.shell_token = shell_token
     return PageAuthMiddleware(app, store)
 
 
@@ -550,7 +659,13 @@ def _asset(request):
 
 
 def _app(request):
-    return FileResponse(_static_file(_static_root(), "index.html"))
+    html = _static_file(_static_root(), "index.html").read_text()
+    marker = '<meta name="achilles-shell" content="' + request.app.state.shell_token + '">'
+    if "<head>" in html:
+        html = html.replace("<head>", "<head>" + marker, 1)
+    else:
+        html = marker + html
+    return HTMLResponse(html)
 
 
 def _text(value: str) -> str:

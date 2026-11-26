@@ -1,3 +1,4 @@
+import { shellHeaders } from "./shell";
 import { continueChatIntent, newChatIntent } from "./surface/routes";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ZetaError, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
@@ -12,7 +13,7 @@ import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type Ch
 import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
-export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
+export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> }; code?: { version: number; digest: string } | null };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
 // newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
 type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
@@ -138,7 +139,7 @@ export async function attachPage(
     if (!loaded.ok) throw new Error("page not found");
     const page = await loaded.json() as Page; requireCurrent(owner, token);
     if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
-    const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
+    const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { headers: shellHeaders(), cache: "no-store" }); requireCurrent(owner, token);
     if (!credentialResponse.ok) throw new Error(`could not load page credential (${credentialResponse.status})`);
     const credential = ((await credentialResponse.json()) as { credential: string }).credential; requireCurrent(owner, token);
     const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, purpose, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };

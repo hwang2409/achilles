@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import socket
 import sqlite3
 import threading
@@ -1090,18 +1091,70 @@ def test_discovery_allows_browser_same_origin(monkeypatch, tmp_path: Path) -> No
             }
         )
     )
+    static = tmp_path / "dist"
+    static.mkdir()
+    (static / "index.html").write_text("<html><body></body></html>")
+    monkeypatch.setattr(web, "_static_root", lambda: static)
     monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
-    response = TestClient(web.create_app(), client=("127.0.0.1", 1234)).get(
-        "/api/zeta/discovery",
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
         headers={
             "origin": "http://127.0.0.1:5190",
             "host": "127.0.0.1:5190",
             "sec-fetch-site": "same-origin",
         },
     )
+    shell = client.get("/")
+    assert shell.status_code == 200
+    token = re.search(r'<meta name="achilles-shell" content="([^"]+)">', shell.text)
+    assert token is not None
+    response = client.get("/api/zeta/discovery", headers={"x-achilles-shell": token.group(1)})
     assert response.status_code == 200
     assert response.json()["url"] == "ws://127.0.0.1:8765"
     assert response.json()["controller_token"] == "controller-secret"
+
+
+def test_forged_browser_headers_cannot_read_shell_secrets(monkeypatch, tmp_path: Path) -> None:
+    discovery = tmp_path / "discovery.json"
+    discovery.write_text(
+        json.dumps(
+            {
+                "port": 8765,
+                "controller_token": "controller-secret",
+                "observer_token": "observer-secret",
+                "pid": os.getpid(),
+                "origins": ["http://127.0.0.1:5190"],
+            }
+        )
+    )
+    monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={
+            "origin": "http://127.0.0.1:5190",
+            "host": "127.0.0.1:5190",
+            "sec-fetch-site": "same-origin",
+        },
+    )
+    discovery_response = client.get("/api/zeta/discovery")
+    credential_response = client.get("/api/pages/home/credential")
+    assert discovery_response.status_code == 403
+    assert credential_response.status_code == 403
+    assert "secret" not in discovery_response.text + credential_response.text
+
+
+def test_non_ascii_shell_secret_is_forbidden() -> None:
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={"origin": "http://127.0.0.1:5190", "host": "127.0.0.1:5190"},
+    )
+
+    response = client.get("/api/pages/home/credential", headers={"x-achilles-shell": b"\xe9"})
+
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize("port", [True, "8765", 0, 65536])
@@ -1334,3 +1387,34 @@ def test_versions_lists_tool_versions_with_the_active_one(tmp_path: Path) -> Non
         ("annotate_trace", 2, False, None),
         ("annotate_trace", 1, False, None),
     ]
+
+
+def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    store = PageStore(root)
+    digest = "a" * 64
+    (root / "bundles" / f"{digest}.js").write_text("export default 1")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+            "artifact_size,diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("home", 1, "source", "{}", digest, 16, None, None, "2025-01-01"),
+        )
+        db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+
+    with TestClient(web.create_app()) as client:
+        frame = client.get("/api/pages/home/frame")
+        artifact = client.get(f"/api/pages/home/artifact/{digest}", headers={"origin": "null"})
+        bootstrap = client.get(
+            "/api/pages/home/frame-bootstrap.js?revision=1", headers={"origin": "null"}
+        )
+
+    assert (
+        "sandbox allow-scripts allow-forms allow-downloads"
+        in frame.headers["content-security-policy"]
+    )
+    assert "<script>" not in frame.text
+    assert "crossorigin='anonymous'" in frame.text
+    assert artifact.headers["access-control-allow-origin"] == "*"
+    assert bootstrap.headers["access-control-allow-origin"] == "*"
+    assert "window.achilles" in bootstrap.text
