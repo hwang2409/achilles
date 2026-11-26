@@ -85,9 +85,6 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await stockField.inputValue() !== reloadDraft) throw new Error(`reload draft row: expected ${JSON.stringify(reloadDraft)}, got ${JSON.stringify(await stockField.inputValue())}`);
   await stockField.fill("");
   await stockField.focus();
-  await page.keyboard.press(appShortcut("b"));
-  if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: command+B did not collapse the sidebar with stock composer focus");
-  await page.keyboard.press(appShortcut("b"));
   await page.keyboard.press(appShortcut("Shift+o"));
   await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== originalSession, "command+shift+O from stock composer");
   const stockSession = await sessionId();
@@ -156,9 +153,6 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await page.keyboard.press("Escape");
   await gateWait.playwright(settingsDialog, "waitFor", { state: "hidden", timeout: 10_000 });
   if (await composer.getAttribute("data-mode") !== "insert") throw new Error("closing settings with escape changed vim mode");
-  await page.keyboard.press(appShortcut("b"));
-  if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: the platform app modifier+B did not collapse the sidebar with vim composer focus");
-  await page.keyboard.press(appShortcut("b"));
   const vimSession = await sessionId();
   await page.keyboard.press(appShortcut("Shift+o"));
   await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== vimSession, "the platform app modifier+shift+O from vim composer");

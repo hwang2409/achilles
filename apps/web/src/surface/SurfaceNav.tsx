@@ -8,13 +8,12 @@ const groups = [...new Set(surfaceRoutes.flatMap((route) => route.group ?? []))]
 
 type PlaceCount = { waiting?: number };
 
-/** One rail icon style: the collapsed sidebar shows only these, so every rail item draws the same 16px stroke. */
+/** One nav icon style: every nav item draws the same 16px stroke. */
 export const NavIcon = ({ d }: { d: string }) => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={d} /></svg>;
 
-// the tooltip names the place only in the collapsed rail, where the label is hidden
-function PlaceLink({ route, current, count, collapsed }: { route: SurfaceRoute; current: SurfaceRoute; count?: PlaceCount; collapsed: boolean }) {
+function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: SurfaceRoute; count?: PlaceCount }) {
   const waiting = count?.waiting || undefined;
-  return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={collapsed ? route.label : undefined}>
+  return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined}>
     <NavIcon d={route.icon} />
     <span>{route.label}</span>
     {waiting && <small aria-hidden="true" className="waiting-count">{waiting}</small>}
@@ -32,15 +31,13 @@ export function BuildStatus({ activity, current, className = "" }: { activity: B
   </span>;
 }
 
-export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, action, search, counts, recent, connectionStatus, activity }: {
+export function SurfaceNav({ current, sidebar, narrow, drawer, onClose, openPalette, action, search, counts, recent, connectionStatus, activity }: {
   activity?: BuildActivity;
   current: SurfaceRoute;
   sidebar: Ref<HTMLElement>;
   narrow: boolean;
   drawer: boolean;
-  collapsed: boolean;
   onClose: () => void;
-  onCollapse: () => void;
   openPalette: () => void;
   action?: ReactNode;
   search: ReactNode;
@@ -51,6 +48,10 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
   return <aside ref={sidebar} id="surface-sidebar" className="sidebar" aria-label={narrow ? "navigation menu" : "sidebar"} role={narrow && drawer ? "dialog" : undefined} aria-modal={narrow && drawer || undefined} aria-hidden={narrow && !drawer ? true : undefined} inert={narrow && !drawer || undefined}>
     <div className="brand-row">
       <span className="brand-mark" aria-hidden="true" /><strong>achilles</strong>
+      <div className="surface-search">
+        {search}
+        <button className="palette-button" aria-label="command palette" title="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button>
+      </div>
       <span className="surface-connection" title={connectionStatus.label} aria-label={connectionStatus.label} data-connected={connectionStatus.connected} role="img" />
       {narrow && <button className="drawer-close" aria-label="close navigation" onClick={onClose}>×</button>}
     </div>
@@ -58,25 +59,18 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       <div className="surface-actions">
         {action}
         <div className="create-split">
-          <PlaceLink route={createRoute} current={current} collapsed={collapsed} />
+          <PlaceLink route={createRoute} current={current} />
           {activity && <BuildStatus activity={activity} current={current} className="build-status-nav" />}
         </div>
-      </div>
-      <div className="surface-search">
-        {search}
-        <button className="palette-button" aria-label="command palette" title="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><span aria-hidden="true"><NavIcon d="M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l3.5 3.5" /></span><kbd>{modKey("K")}</kbd></button>
       </div>
       <div className="sidebar-destinations">
         <nav className="place-nav" aria-label="places">
           {groups.map((group) => <section aria-label={group} key={group}>
-            {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} count={counts[route.id]} collapsed={collapsed} />)}
+            {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} count={counts[route.id]} />)}
           </section>)}
         </nav>
         {recent}
       </div>
     </div>
-    {!narrow && <footer>
-      <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} title={collapsed ? "expand sidebar" : undefined} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span></button>
-    </footer>}
   </aside>;
 }

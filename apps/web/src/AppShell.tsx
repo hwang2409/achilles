@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { CommandPalette, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
@@ -9,6 +9,7 @@ import { WRITE_SURFACE } from "./writeSurfaces";
 import { ShellDock } from "./surface/ModuleState";
 import type { BuildActivity } from "./create/buildActivity";
 import { BuildStatus, NavIcon, SurfaceNav } from "./surface/SurfaceNav";
+import { SidebarResizer, useSidebarWidth } from "./surface/SidebarResizer";
 import type { CreateModeOwner } from "./create/createMode";
 import { surfaceHref, type SurfaceRoute } from "./surface/routes";
 
@@ -41,7 +42,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   const { canWrite = false, serverForcesAsk = false, createMode } = workspace ?? {};
   const settingsPlace = current.id === "settings";
   const displaySettings = Boolean(workspace) || settingsPlace;
-  const [collapsed, setCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
   const [drawer, setDrawer] = useState(false);
   const liveRegion = useRef<HTMLSpanElement>(null);
   const [spoken, setSpoken] = useState("");
@@ -62,7 +63,6 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     setDrawer(false);
     newChat.run();
   }, [newChat]);
-  const collapse = () => setCollapsed((value) => !value);
   const dismissDrawer = () => setDrawer(false);
   const closeDrawer = () => { requestFocus(() => restorableFocus(menuButton.current)); setDrawer(false); };
   const openSettings = (opener: Element | null) => {
@@ -122,10 +122,6 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
         event.preventDefault();
         event.stopPropagation();
         if (paletteOpen) closePalette(); else openPalette();
-      } else if (key === "b") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!narrow) collapse();
       } else if (displaySettings && event.key === ",") {
         event.preventDefault();
         event.stopPropagation();
@@ -170,7 +166,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   const receiptHref = receipt ? surfaceHref(receipt.route) : "";
   // Go to this receipt's page before the acknowledgement re-renders the link with the next receipt.
   const openReceipt = () => { location.assign(receiptHref); activity.dismissReceipt(); };
-  const showNavActivity = narrow ? drawer : !collapsed;
+  const showNavActivity = !narrow || drawer;
   const pending = activity.announcement;
   useEffect(() => {
     if (!pending) return;
@@ -200,12 +196,13 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
       <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
     </aside>}
   </div> : null;
-  return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
+  return <div className={`app-shell ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`} style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
-    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} activity={showNavActivity ? activity : undefined}
-      action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : collapsed ? "new chat" : undefined} onClick={startNewChat}><span aria-hidden="true"><NavIcon d="M8 3v10 M3 8h10" /></span><b>{newChat.pending ? "Starting…" : "New chat"}</b></button>}
+    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} onClose={closeDrawer} openPalette={openPalette} connectionStatus={connectionStatus} activity={showNavActivity ? activity : undefined}
+      action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : undefined} onClick={startNewChat}><span aria-hidden="true"><NavIcon d="M8 3v10 M3 8h10" /></span><b>{newChat.pending ? "Starting…" : "New chat"}</b></button>}
       search={nav.searchControl(dismissDrawer)} counts={{ ...nav.counts, chats: nav.counts.chats && { ...nav.counts.chats, waiting: (nav.counts.chats.waiting ?? 0) + activity.needsYou } }} recent={nav.recent(dismissDrawer, activity.rows, activity.onScreen)} />
+    {!narrow && <SidebarResizer width={sidebarWidth} onResize={setSidebarWidth} />}
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {workspace && banner}
       <div className="shell-header">
