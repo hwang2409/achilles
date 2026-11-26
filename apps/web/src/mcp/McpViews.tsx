@@ -108,7 +108,7 @@ export function FailedRead({ failure, project, retry, reading, offline }: { fail
     try { await navigator.clipboard.writeText(JSON.stringify(failure)); setCopied("details copied"); }
     catch { setCopied("could not copy details"); }
   };
-  if (failure.reason === "observer") return <div className="mcp-failure"><ModuleState kind="offline" title="zeta is full" detail={OBSERVER_READ_REASON} /></div>;
+  if (failure.reason === "observer") return <div className="mcp-failure"><ModuleState kind="offline" title={OBSERVER_READ_REASON} /></div>;
   return <div className="mcp-failure">
     <ModuleState kind="failed" title="zeta could not read mcp configuration" detail={project ? "zeta’s current project is unavailable or its configuration could not be read."
       : failure.reason === "operation_busy" ? "zeta is busy. try again." : "retry to read the current configuration from disk."} />

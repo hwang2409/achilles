@@ -1182,21 +1182,30 @@ test("a default attach names its chat in the url, so a reload or reconnect reope
   expect(resumed.at(-1), "the reconnect resumed the page's newest chat, not the url's").toBe("chat");
 });
 
-test("a new tab whose default chat is open in another tab gets its own new chat, not zeta's refusal", async () => {
-  const pushed: string[] = [];
+test("a new tab whose default chat is open in another tab gets its own new chat, not zeta's refusal, and Back leaves", async () => {
   const location = { pathname: "/", search: "", hash: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
   const go = (path: string) => { const url = new URL(path, location.href); Object.assign(location, { pathname: url.pathname, search: url.search, hash: url.hash, href: url.href }); };
-  let created = false;
+  // the tab's history: the entry it arrived on, plus any it pushes
+  const entries = ["/"];
+  let current = 0;
+  const pops: (() => void)[] = [];
+  let creates = 0;
   setGlobals({
     localStorage: new MemoryStorage(), location,
-    history: { state: null, pushState(_state: unknown, _title: string, path: string) { pushed.push(path); go(path); }, replaceState(_state: unknown, _title: string, path: string) { go(path); } },
-    addEventListener() {}, removeEventListener() {},
+    history: {
+      state: null,
+      pushState(_state: unknown, _title: string, path: string) { entries.splice(current + 1, Infinity, path); current += 1; go(path); },
+      replaceState(_state: unknown, _title: string, path: string) { entries[current] = path; go(path); },
+    },
+    addEventListener: (type: string, listener: () => void) => { if (type === "popstate") pops.push(listener); },
+    removeEventListener: (type: string, listener: () => void) => { if (type === "popstate") pops.splice(pops.indexOf(listener), 1); },
     fetch: async (input: string | URL | Request) => {
       const url = String(input);
       if (url === "/api/pages/home") return Response.json(page);
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
       if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
-      if (url.startsWith("/api/chats?")) return Response.json({ chats: created ? [{ ...chat, session_id: "fresh" }, chat] : [chat], next: null });
+      // like achilles, the default list hides the fresh chat until it has a sent message, so the default chat stays the held one
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: url.includes("include=fresh") ? [{ ...chat, session_id: "fresh" }, chat] : [chat], next: null });
       if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
       throw new Error(`unexpected fetch ${url}`);
     },
@@ -1210,7 +1219,7 @@ test("a new tab whose default chat is open in another tab gets its own new chat,
         if (params?.session_id === "chat") throw Object.assign(new Error("session is controlled by another client"), { code: -32014, data: { code: "session_controlled" } });
         return { session: { name: null } };
       }
-      if (method === "new_session") { created = true; return { session: { session_id: "fresh" } }; }
+      if (method === "new_session") { creates += 1; return { session: { session_id: "fresh" } }; }
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       if (method === "status") return { session: { session_id: "fresh" }, state: "idle" };
@@ -1229,4 +1238,12 @@ test("a new tab whose default chat is open in another tab gets its own new chat,
   expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
   expect(resumed[0]).toBe("chat");
   expect(location.search).toBe("?chat=fresh");
+  // Back: go to the previous entry of this tab, if it has one; else the browser leaves achilles
+  if (current > 0) {
+    current -= 1; go(entries[current]!);
+    await act(async () => { for (const pop of [...pops]) pop(); });
+    for (let flush = 0; flush < 40; flush += 1) await act(async () => {});
+  }
+  expect(creates, "Back from the fresh chat created another zeta session").toBe(1);
+  expect(entries, "the fresh chat took the entry the tab arrived on").toEqual(["/?chat=fresh"]);
 });

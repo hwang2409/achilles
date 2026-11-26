@@ -23,8 +23,9 @@ export class ChatBusyError extends Error {
 }
 
 /** zeta refuses `resume` and `new_session` (-32004, `data.reason: "resident_limit"`) while it holds all the open chats it allows. */
+export const TOO_MANY_CHATS = "zeta has too many open chats. a closed tab keeps its chat open for about 90 s, so wait a minute or close a chat tab, then try again.";
 export class TooManyChatsError extends Error {
-  constructor() { super("zeta has too many open chats. close a chat tab or wait, then try again."); }
+  constructor() { super(TOO_MANY_CHATS); }
 }
 export const isResidentLimit = (caught: unknown) => {
   const error = caught as { code?: unknown; data?: { reason?: unknown } | null } | null;

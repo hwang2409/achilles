@@ -56,32 +56,12 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
   }
 }
 
-type RoleState = { role: ZetaRole; reason: string | null };
-type RoleEvent = "controller_granted" | "observer_granted" | "takeover_refused" | "takeover_failed" | "controller_closed" | "retry";
-
 // zeta sends observers no "slot free" signal, so the refusal is a past result with its time: true for as long as it shows.
-// the banner above already says why zeta is full, so this line does not repeat it.
-export const refusedReason = (at: number) => `zeta is still full at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}. close another zeta tab, then try again.`;
+// the banner above already says why zeta is full and what to do, so this line says only when it was still full.
+export const refusedReason = (at: number) => `zeta is still full at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}.`;
 
 /** The reason when a takeover failed for any cause other than an occupied controller slot. */
 export const TAKEOVER_FAILED = "could not take control. try again.";
-
-// `at`: when a takeover was refused (epoch ms).
-export function transitionRole(state: RoleState, event: RoleEvent, at = Date.now()): RoleState {
-  switch (event) {
-    case "controller_granted":
-    case "controller_closed":
-      return { role: "controller", reason: null };
-    case "observer_granted":
-      return { role: "observer", reason: null };
-    case "takeover_refused":
-      return { role: state.role, reason: refusedReason(at) };
-    case "takeover_failed":
-      return { role: state.role, reason: TAKEOVER_FAILED };
-    case "retry":
-      return { role: state.role, reason: null };
-  }
-}
 
 export type ConnectionDeps = {
   /** The page origin the server's `--ws-origin` allowlist must contain. */
@@ -121,7 +101,8 @@ export const TELEMETRY_FEATURE = "telemetry_read_v1";
 
 /** A read zeta refused (-32003) because this tab fell back to observer: zeta was full when the tab connected. */
 export const observerRefused = (client: unknown, error: unknown) => (client as { authority?: unknown } | null)?.authority === "observer" && (error as { code?: unknown } | null)?.code === -32003;
-export const OBSERVER_READ_REASON = "zeta is full, so this tab cannot read this. close another zeta tab, then take control.";
+// the banner says what to do; a page body says only why it shows nothing
+export const OBSERVER_READ_REASON = "this tab cannot read this while zeta is full.";
 
 export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", "multi_controller", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "session_history_backward", "list_sessions_paging", "projects", "projects-memory-v2", "project_writes_v1", "state_read_v1", "agent_run_catalog_v1", "child_runs", "child_run_control_v1", "child_run_history", "child_run_events", "home_settings_v1", "mcp_management_v1", ACCOUNT_LIST_IDLE_FEATURE];
 
@@ -177,7 +158,6 @@ export function createConnection({
   let timer: unknown = null;
   let generation = 0;
   let stopped = false;
-  let roleState: RoleState = { role: "controller", reason: null };
   let retainedObserver = false;
   let liveDiscovery: ZetaDiscovery | null = null;
   let takingControl = false;
@@ -222,13 +202,11 @@ export function createConnection({
     const previous = client;
     client = next;
     liveDiscovery = discovery;
-    roleState = transitionRole(roleState, authority === "controller" ? "controller_granted" : "observer_granted");
     previous?.close();
     (next as ZetaClient & { authority?: ZetaRole }).authority = authority;
     next.onClose(() => {
       if (client !== next) return;
       client = null;
-      roleState = transitionRole(roleState, authority !== "controller" ? "retry" : "controller_closed");
       send({ type: "closed", now: now() });
     });
     retainedObserver = authority === "observer";
@@ -276,34 +254,30 @@ export function createConnection({
       void attempt();
     },
     async withControl(read) {
-      if (takingControl) return { refused: transitionRole(roleState, "takeover_failed").reason! };
+      if (takingControl) return { refused: TAKEOVER_FAILED };
       const reason = await connection.takeControl();
       const controller = client;
       if (reason !== null || !controller || state.phase !== "connected" || state.authority !== "controller")
-        return { refused: reason ?? transitionRole(roleState, "takeover_failed").reason! };
+        return { refused: reason ?? TAKEOVER_FAILED };
       return { value: await read(controller) };
     },
     async takeControl() {
       if (stopped || takingControl) return null;
       if (state.phase === "connected" && state.authority === "controller") return null;
       // the banner can show while the observer socket reconnects: a click then says so instead of doing nothing
-      if (state.phase !== "connected" || !client || !liveDiscovery) return transitionRole(roleState, "takeover_failed").reason;
+      if (state.phase !== "connected" || !client || !liveDiscovery) return TAKEOVER_FAILED;
       const observer = client;
       const discovery = liveDiscovery;
       takingControl = true;
-      roleState = transitionRole(roleState, "retry");
       // Keep the live observer until a controller handshake actually succeeds.
       const opened = await openRole(discovery, "controller");
       takingControl = false;
       if (stopped || client !== observer) {
         if (opened.kind === "connected") opened.client.close();
         // the observer socket was replaced during the attempt: still say the click did not take control
-        return stopped ? null : transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed", now()).reason;
+        return stopped ? null : opened.kind === "busy" ? refusedReason(now()) : TAKEOVER_FAILED;
       }
-      if (opened.kind !== "connected") {
-        roleState = transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed", now());
-        return roleState.reason;
-      }
+      if (opened.kind !== "connected") return opened.kind === "busy" ? refusedReason(now()) : TAKEOVER_FAILED;
       adopt(opened.client, discovery, "controller");
       return null;
     },

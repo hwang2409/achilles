@@ -64,11 +64,10 @@ a { color: inherit; text-decoration: none; }
 kbd { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
 .observer-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; flex: none; gap: 8px 16px; padding: 10px var(--g1-page-gutter); border-bottom: 1px solid var(--fulcrum-border); background: color-mix(in srgb, var(--fulcrum-accent) 8%, var(--fulcrum-bg)); color: var(--fulcrum-fg); }
-.observer-banner div { display: grid; gap: 2px; min-width: 0; }
-.observer-banner > div:first-child { flex: 1 1 0; }
+.observer-banner > p { flex: 1 1 0; min-width: 0; margin: 0; text-wrap: pretty; }
 .observer-banner strong { color: var(--fulcrum-accent); }
 .observer-banner span { color: var(--fulcrum-muted); text-wrap: pretty; }
-.observer-action { justify-items: end; flex: none; }
+.observer-action { display: grid; justify-items: end; flex: none; }
 #take-control-feedback { flex-basis: 100%; }
 #take-control-feedback:empty { position: absolute; }
 .observer-banner button { flex: 0 0 auto; min-height: 40px; padding: 0 12px; }
@@ -79,7 +78,8 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .approval-control button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 .approval-control span { color: var(--fulcrum-muted); text-wrap: pretty; }
 /* narrow: all text first, then the button, so the banner stays compact */
-@media (max-width: 600px) { .observer-banner { align-items: flex-start; flex-direction: column; flex-wrap: nowrap; gap: 6px; padding-block: 8px; } .observer-banner > div:first-child, #take-control-feedback { flex: none; } #take-control-feedback { order: 1; } .observer-action { order: 2; justify-items: start; } .observer-banner button { min-height: 44px; } }
+/* a phone keeps the button beside the text, so the banner stays about three lines tall */
+@media (max-width: 600px) { .observer-banner { gap: 6px 12px; padding-block: 8px; } .observer-banner button { min-height: 44px; } }
 .sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, var(--g1-type-chat)) / var(--g1-leading-chat) var(--achilles-ui-font, var(--g1-font-ui)); }
 .page-view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 @media (width >= 1280px) {

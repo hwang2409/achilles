@@ -75,7 +75,7 @@ function catalog(wire: unknown, idle: boolean): AccountCatalog {
 }
 
 type AccountClient = Pick<ZetaClient, "request" | "features"> & { authority?: "controller" | "observer" };
-const observerRefusal = () => new AccountReadError("this tab is read-only: too many tabs control zeta. close one, then try again.");
+const observerRefusal = () => new AccountReadError("this tab cannot read accounts while zeta is full.");
 
 // the default deadline turns an unanswered account_list into an error instead of an endless "loading"
 export async function readAccounts(client: AccountClient, sessionId?: string, options: Parameters<ZetaClient["request"]>[2] = { timeoutMs: 12_000 }): Promise<AccountCatalog> {

@@ -95,7 +95,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
     for (let turn = 0; turn < 20 && authority === "observer" && !app.container.querySelector(".observer-banner"); turn++) await act(async () => {});
     const banner = app.container.querySelector(".observer-banner");
     if (authority === "observer") {
-      expect(banner?.textContent).toContain("this tab is read-only and shows updates: too many tabs control zeta, or another app does. close another zeta tab, then take control.");
+      expect(banner?.textContent).toContain("this tab is read-only and shows updates. close another zeta tab, then take control.");
       expect(banner?.getAttribute("hidden")).toBeNull();
     } else {
       expect(banner === null, "a controller tab showed the observer banner").toBe(true);
@@ -378,7 +378,8 @@ const browserLogin = (cancel: boolean): Row => {
     login_cancel: () => ({ result: { state: "succeeded" } }),
   } }, check: async (app, authority, writes, requests) => {
     if (authority === "observer") {
-      expect(await app.findByText(/^zeta is still full at .+\. close another zeta tab, then try again\.$/)).toBeTruthy();
+      // an observer waits for the banner's take control: no automatic take control, no red read error
+      expect(await app.findByText("this tab cannot read this while zeta is full.")).toBeTruthy();
       expect(requests).not.toContain("account_list");
       expect(app.container.querySelector(tag("accounts.login"))).toBeNull();
       expect(app.container.querySelector(tag("accounts.login-cancel"))).toBeNull();
@@ -742,7 +743,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     // library tabs start as observers either way; "+ new" takes control only if the controller slot is free.
     await click(select(app, tag("library.create")));
     if (authority === "observer") {
-      expect(app.getByText(/^zeta is still full at .+\. close another zeta tab, then try again\.$/)).toBeTruthy();
+      expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
@@ -758,7 +759,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(app.getByText("show skill text", { selector: "button", exact: true }));
     await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
     if (authority === "observer") {
-      expect(app.getByText(/^zeta is still full at .+\. close another zeta tab, then try again\.$/)).toBeTruthy();
+      expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
@@ -819,7 +820,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(action);
     expect(rows["sessions.continue"].options!.roles).toEqual(authority === "observer" ? [...opened, "controller"] : opened);
     if (authority === "observer") {
-      expect(await app.findByText(/^zeta is still full at .+\. close another zeta tab, then try again\.$/)).toBeTruthy();
+      expect(await app.findByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(location.pathname).toBe("/sessions/session");
       expect(document.activeElement).toBe(action);
       expect(writes).toEqual([]);
@@ -961,9 +962,9 @@ test("a library take-control refusal still shows after the observer socket is re
   await withApp("observer", options, async (app) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
-    expect(await app.findByText(/^zeta is still full at .+\. close another zeta tab, then try again\.$/, {}, { timeout: 3_000 })).toBeTruthy();
+    expect(await app.findByText(/^zeta is still full at .+\.$/, {}, { timeout: 3_000 })).toBeTruthy();
     expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
-    expect(app.getByText(/^zeta is still full at .+\. close another zeta tab, then try again\.$/)).toBeTruthy();
+    expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
   });
 });
 

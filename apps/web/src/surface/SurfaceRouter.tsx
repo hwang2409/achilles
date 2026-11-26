@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
 import { useBuildActivity, type BuildActivity } from "../create/buildActivity";
 import { AppShell, type AppShellProps } from "../AppShell";
@@ -117,7 +117,10 @@ export function SurfaceRouter() {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
   return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={observerBanner}
-    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow(), continueSession } : undefined}>{content}{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
+    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow(), continueSession } : undefined}>
+    {/* keyed on the tab's role: a tab that takes control (or falls back to observer) mounts every module fresh, so each
+        reads again with its new authority instead of keeping an observer-era error */}
+    <Fragment key={observer ? "observer" : "controller"}>{content}</Fragment>{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
 }
 
 // library_read_v1 path when hello granted it; each exact method is checked, so a catalog can work without its read.
@@ -163,10 +166,10 @@ function ObserverBanner({ connection }: { connection: Connection }) {
     setFeedback(reason);
   };
   return <aside className="observer-banner" aria-label="observer mode">
-    <div>
-      <strong>zeta is full</strong>
-      <span id="tab-authority-description">this tab is read-only and shows updates: too many tabs control zeta, or another app does. close another zeta tab, then take control.</span>
-    </div>
+    <p>
+      <strong>zeta is full.</strong>{" "}
+      <span id="tab-authority-description">this tab is read-only and shows updates. close another zeta tab, then take control.</span>
+    </p>
     <div className="observer-action"><button type="button" className="primary" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
     {/* its own full-width row under the text and the button, so a long refusal does not squeeze the text */}
     <span id="take-control-feedback" role="status">{feedback}</span>

@@ -232,7 +232,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   const createDraft = write?.drafts.get(draftKey);
   let content: ReactNode;
   if (!catalog) content = <ModuleState kind="loading" title={reads.catalog ? "reading catalog…" : "reading session snapshot…"} />;
-  else if (catalog.state === "failed" && catalog.problem.observer) content = <ModuleState kind="offline" title="zeta is full" detail={catalog.problem.message} />;
+  else if (catalog.state === "failed" && catalog.problem.observer) content = <ModuleState kind="offline" title={catalog.problem.message} />;
   else if (catalog.state === "failed") content = <ModuleState kind="failed" title={`could not read ${title}: ${catalog.problem.message}`}
     action={catalog.problem.retry ? { label: "retry", run: refresh } : undefined} />;
   else if (catalog.state === "invalid") content = <ModuleState kind="failed" title="could not read the catalog" detail="refresh to try the active session snapshot again." />;

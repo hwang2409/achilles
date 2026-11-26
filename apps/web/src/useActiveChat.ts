@@ -89,11 +89,11 @@ export async function persistChatState(sessionId: string, lastState: string, fet
   } catch { return false; }
 }
 
-function attachmentError(caught: unknown, context: "loading" | "creation" = "loading"): string {
+function attachmentError(caught: unknown, context: "loading" | "creation" = "loading", canWrite = true): string {
   const message = caught instanceof Error ? caught.message : String(caught);
   if (message === "Failed to fetch" || message === "Load failed") return `achilles is unavailable while ${context === "creation" ? "creating the chat" : "loading the chat"}.`;
   // only an observer (zeta was full) reads a chat without resuming it, and zeta refuses that when no tab has the chat open
-  if (message.includes("server has no active session")) return "this chat is not open in any tab. take control to open it here.";
+  if (!canWrite && message.includes("server has no active session")) return "this chat is not open in any tab. take control to open it here.";
   return message.includes("MCP server is not a trusted global server: achilles")
     ? "achilles is not trusted by zeta. add it to $ZETA_HOME/mcp.json, then restart zeta serve."
     : message;
@@ -631,7 +631,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       } else if (caught instanceof SessionControlledError && canWrite && !selectedId && !selectedFromUrl() && owner.current.current(token)) {
         // a default attach met the page's newest chat open in another tab: this tab gets its own new chat instead
         openFresh(location.pathname, true);
-      } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) applyActive(token, { kind: "state", update: { phase: "error", error: attachmentError(caught) } });
+      } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) applyActive(token, { kind: "state", update: { phase: "error", error: attachmentError(caught, "loading", canWrite) } });
     }).finally(() => {
       clock.clearTimeout(slowTimer);
       if (owner.current.current(token)) setAttachSlow(false);
@@ -648,6 +648,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
 
   const selectChat = useCallback((chat: Chat) => {
     setBusy(null);
+    createAfterLoad.current = false;
     const route = chat.page_route === "/" ? "/" : chat.page_route;
     const target = routeWithChat(route, chat.session_id);
     if (route !== location.pathname) { location.assign(target); return; }
@@ -669,7 +670,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (waiting) selectChat(waiting);
   }, [canWrite, selectChat]);
 
-  const newChat = useCallback(() => startChat("new", async () => {
+  // replace: the create belongs to a /#new-chat entry already in history, so its chat takes that entry and Back leaves
+  const createChat = useCallback((replace: boolean) => startChat("new", async () => {
     if (!canWrite || !client) return;
     setBusy(null);
     const context = state.phase === "ready" || state.phase === "empty" || state.phase === "busy"
@@ -686,7 +688,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     // the page stays (header, new-chat box) while the chat is created; it can wait for an earlier create of the page
     applyActive(token, { kind: "state", update: state.phase !== "ready" && state.phase !== "empty" && state.phase !== "busy" ? { phase: "loading" } : { phase: "empty", page: state.page, serverApprovalMode: state.serverApprovalMode, credential: state.credential, newChat: true } });
     try {
-      const next = await attachPage(client, key, null, owner.current, creation.current, token, true, canWrite ? applyPendingCreateMode : undefined, (ready) => publishReady(ready, token, readAt, false, focusClaim.owns()), true, canWrite);
+      const next = await attachPage(client, key, null, owner.current, creation.current, token, true, canWrite ? applyPendingCreateMode : undefined, (ready) => publishReady(ready, token, readAt, replace, focusClaim.owns()), true, canWrite);
       // zeta cannot start a chat while another turn runs: say which chat runs and keep the new chat's box. text typed
       // there was written for a new chat, so it must never go to the running chat.
       if (next.phase === "busy" && owner.current.current(token)) {
@@ -701,6 +703,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       focusClaim.release();
     }
   }), [applyActive, applyPendingCreateMode, canWrite, client, openFresh, publishReady, showBusy, startChat, state]);
+  const newChat = useCallback(() => createChat(false), [createChat]);
 
   // the unsent-rows notice: show the page's new-chat box with its rows; the chat is made only when one of them is sent
   const openNewChat = useCallback(() => {
@@ -732,11 +735,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (!canWrite || !createAfterLoad.current) return;
     // "new chat" clicked while a missing page loaded: make the chat on home instead
     if (state.phase === "error" && state.error === "page not found") return openFresh("/", false);
-    if (state.phase !== "ready" && state.phase !== "empty") return;
+    if (state.phase === "loading") return;
     createAfterLoad.current = false;
-    if (location.hash === newChatIntent) history.replaceState({}, "", location.pathname + location.search);
-    void newChat();
-  }, [canWrite, newChat, openFresh, state]);
+    // missing, busy or another error: drop the click, so a later ready state never creates a chat nobody asked for
+    if (state.phase !== "ready" && state.phase !== "empty") return;
+    const replace = location.hash === newChatIntent;
+    if (replace) history.replaceState({}, "", location.pathname + location.search);
+    void createChat(replace);
+  }, [canWrite, createChat, openFresh, state]);
 
   const updateReady = useCallback((token: number, update: (current: ReadyState) => ReadyState) => {
     applyActive(token, { kind: "state", update: (current) => current.phase === "ready" ? update(current) : current });

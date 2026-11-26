@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ZetaError, type ZetaDiscovery } from "@fulcrum/zeta";
-import { createConnection, FEATURES, isObserverPresentation, refusedReason, transitionRole, type ConnectionState } from "./connection";
+import { createConnection, FEATURES, isObserverPresentation, type ConnectionState } from "./connection";
 
 const discovery: ZetaDiscovery = { url: "ws://127.0.0.1:8765", controller_token: "c", observer_token: "o", origins: [] };
 
@@ -39,23 +39,7 @@ test("startup and offline failures never retain observer presentation", async ()
   rejected.stop();
 });
 
-const controllerRole = { role: "controller", reason: null } as const;
-const observerRole = { role: "observer", reason: null } as const;
-const refusedAt = new Date(2030, 0, 1, 10, 31).getTime();
-const refusedRole = { ...observerRole, reason: refusedReason(refusedAt) };
-const refused = /^zeta is still full at .{1,15}\. close another zeta tab, then try again\.$/;
-test.each([
-  ["controller granted", controllerRole, ["controller_granted"], controllerRole],
-  ["observer granted", controllerRole, ["observer_granted"], observerRole],
-  ["refused takeover keeps observer and exposes reason", observerRole, ["takeover_refused"], refusedRole],
-  ["retry clears refusal without promoting observer", refusedRole, ["retry"], observerRole],
-  ["released controller slot grants takeover and clears reason", refusedRole, ["controller_granted"], controllerRole],
-  ["closed controller retries as controller", controllerRole, ["controller_closed", "retry"], controllerRole],
-] as const)("role transition: %s", (_name, initial, events, expected) => {
-  let state: Parameters<typeof transitionRole>[0] = initial;
-  for (const event of events) state = transitionRole(state, event, refusedAt);
-  expect(state).toEqual(expected);
-});
+const refused = /^zeta is still full at .{1,15}\.$/;
 
 describe("createConnection controller capacity vs version mismatch", () => {
   test("falls back to a live observer and remains live when take-control is still busy", async () => {
