@@ -1142,3 +1142,32 @@ test.each([
     await Promise.all([start, duplicate]);
   }
 });
+
+test("a default attach names its chat in the url, so a reload reopens this tab's chat, not the page's newest", async () => {
+  const replaced: string[] = [];
+  const pushed: string[] = [];
+  const location = { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
+  setGlobals({
+    localStorage: new MemoryStorage(), location,
+    history: { state: null, pushState(_state: unknown, _title: string, path: string) { pushed.push(path); },
+      replaceState(_state: unknown, _title: string, path: string) { replaced.push(path); const url = new URL(path, location.href); location.search = url.search; location.href = url.href; } },
+    addEventListener() {}, removeEventListener() {},
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [chat], next: null });
+      if (url === "/api/chats/chat" && init?.method === "PATCH") return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const zeta = client();
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => active.state.phase === "ready");
+  expect(replaced, "the default attach left the url without ?chat=").toEqual(["/?chat=chat"]);
+  expect(location.search).toBe("?chat=chat");
+  expect(pushed, "a default attach adds no history entry").toEqual([]);
+});

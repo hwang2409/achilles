@@ -186,7 +186,7 @@ function testReceipt(result: TestReceipt) {
 
 function testFailure(status: string | undefined) {
   switch (status) {
-    case "refused": return reviewText("test not sent. a chat tab keeps control while it is open; try again after it finishes or closes.");
+    case "refused": return reviewText("test not sent. too many tabs control zeta, or another app does. close one, then try again.");
     case "unsupported": return reviewText("test not sent. update zeta to test connections here.");
     case "busy": case "conflict": return reviewText("test not run. zeta or another connection action is busy; open a new review to try again.");
     case "stale": return reviewText("test not sent. the configuration changed. close this review and review the current definition before testing.");

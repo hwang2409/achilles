@@ -165,8 +165,8 @@ function ObserverBanner({ connection }: { connection: Connection }) {
   };
   return <aside className="observer-banner" aria-label="observer mode">
     <div>
-      <strong>this tab is read-only</strong>
-      <span id="tab-authority-description">too many tabs control zeta, or another app does. this tab stays live.</span>
+      <strong>zeta is full</strong>
+      <span id="tab-authority-description">this tab is read-only and stays live: too many tabs control zeta, or another app does.</span>
     </div>
     <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
     {/* its own full-width row under the text and the button, so a long refusal does not squeeze the text */}
