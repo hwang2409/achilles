@@ -1,7 +1,6 @@
 import type { ReactNode, Ref } from "react";
 import type { BuildActivity } from "../create/buildActivity";
 import { chatHref } from "./AgentNavAdapter";
-import type { CreateModeOwner } from "../create/createMode";
 import { isMac, modKey } from "../keyboard";
 import { approvalIntent, createRoute, surfaceHref, surfaceRoutes, type SurfaceRoute } from "./routes";
 
@@ -32,7 +31,7 @@ export function BuildStatus({ activity, current, className = "" }: { activity: B
   </span>;
 }
 
-export function SurfaceNav({ current, sidebar, narrow, drawer, onClose, openPalette, createMode, action, search, counts, recent, connectionStatus, activity }: {
+export function SurfaceNav({ current, sidebar, narrow, drawer, onClose, openPalette, action, search, counts, recent, connectionStatus, activity }: {
   activity?: BuildActivity;
   current: SurfaceRoute;
   sidebar: Ref<HTMLElement>;
@@ -40,7 +39,6 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, onClose, openPale
   drawer: boolean;
   onClose: () => void;
   openPalette: () => void;
-  createMode?: CreateModeOwner;
   action?: ReactNode;
   search: ReactNode;
   counts: Partial<Record<string, PlaceCount>>;
@@ -60,14 +58,9 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, onClose, openPale
     <div className="sidebar-scroll">
       <div className="surface-actions">
         {action}
-        <div className="create-split" data-mode={createMode?.enabled ? "on" : undefined}>
+        <div className="create-split">
           <PlaceLink route={createRoute} current={current} />
           {activity && <BuildStatus activity={activity} current={current} className="build-status-nav" />}
-          {createMode && <button type="button" aria-label="toggle create mode for this page" aria-pressed={createMode.enabled}
-            aria-busy={createMode.pending || undefined} disabled={!createMode.available || createMode.pending}
-            title={createMode.error ?? "create mode for this page"} onClick={() => void createMode.toggle()}>
-            {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}{createMode.error && <span aria-hidden="true"> !</span>}
-          </button>}
         </div>
       </div>
       <div className="sidebar-destinations">

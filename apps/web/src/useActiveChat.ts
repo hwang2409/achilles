@@ -17,7 +17,7 @@ type PageAttachment = { page: Page; serverApprovalMode: string | null; credentia
 // newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
 type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
 // rebind: attached during a live turn without `resume`, so the page MCP binding must be re-sent once zeta is idle.
-type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; continued?: true; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean; cwd: string | null };
+type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; continued?: true; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean; cwd: string | null; model: string | null };
 type BusyState = PageAttachment & { phase: "busy"; busySessionId: string | null };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | EmptyState | ReadyState | BusyState;
 type BusyChat = { sessionId: string | null; chat: Chat | null; retry: "attach" | "new" };
@@ -152,13 +152,13 @@ export async function attachPage(
     const observer = !canWrite;
 
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
-      // A docked observer can read the true per-session mode without resuming the session or writing settings.
-      const observedMode = observer && page.layout.blocks.length && serverApprovalMode !== "ask"
-        ? (await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { approval_mode?: string | null } | null)?.approval_mode
+      // An observer reads the true per-session mode and model without resuming the session or writing settings.
+      const observed = observer
+        ? await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { model?: string; approval_mode?: string | null } | null
         : null;
       requireCurrent(owner, token);
       const session = observer
-        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: observedMode ?? serverApprovalMode, pending: false, rebind: false, cwd: null }
+        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode === "ask" ? "ask" : observed?.approval_mode ?? serverApprovalMode, model: observed?.model ?? null, pending: false, rebind: false, cwd: null }
         : await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token));
       requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
@@ -176,7 +176,7 @@ export async function attachPage(
       const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
       if (canWrite && !userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, ...(continued ? { continued: true } as const : {}), credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind, cwd: session.cwd };
+      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, ...(continued ? { continued: true } as const : {}), credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind, cwd: session.cwd, model: session.model };
     };
     const busy = (busySessionId: string | null): BusyState => ({ phase: "busy", page, serverApprovalMode, credential, busySessionId });
 
@@ -495,7 +495,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   // "retry creating chat" re-runs the attach: the failed-create screen and its header stay until the retry settles
   const retryingCreation = useRef(false);
   const [listRefresh, setListRefresh] = useState(0);
-  const [approvalChange, setApprovalChange] = useState<{ pending: boolean; error?: string; savedAt?: Date } | null>(null);
+  const [approvalChange, setApprovalChange] = useState<{ pending: boolean; error?: string } | null>(null);
   const approvalRequest = useRef<number | null>(null);
   const authority = useRef(canWrite);
   authority.current = canWrite;
@@ -774,7 +774,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
           : "rebind" in update ? { ...value, rebind: false }
           : { ...value, page: { ...value.page, approval_mode: update.approvalMode }, pendingApprovalMode: update.pendingApprovalMode });
         if (!("rebind" in update) && !update.pendingApprovalMode) {
-          setApprovalChange((change) => change?.pending ? { pending: false, savedAt: new Date() } : change);
+          setApprovalChange((change) => change?.pending ? { pending: false } : change);
         }
       },
       failed: (caught) => {
@@ -909,8 +909,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     try {
       const result = await applyApprovalMode(client, ready.sessionId, desired, current);
       if (!current()) return;
-      updateReady(token, (value) => ({ ...value, page: { ...value.page, approval_mode: result.approvalMode }, pendingApprovalMode: result.pending ? desired : null }));
-      if (!result.pending) setApprovalChange({ pending: false, savedAt: new Date() });
+      updateReady(token, (value) => ({ ...value, page: { ...value.page, approval_mode: result.approvalMode }, model: result.model, pendingApprovalMode: result.pending ? desired : null }));
+      if (!result.pending) setApprovalChange({ pending: false });
     } catch {
       if (current()) setApprovalChange({ pending: false, error: "could not change tool approval; try again" });
     } finally {

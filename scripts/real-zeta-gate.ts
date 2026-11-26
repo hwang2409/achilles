@@ -679,27 +679,19 @@ with _database() as db:
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   const dockHead = (tab: Page) => tab.locator(".page-chat-head");
-  const modeMenu = (tab: Page) => dockHead(tab).getByRole("button", { name: "page chat options" });
-  const modeItem = (tab: Page, name: "create mode" | "run tools without asking") => dockHead(tab).getByRole("menuitemcheckbox", { name, exact: true });
-  const ensureModeMenu = async (tab: Page) => { if (await modeMenu(tab).getAttribute("aria-expanded") === "false") await modeMenu(tab).click(); };
+  // the chat's modes are switches in the composer, in the rail, the sheet, and a full-width chat alike
+  const modeSwitch = (tab: Page, name: "create mode" | "auto-approve", checked?: boolean) => tab.locator(`#message-composer [data-write-surface="composer.${name === "create mode" ? "create-mode" : "auto-approve"}"]${checked === undefined ? "" : `[aria-checked="${checked}"]`}`);
   const clickCreateMode = async (enabled: boolean) => {
-    if (!await dockHead(page).count()) return page.getByRole("button", { name: `create mode ${enabled ? "on" : "off"}`, exact: true }).click();
-    await ensureModeMenu(page);
-    await modeItem(page, "create mode").click();
-    await dockHead(page).getByRole("button", { name: "confirm", exact: true }).click();
+    await gateWait.playwright(modeSwitch(page, "create mode", enabled), "waitFor");
+    await modeSwitch(page, "create mode").click();
   };
-  const waitCreateMode = async (enabled: boolean) => {
-    if (!await dockHead(page).count()) return gateWait.playwright(page.getByRole("button", { name: `create mode ${enabled ? "on" : "off"}`, exact: true }), "waitFor");
-    await gateWait.playwright(page.locator(`.page-chat-head[data-create-mode="${enabled ? "on" : "off"}"]`), "waitFor");
-    if (await modeMenu(page).getAttribute("aria-expanded") === "true") await page.keyboard.press("Escape");
-  };
+  const waitCreateMode = (enabled: boolean) => gateWait.playwright(modeSwitch(page, "create mode", enabled), "waitFor");
   const mobileSheet = {
     closed: null,
     button: "pointer",
     keyboard: "keyboard",
     resize: "resize",
     switcher: "pointer",
-    confirmation: "pointer",
   } as const;
   const setupMobileSheet = async (tab: Page, height: number, state: keyof typeof mobileSheet = "closed", width = 390) => {
     const opener = mobileSheet[state];
@@ -777,19 +769,13 @@ with _database() as db:
       if (!await composer.evaluate(element => element === document.activeElement && !matchMedia("(width < 1280px)").matches)) throw new Error("390px page chat resize: expected a focused desktop composer");
     }
     if (opener) await checkOpen(opener);
-    if (state !== "switcher" && state !== "confirmation") return;
-    const trigger = state === "switcher" ? dockHead(tab).locator('[aria-haspopup="listbox"]') : modeMenu(tab);
+    if (state !== "switcher") return;
+    const trigger = dockHead(tab).locator('[aria-haspopup="listbox"]');
     await trigger.click();
-    const row = state === "switcher" ? dockHead(tab).getByRole("option", { selected: true }) : modeItem(tab, "create mode");
-    if (state === "confirmation") await row.click();
-    const focused = state === "confirmation" ? dockHead(tab).getByRole("button", { name: "confirm", exact: true }) : row;
-    if (!await focused.evaluate((node) => node === document.activeElement)) throw new Error("page chat popup did not take focus on open");
+    const row = dockHead(tab).getByRole("option", { selected: true });
+    if (!await row.evaluate((node) => node === document.activeElement)) throw new Error("page chat popup did not take focus on open");
     if (await tab.locator("#message-composer").count() !== 1) throw new Error("page chat popup duplicated the composer");
     if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, `s2-header-${state}-390.png`), animations: "disabled" });
-    if (state === "confirmation") {
-      await tab.keyboard.press("Escape");
-      if (await focused.count() || !await row.evaluate((node) => node === document.activeElement)) throw new Error("first Escape did not cancel only the confirmation and restore its row");
-    }
     await tab.keyboard.press("Escape");
     if (await trigger.getAttribute("aria-expanded") !== "false" || !await trigger.evaluate((node) => node === document.activeElement)) throw new Error("popup Escape did not close only the popup and restore its trigger");
     await tab.keyboard.press("Escape");
@@ -1386,7 +1372,7 @@ with _database() as db:
   const toggleClick = clickCreateMode(false);
   try {
     await waitFor(async () => toggleReached, "create mode toggle request");
-    const pendingMode = await dockHead(page).count() ? modeItem(page, "create mode") : page.getByRole("button", { name: "turning on create mode…", exact: true });
+    const pendingMode = modeSwitch(page, "create mode").and(page.locator('[aria-busy="true"]'));
     await gateWait.playwright(pendingMode, "waitFor", { state: "visible" });
     if (!(await pendingMode.isDisabled())) throw new Error("create mode toggle pending state was not disabled");
     await field.press("Enter");
@@ -1400,8 +1386,7 @@ with _database() as db:
   await waitCreateMode(true);
   if (screenshotDir) {
     await page.setViewportSize({ width: 1440, height: 900 });
-    const contextual = page.getByRole("button", { name: "toggle create mode for this page", exact: true });
-    await contextual.and(page.locator('[aria-pressed="true"]')).waitFor();
+    await modeSwitch(page, "create mode", true).waitFor();
     const createPlace = page.getByRole("link", { name: "create", exact: true });
     if (new URL((await createPlace.getAttribute("href")) ?? "", origin).pathname !== "/create") throw new Error("contextual mode hid the separate create place link");
     await page.screenshot({ path: join(screenshotDir, "v5-chat-create-on-1440x900.png"), animations: "disabled" });
@@ -2831,7 +2816,7 @@ with _database() as db:
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   if (await homeSessionId() !== homeOpened) throw new Error("achilles restart changed the open home chat");
   await awaitApprovalMode("session_settings", homeOpened, "ask", "ask-mode session after achilles restart");
-  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("ask-mode session showed the auto-approve marker after achilles restart");
+  if (await page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]').count()) throw new Error("ask-mode session showed the auto-approve marker after achilles restart");
   const refreshCountBeforeRestartToggle = requests().filter((frame) => frame.method === "mcp_refresh_tools").length;
   const restartedToggleResponse = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "POST" && requestPath(response.url()) === "/api/pages/home/create-mode");
   await clickCreateMode(false);
@@ -2895,7 +2880,7 @@ with _database() as db:
   await gateWait.playwright(page.getByText("allow page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]'), "waitFor", { state: "visible" });
   await awaitApprovalMode("set_settings", allowSession, "allow", "allow-mode session settings");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
   await page.reload();
@@ -2929,7 +2914,7 @@ with _database() as db:
     return Boolean(current && current !== readingChatBeforeReload);
   }, "new allow-mode reading chat");
   const reloadChat = await homeSessionId();
-  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]'), "waitFor", { state: "visible" });
   const reloadBooks = async () => {
     const response = await fetch(`${origin}/api/pages/${createdPage.id}/records/books?field=title&equals=${encodeURIComponent('"Reload Book"')}`, { headers: { Authorization: `Bearer ${readingCredential}` } });
     if (!response.ok) throw new Error(`reload book query failed: ${response.status}`);
@@ -3048,7 +3033,7 @@ with _database() as db:
   await waitFor(async () => Boolean(replyTo("resume")), "reloaded page resumed the chat in the woken turn's setup");
   const wakeAttach = replyTo("resume");
   if (wakeAttach?.result?.attached !== "live_turn") throw new Error(`reload in a woken turn's setup did not attach to it: ${redact(JSON.stringify(wakeAttach?.error ?? { attached: wakeAttach?.result?.attached ?? null }))}`);
-  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="allow"]').or(page.getByLabel("auto-approve", { exact: true })), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]'), "waitFor", { state: "visible" });
   // zeta reports the setup as running, so the page keeps the mode pending; an older zeta reported idle and refused it
   if (replyTo("set_settings") && replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
   if (await page.getByRole("alert").count()) throw new Error(`reload in a woken turn's setup showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
@@ -3060,7 +3045,7 @@ with _database() as db:
   await waitForIdleTurn(page, waitFor);
   const wakeTool = JSON.parse(await Bun.file(control).text()).tool_results?.find((result: { call_id: string }) => result.call_id === "wake-inspect");
   if (!wakeTool || wakeTool.is_error) throw new Error(`the woken turn's page tool did not run on the re-sent binding: ${JSON.stringify(wakeTool ?? null)}`);
-  await gateWait.playwright(page.locator('.page-chat-head[data-approval-mode="ask"]').or(page.getByLabel("ask before tools", { exact: true })), "waitFor", { state: "visible", timeout: 20_000 });
+  await gateWait.playwright(page.locator('[data-write-surface="composer.auto-approve"][aria-checked="false"]'), "waitFor", { state: "visible", timeout: 20_000 });
   await awaitApprovalMode("set_settings", wakeChat, "ask", "ask mode after the woken turn ended");
   if (await page.getByRole("alert").count()) throw new Error(`the woken turn's end showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
   await restartAchilles("allow");
@@ -3086,7 +3071,7 @@ with _database() as db:
   const firstSetSettingsBeforeAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   await page.goto(`${origin}/?chat=${first}`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
-  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("user ask chat reopened under allow showed auto-approve");
+  if (await page.locator('[data-write-surface="composer.auto-approve"][aria-checked="true"]').count()) throw new Error("user ask chat reopened under allow showed auto-approve");
   const firstSetSettingsAfterAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   if (firstSetSettingsAfterAllowReopen !== firstSetSettingsBeforeAllowReopen)
     throw new Error("reopening a user ask chat under an allow server sent set_settings");
@@ -3232,16 +3217,10 @@ with _database() as db:
   await titleInput.press("Enter");
   await gateWait.playwright(dockHead(page).getByText(longTitle, { exact: true }), "waitFor", { state: "attached" });
   await gateWait.playwright(page.locator(`[data-chat-id="${controllerChat}"]`).getByText(longTitle, { exact: true }), "waitFor");
-  const changeS2Mode = async (name: "create mode" | "run tools without asking", checked: boolean, capture?: string) => {
-    await ensureModeMenu(page);
-    const item = modeItem(page, name);
-    if ((await item.getAttribute("aria-checked")) === String(checked)) { await page.keyboard.press("Escape"); return; }
-    if (capture) await s2Shot(page, "menu-1440");
-    await item.click();
-    if (capture) await s2Shot(page, capture);
-    await dockHead(page).getByRole("button", { name: "confirm", exact: true }).click();
-    await gateWait.playwright(dockHead(page).locator(`[role="menuitemcheckbox"][aria-checked="${checked}"]`).and(item), "waitFor");
-    await page.keyboard.press("Escape");
+  const changeS2Mode = async (name: "create mode" | "auto-approve", checked: boolean) => {
+    if ((await modeSwitch(page, name).getAttribute("aria-checked")) === String(checked)) return;
+    await modeSwitch(page, name).click();
+    await gateWait.playwright(modeSwitch(page, name, checked), "waitFor");
   };
   const headerGeometry = async () => {
     const dimensions = await dockHead(page).evaluate((head) => {
@@ -3256,7 +3235,7 @@ with _database() as db:
         oneBaseline: controls.every((button) => Math.abs(button.getBoundingClientRect().top + button.clientHeight / 2 + button.clientTop - (rowBox.top + rowBox.height / 2)) <= 1),
         // desktop controls share the 32 px control height; narrow screens keep 44 px touch targets
         target: innerWidth <= 760 ? 44 : 32,
-        touchTargets: controls.length === (innerWidth <= 760 ? 4 : 3) && controls.every((button) => button.getBoundingClientRect().width >= (innerWidth <= 760 ? 44 : 32) && button.getBoundingClientRect().height === (innerWidth <= 760 ? 44 : 32)),
+        touchTargets: controls.length === (innerWidth <= 760 ? 3 : 2) && controls.every((button) => button.getBoundingClientRect().width >= (innerWidth <= 760 ? 44 : 32) && button.getBoundingClientRect().height === (innerWidth <= 760 ? 44 : 32)),
       };
     });
     if (dimensions.height !== dimensions.target + 9 || dimensions.overflow || !dimensions.ellipsized || !dimensions.oneBaseline || !dimensions.touchTargets) throw new Error(`page chat header geometry: ${JSON.stringify(dimensions)}`);
@@ -3285,14 +3264,6 @@ with _database() as db:
     }
   };
   const popupPointers = async () => {
-    await modeMenu(page).click();
-    await popupBounds();
-    for (const name of ["run tools without asking", "create mode"] as const) {
-      await modeItem(page, name).click();
-      await popupBounds();
-      await dockHead(page).getByRole("button", { name: "keep current", exact: true }).click();
-    }
-    await outsideCloses(modeMenu(page));
     await switcher.click();
     await popupBounds();
     await outsideCloses(switcher);
@@ -3309,11 +3280,11 @@ with _database() as db:
     }
     await page.setViewportSize({ width: 1440, height: 900 });
   };
-  await changeS2Mode("run tools without asking", true);
+  await changeS2Mode("auto-approve", true);
   await changeS2Mode("create mode", true);
   await captures("default");
-  await changeS2Mode("run tools without asking", false, "confirm-approval-1440");
-  await changeS2Mode("create mode", false, "confirm-create-1440");
+  await changeS2Mode("auto-approve", false);
+  await changeS2Mode("create mode", false);
   await captures("non-default");
   // A chat switch owns navigation and focus even when an outside click also closes a popup.
   const sidebarChat = page.locator(`a[data-chat-id="${alternateId}"]`);
@@ -3328,7 +3299,6 @@ with _database() as db:
     await waitForIdleTurn(page, waitFor);
   }
   await setupMobileSheet(page, 844, "switcher");
-  await setupMobileSheet(page, 844, "confirmation");
   await setupMobileSheet(page, 844, "button");
   for (const [width, height] of [[360, 780], [390, 844], [430, 844]]) {
     await setupMobileSheet(page, height, "button", width);
@@ -3343,14 +3313,9 @@ with _database() as db:
     await gateWait.playwright(dockHead(page).getByText(longTitle, { exact: true }), "waitFor");
   }
   await setupMobileSheet(page, 844, "button");
-  await modeMenu(page).click();
-  await s2Shot(page, "menu-390");
-  await page.keyboard.press("Home");
-  await page.keyboard.press("Enter");
-  await s2Shot(page, "confirm-approval-390");
-  await dockHead(page).getByRole("button", { name: "confirm", exact: true }).click();
-  await gateWait.playwright(dockHead(page).locator('[data-write-surface="page-chat.auto-approve"][aria-checked="true"]'), "waitFor");
-  await page.keyboard.press("Escape");
+  await modeSwitch(page, "auto-approve").click();
+  await gateWait.playwright(modeSwitch(page, "auto-approve", true), "waitFor");
+  await s2Shot(page, "modes-390");
   await switcher.click();
   await page.keyboard.press("ArrowDown");
   const keyboardTitle = await dockHead(page).locator('[role="option"]:focus .page-chat-choice-title').innerText();
@@ -3421,24 +3386,20 @@ with _database() as db:
   if (!(await observerBanner.innerText()).includes("another tab controls zeta") || !(await observerBanner.innerText()).includes("live and read-only")) throw new Error("observer banner did not explain the live read-only state");
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   await gateWait.playwright(dockHead(observerPage).locator('[data-write-surface="page-chat.new"]:disabled'), "waitFor");
-  await modeMenu(observerPage).click();
-  for (const item of [modeItem(observerPage, "run tools without asking"), modeItem(observerPage, "create mode")]) {
-    if (!(await item.isDisabled()) || !(await item.getAttribute("title"))?.includes("read-only")) throw new Error("observer page chat mode write was enabled or unexplained");
+  for (const name of ["auto-approve", "create mode"] as const) {
+    const item = modeSwitch(observerPage, name);
+    if (!(await item.isDisabled()) || !(await item.getAttribute("title"))?.includes("read-only")) throw new Error("observer chat mode write was enabled or unexplained");
   }
   await recordRenderedWriteSurfaces(observerPage);
   await s2Shot(observerPage, "observer-1440");
-  await observerPage.keyboard.press("Escape");
   await setupMobileSheet(observerPage, 844, "button");
   await s2Shot(observerPage, "observer-390");
-  await modeMenu(observerPage).click();
-  for (const name of ["run tools without asking", "create mode"] as const) {
-    if (!await modeItem(observerPage, name).isDisabled()) throw new Error("mobile observer can change a mode");
+  for (const name of ["auto-approve", "create mode"] as const) {
+    if (!await modeSwitch(observerPage, name).isDisabled()) throw new Error("mobile observer can change a mode");
   }
-  await gateWait.playwright(dockHead(observerPage).getByText("this tab is read-only", { exact: false }).first(), "waitFor");
-  await s2Shot(observerPage, "observer-menu-390");
   await setupMobileSheet(observerPage, 844);
   await observerPage.setViewportSize({ width: 1440, height: 900 });
-  if (screenshotDir) await writeFile(join(screenshotDir, "s2-header-manifest.json"), JSON.stringify({ head: (await Bun.$`git rev-parse HEAD`.text()).trim(), theme, captures: [...s2Images, "s2-header-switcher-390.png", "s2-header-confirmation-390.png", "s2-header-one-chat-controller-390.png", "s2-header-one-chat-observer-390.png"] }, null, 2) + "\n");
+  if (screenshotDir) await writeFile(join(screenshotDir, "s2-header-manifest.json"), JSON.stringify({ head: (await Bun.$`git rev-parse HEAD`.text()).trim(), theme, captures: [...s2Images, "s2-header-switcher-390.png", "s2-header-one-chat-controller-390.png", "s2-header-one-chat-observer-390.png"] }, null, 2) + "\n");
   const observerReason = await observerPage.locator("#tab-authority-description").innerText();
   if (!observerReason.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
   const observerNewChat = observerPage.locator("button.new-chat");

@@ -12,7 +12,7 @@ function setup() {
   const called: string[] = [];
   const value = { chats: [row("recent", "page", longTitle), row("outside", "other"), row("current"), row("older")], loading: false, error: false, next: "cursor" as string | null, reload: () => called.push("reload"), more: () => called.push("more"), clearSearch: () => {}, builds: [], onScreen: () => {} };
   const shell = () => createElement(PageChatCatalog.Provider, { value }, createElement(PageChatHeader, {
-    pageId: "page", sessionId: "current", title: "fixture", state: "idle", stateLabel: "idle", onSelect: (chat) => called.push(chat.session_id), newChat: () => {}, approval: { checked: true, action: () => called.push("approval") }, create: { checked: true, action: () => called.push("create") }, close: () => called.push("close"), closeRef: null,
+    pageId: "page", sessionId: "current", title: "fixture", state: "idle", stateLabel: "idle", onSelect: (chat) => called.push(chat.session_id), newChat: () => {}, close: () => called.push("close"), closeRef: null,
   }));
   const app = render(shell());
   return { app, called, update: (changes: Partial<typeof value>) => { Object.assign(value, changes); app.rerender(shell()); } };
@@ -48,21 +48,16 @@ test("switcher keeps the shared catalog order and uses its continuation and retr
   } finally { app.unmount(); }
 });
 
-test("confirmation and menu consume Escape before the page chat sheet", () => {
+test("the chat switcher consumes Escape before the page chat sheet", () => {
   const { app } = setup();
   const sheetEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) escaped++; };
   let escaped = 0;
   window.addEventListener("keydown", sheetEscape);
   try {
-    const trigger = app.getByRole("button", { name: "page chat options" });
+    const trigger = app.getByRole("button", { name: "fixture, 3 chats" });
     fireEvent.click(trigger);
-    const item = app.getByRole("menuitemcheckbox", { name: "create mode" });
-    fireEvent.click(item);
-    const confirm = app.getByRole("button", { name: "confirm" });
-    expect(document.activeElement).toBe(confirm);
-    fireEvent.keyDown(confirm, { key: "Escape" });
-    expect(document.activeElement).toBe(item);
-    fireEvent.keyDown(item, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(app.queryByRole("listbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
     expect(escaped).toBe(0);
     act(() => { fireEvent.keyDown(trigger, { key: "Escape" }); });

@@ -81,10 +81,8 @@
    visually overlap .chat-actions; ellipsis alone keeps the title readable at whatever room remains. */
 .chat-heading strong { order: 1; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .chat-actions { display: flex; align-items: center; gap: 12px; white-space: nowrap; font-size: inherit; }
-/* actions read as buttons (body text, hover fill); the approval mode is muted status text with the same side padding, so the gaps match */
+/* actions read as buttons (body text, hover fill) */
 .chat-actions button { min-height: var(--g1-control-height); color: var(--g1-fg); font-size: inherit; }
-.chat-actions > button[aria-pressed] { min-width: calc(10ch + 2 * var(--g1-space-2)); }
-.approval-mode { padding-inline: var(--g1-space-2); color: var(--fulcrum-muted); font-size: inherit; white-space: nowrap; }
 .run-state, .page-chat-status { color: var(--fulcrum-muted); font-size: inherit; white-space: nowrap; }
 /* the run state comes first in the right-aligned actions, so when it shows the controls to its right do not move */
 .run-state { order: -1; }
@@ -99,45 +97,10 @@
 :is(.chat-row-edit, .chat-title-edit):focus-visible { outline: none; }
 @media (pointer: coarse) { .chat-row-edit, .chat-title-edit { font-size: var(--g1-type-title); } }
 .chat-actions button:focus-visible { border-color: var(--fulcrum-accent); }
-.header-overflow, .header-menu, .fold-indicator { display: none; }
-/* the status wrapper is transparent to layout on desktop; below 40em it becomes a narrow right-aligned
-   column (run state over the mode words), so the mode words never steal the title's horizontal room */
-.header-status { display: contents; }
-/* the actions move into the ••• menu whenever they would squeeze the title (not only at the narrow
-   width): 64em of header leaves the title about 30 characters beside the full actions. em follows the
-   ui font size; ch would also follow the font face, and a wide fallback face folded them at 1440. */
-@container (max-width: 64em) {
-  .chat-actions > .approval-mode, .chat-actions > button:not(.header-overflow) { display: none; }
-  .chat-actions { position: relative; }
-  .header-overflow { display: block; width: 40px; height: 40px; padding: 0; }
-  .header-menu { position: absolute; z-index: 5; top: 46px; right: 0; display: grid; min-width: 210px; padding: 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); }
-  .header-menu .approval-mode { min-height: 40px; display: flex; align-items: center; padding: 0 10px; }
-  .header-menu button { display: block; text-align: left; }
-  /* the full controls fold into the menu above, but an enabled mode must not become invisible: a word mark
-     (only rendered when that mode is on) stays beside ••• in the header itself, at every width. the divider
-     (rendered only with a mark) keeps the marks from reading as part of the run state word. */
-  .fold-indicator { display: flex; gap: 12px; align-items: center; padding-left: 12px; border-left: 1px solid var(--fulcrum-border); }
-  .fold-mark-approve { color: var(--g1-muted); }
-  .fold-mark-create { color: var(--g1-muted); }
-}
-@container (max-width: 40em) {
-  .fold-long { display: none; }
-  .run-state { min-width: 9ch; }
-  /* stack run state over the named mode words in a narrow column, so the title keeps its full width and
-     no mode is ever a bare square; the divider is dropped since the marks sit under the run state now */
-  .header-status { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 2px; min-width: 0; }
-  .fold-indicator { gap: 6px; padding-left: 0; border-left: none; }
-}
-/* on narrow headers, keep the named create marker visible and fold only the less important auto marker. */
-/* Keep the existing fold menu on screen at mobile widths under 200% zoom. */
+/* keep the header on screen at mobile widths under 200% zoom */
 @container (max-width: 180px) {
   .chat-actions { gap: 4px; }
   .chat-heading { gap: 4px; }
-  .header-menu { min-width: min(210px, 100cqw); }
-  .header-menu button { white-space: normal; }
-}
-@container (max-width: 25em) {
-  .fold-mark-approve { display: none; }
 }
 /* hollow, so "queued" differs from "running" by shape, not only color */
 .chat-header > [role="alert"] { position: absolute; top: 44px; right: 16px; color: var(--fulcrum-danger); }
@@ -227,6 +190,3 @@
   .main-pane .page-chat-docked [data-part="composer"] { width: calc(100% - 32px); margin-bottom: 16px; }
 }
 
-@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
-  .header-menu :is(.approval-mode, button) { min-width: 44px; min-height: 44px; }
-}

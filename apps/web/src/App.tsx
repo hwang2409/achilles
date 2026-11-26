@@ -18,6 +18,8 @@ import type { CreateModeOwner } from "./create/createMode";
 import { AuthErrorRecovery } from "./chat/AuthErrorRecovery";
 import { CommandOutput, useComposerCommands } from "./composer/ComposerCommands";
 import { PlainComposer } from "./composer/PlainComposer";
+import { ComposerModes } from "./composer/ComposerModes";
+import { parseDefaults } from "./settings/SettingsModule";
 import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT_LABEL } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
@@ -99,7 +101,7 @@ function usePageChatSheet() {
 }
 
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
-function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite }: { client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const commandOpener = useRef<HTMLElement | null>(null);
   const commands = useComposerCommands(client, chat, canWrite);
@@ -133,6 +135,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
       return commands.run(command, commandOpener.current);
     },
     commandOutput: commands.output && <CommandOutput commands={commands} opener={commandOpener.current} />,
+    controls,
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
@@ -407,20 +410,34 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const newPageChatReason = !connected ? "new chat is off until zeta is back" : !canWrite ? readOnlyReason
     : active.creatingChat ? "creating chat…" : empty || (ready && !ready.sent) ? "already in a new chat"
     : state === "running" || state === "approval" || active.busy ? "wait for the running chat to finish" : undefined;
-  const [createReceipt, setCreateReceipt] = useState<{ pageId: string; sessionId?: string; enabled: boolean; at: Date } | null>(null);
   const createMode: CreateModeOwner | undefined = !landing && activePage ? {
     available: connected && canWrite && !active.creatingChat && (!active.toggleBlocked || active.toggleRetryable),
     enabled: activePage.create_mode, pending: active.toggling, error: active.toggleError,
     async toggle() {
       if (!createMode?.available || createMode.pending) return;
-      setCreateReceipt(null);
-      const result = await active.toggle();
-      if (result && !result.error && result.createMode !== null) setCreateReceipt({ pageId: activePage!.id, sessionId: ready?.sessionId, enabled: result.createMode, at: new Date() });
+      await active.toggle();
     },
   } : undefined;
+  // the chat's own model; a new chat shows zeta's default, the one it will start with
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
+  const needsDefaultModel = connected && client !== null && (empty !== null || (ready !== null && !ready.model));
+  useEffect(() => {
+    if (!needsDefaultModel) return;
+    let live = true;
+    client!.request("state_settings", { collection: "mcp", limit: 1 }).then((result) => { if (live) setDefaultModel(parseDefaults(result)?.model ?? null); }, () => {});
+    return () => { live = false; };
+  }, [client, needsDefaultModel]);
+  const serverForcesAsk = (ready ?? empty)?.serverApprovalMode === "ask";
+  const composerModes = activePage && <ComposerModes model={ready?.model ?? defaultModel}
+    create={createMode && { on: createMode.enabled, toggle: createMode.available ? createMode.toggle : undefined, busy: createMode.pending ? "saving…" : undefined,
+      reason: !canWrite ? readOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined }}
+    approval={{ on: ready ? activePage.approval_mode === "allow" : active.build.approvalMode === "allow", toggle: canWrite ? active.toggleApprovalMode : undefined,
+      reason: !canWrite ? readOnlyReason : serverForcesAsk ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
+      busy: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
+      error: active.approvalChange?.error }} />;
   const content = <>
     {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
-    {activePage && active.toggleError && <div className="create-mode-alert" role="alert" hidden={hasBlocks && !active.toggleRetryable}><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
+    {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
@@ -440,13 +457,6 @@ export function AgentSurface({ connection, client, connectionState, observerBann
         <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={pageChatSheetOpen ? "dialog" : undefined} aria-modal={pageChatSheetOpen ? "true" : undefined} aria-label={pageChatSheetOpen ? "page chat" : undefined} inert={pageChatSheetClosed}>
         {hasBlocks && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${pageChatSheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
           onSelect={active.selectChat} newChat={newPageChatReason ? undefined : active.newChat} newReason={canWrite ? newPageChatReason : undefined}
-          approval={{ checked: (activePage.approval_mode ?? "allow") === "allow", action: canWrite ? active.toggleApprovalMode : undefined,
-            reason: !canWrite ? readOnlyReason : (ready ?? empty)?.serverApprovalMode === "ask" ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
-            pending: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
-            error: active.approvalChange?.error, savedAt: active.approvalChange?.savedAt }}
-          create={{ checked: createMode?.enabled ?? false, action: createMode?.available ? createMode.toggle : undefined, reason: !canWrite ? readOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined,
-            pending: createMode?.pending ? "saving…" : undefined, error: createMode?.error,
-            savedAt: createReceipt?.pageId === activePage.id && createReceipt?.sessionId === ready?.sessionId && createReceipt?.enabled === activePage.create_mode ? createReceipt.at : undefined }}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
         <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId} cwd={ready.cwd}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
@@ -456,7 +466,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "auto" });
         }} aria-label="jump to latest" title="jump to latest"><span data-jump-label="full">jump to latest</span><span data-jump-label="compact" aria-hidden="true">↓</span></button></div>}
         </section>
-        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={canWrite && settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} chat={ready ? { id: ready.sessionId, title } : null} canWrite={canWrite} />
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={canWrite && settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} chat={ready ? { id: ready.sessionId, title } : null} canWrite={canWrite} controls={composerModes} />
         </div>
         </div>
         </div>
@@ -467,8 +477,8 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const place = landing ? createRoute : current === createRoute ? chatsRoute : onPage ? pagesRoute : current;
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
-    workspace: landing ? undefined : { canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", createMode },
-    header: !landing && activePage && createMode && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} createMode={createMode} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
+    workspace: landing ? undefined : { canWrite, serverForcesAsk, createMode },
+    header: !landing && activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
     children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} /> : content,
   });
 }
@@ -534,28 +544,7 @@ function runStateLabel(state: string, queued: number, building: boolean) {
   return state === "approval" ? "needs you" : state === "running" && building ? "building" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state;
 }
 
-function ChatHeader({ page, docked, sessionId, title, state, stateLabel, createMode, onRename, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; createMode: CreateModeOwner; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
-  const [overflow, setOverflow] = useState(false);
-  const overflowButton = useRef<HTMLButtonElement>(null);
-  const actions = useRef<HTMLDivElement>(null);
-  const closeOverflow = () => { setOverflow(false); overflowButton.current?.focus(); };
-  useEffect(() => {
-    // the open menu covers the notice below the header, so Escape (from anywhere, even a table row that handles it:
-    // capture runs first), a tap outside, and focus moving outside (Tab) close it
-    if (!overflow) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOverflow(false);
-      if (actions.current?.contains(document.activeElement)) overflowButton.current?.focus();
-    };
-    const onDown = (event: PointerEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
-    // focus landing anywhere outside, not focus leaving the box: WebKit does not focus a clicked •••, so focus may never enter it
-    const onFocusIn = (event: FocusEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
-    addEventListener("keydown", onKey, true);
-    addEventListener("pointerdown", onDown);
-    addEventListener("focusin", onFocusIn);
-    return () => { removeEventListener("keydown", onKey, true); removeEventListener("pointerdown", onDown); removeEventListener("focusin", onFocusIn); };
-  }, [overflow]);
+function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
   const startRename = () => { if (onRename && sessionId) rename.start(title === "new chat" ? "" : title, (value) => onRename(sessionId, value)); };
@@ -581,18 +570,12 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, createM
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, [onRename, rename.editing, sessionId, title]);
-  const modeLabel = createMode.pending ? `turning ${createMode.enabled ? "off" : "on"} create mode…` : `Create ${createMode.enabled ? "on" : "off"}`;
-  const controls = (inMenu: boolean, withHistory = true) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "Auto-approve" : "Ask before tools"}</span><button type="button" data-write-surface={WRITE_SURFACE.headerCreate} aria-label={createMode.pending ? modeLabel : createMode.enabled ? "create mode on" : "create mode off"} aria-pressed={createMode.enabled ? "true" : "false"} disabled={!createMode.available || createMode.pending} onClick={() => { if (inMenu) closeOverflow(); void createMode.toggle(); }}>{modeLabel}</button>{withHistory && <button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>History</button>}</>;
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
-  // the fold hides the full controls into the ••• menu below 64em, but an enabled mode must stay visible
-  // without opening it (spec.md:36, :109): a short word mark per mode that is on sits beside •••.
-  const autoApprove = page.approval_mode === "allow";
-  const foldMarkers = (autoApprove || createMode.enabled) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">Auto<span className="fold-long">-approve</span></span>}{createMode.enabled && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on">Create</span>}</span>;
   const routeLabel = page.route === "/" ? "Home" : page.title;
   if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
-  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
 }
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
