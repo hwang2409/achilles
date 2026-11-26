@@ -2,6 +2,7 @@ import "./test-dom";
 import { afterEach, expect, test } from "bun:test";
 import { act, createElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
+import { createRunStore } from "@fulcrum/core";
 import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
@@ -1142,3 +1143,75 @@ test.each([
     await Promise.all([start, duplicate]);
   }
 });
+
+// a message sent in the last moment of a turn goes out as a steer; the turn ends before zeta reads it and zeta drops it.
+// Forced order: zeta answers the status poll with "dropped" before its delivery_status event (the reason) arrives.
+test.each([
+  { name: "a new turn starts: it goes out once as a new message", reason: "turn_end", send: () => ({ accepted: true }), sends: 1 },
+  { name: "dropped as disconnect while this connection answers: it goes out once as a new message", reason: "disconnect", send: () => ({ accepted: true }), sends: 1 },
+  { name: "another turn already started: it stays unsent with the true reason", reason: "turn_end", send: () => { throw TURN_RUNNING_ERROR(); }, sends: 1, error: "the turn ended before zeta read it." },
+  { name: "a stop dropped it: never resent", reason: "abort", send: () => ({ accepted: true }), sends: 0, error: "zeta dropped this message before reading it." },
+])("a steer its turn ended without reading: $name", async (row) => {
+  setGlobals({
+    localStorage: new MemoryStorage(),
+    location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ ...chat, last_state: "running", message_sent: true }], next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const store = Object.assign(createRunStore(), { resync() {} });
+  const requests: { method: string; text?: string; delivery_id?: string; intent?: string }[] = [];
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "turn_reconnect"],
+    request: async (method: string, params?: { text?: string; delivery_id?: string }, options?: { intent?: string }) => {
+      if (method === "resume") return { session: { name: null } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "running", pending_approvals: [] } };
+      if (method === "status") return { session: { session_id: "chat" }, state: "running" };
+      requests.push({ method, text: params?.text, delivery_id: params?.delivery_id, intent: options?.intent });
+      if (method === "steer") {
+        store.dispatch({ type: "user_message", text: params!.text!, mode: "steer", delivery_id: params!.delivery_id!, intent: options?.intent });
+        return { accepted: true };
+      }
+      if (method === "delivery_status") {
+        const id = params!.delivery_id!;
+        setTimeout(() => store.dispatch({ type: "delivery_status", delivery_id: id, method: "steer", status: "dropped", content: "", reason: row.reason }), 5);
+        return { status: "dropped" };
+      }
+      if (method === "send") {
+        const reply = row.send();
+        // fulcrum stamps the echo with the request's intent: the resend takes over the steer's row
+        store.dispatch({ type: "user_message", text: params!.text!, mode: "send", delivery_id: params!.delivery_id!, intent: options?.intent });
+        return reply;
+      }
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const harness = { active: null as unknown as ReturnType<typeof useActiveChat> };
+  const clock = new ManualClock();
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => harness.active.state.phase === "ready");
+  let failure: unknown = null;
+  await act(async () => { await harness.active.send("late", { steer: true }, () => {}).catch((caught) => { failure = caught; }); });
+  const [steer] = requests;
+  const sends = requests.filter((request) => request.method === "send");
+  expect(sends, "a steer its turn did not read was not sent again as a new message").toEqual(Array.from({ length: row.sends }, () => ({ method: "send", text: "late", delivery_id: expect.not.stringMatching(`^${steer!.delivery_id}$`), intent: steer!.delivery_id })));
+  expect(steer).toMatchObject({ method: "steer", intent: steer!.delivery_id });
+  expect(failure === null ? null : String((failure as Error).message)).toBe(row.error ?? null);
+  // one bubble: the delivered resend, or the dropped steer with the reason the composer row gives
+  const users = store.getState().outline.map(({ id }) => store.getItem(id)).filter((item) => item?.type === "user");
+  expect(users.map((item) => item?.type === "user" && item.event.type === "user_message" ? `${item.event.mode}:${item.event.delivery_status ?? "ok"}:${item.event.delivery_reason ?? ""}` : "")).toEqual([row.sends && !row.error ? "send:ok:" : `steer:dropped:${row.error === TURN_ENDED ? "turn_end" : row.reason}`]);
+});
+const TURN_ENDED = "the turn ended before zeta read it.";
