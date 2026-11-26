@@ -675,7 +675,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const context = state.phase === "ready" || state.phase === "empty" || state.phase === "busy"
       ? { route: state.page.route, pageId: state.page.id }
       : state.phase === "missing" && missingCreation.current ? { route: missingCreation.current.route, pageId: missingCreation.current.input.pageId } : null;
-    // no page to create in (an error, or still loading): open the page fresh, so "new chat" never does nothing
+    // still loading: create once the page loads. an error: open the page fresh. either way "new chat" never does nothing
+    if (!context && state.phase === "loading") { createAfterLoad.current = true; return; }
     if (!context) return openFresh(state.phase === "error" && state.error === "page not found" ? "/" : location.pathname, false);
     const key = context.route === "/" ? "home" : context.route.slice(1);
     const token = owner.current.begin(`new:${key}`, true);
@@ -728,11 +729,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const openBusyChat = useCallback(() => { if (busy?.chat) selectChat(busy.chat); }, [busy, selectChat]);
 
   useEffect(() => {
-    if (!canWrite || !createAfterLoad.current || (state.phase !== "ready" && state.phase !== "empty")) return;
+    if (!canWrite || !createAfterLoad.current) return;
+    // "new chat" clicked while a missing page loaded: make the chat on home instead
+    if (state.phase === "error" && state.error === "page not found") return openFresh("/", false);
+    if (state.phase !== "ready" && state.phase !== "empty") return;
     createAfterLoad.current = false;
     if (location.hash === newChatIntent) history.replaceState({}, "", location.pathname + location.search);
     void newChat();
-  }, [canWrite, newChat, state]);
+  }, [canWrite, newChat, openFresh, state]);
 
   const updateReady = useCallback((token: number, update: (current: ReadyState) => ReadyState) => {
     applyActive(token, { kind: "state", update: (current) => current.phase === "ready" ? update(current) : current });
