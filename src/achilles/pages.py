@@ -1668,7 +1668,6 @@ class PageStore:
         current = page["active_code_revision"] or 0
         if expected_revision is not None and expected_revision != current:
             raise ValidationError("/expected_revision", "current code revision", "conflict")
-        version = current + 1
         stamp = now()
         try:
             result = build_page(self.root, page_id, source, dependencies)
@@ -1681,6 +1680,10 @@ class PageStore:
             digest = None
             size = None
         with self.transaction() as db:
+            version = db.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM code_revision WHERE page_id=?",
+                (page_id,),
+            ).fetchone()[0]
             db.execute(
                 (
                     "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
