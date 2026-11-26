@@ -462,10 +462,18 @@ export function createDecisionQueue(onError: (error: unknown) => void) {
   let tail: Promise<void> = Promise.resolve();
   return (decide: () => Promise<void>, before?: () => Promise<void>) => { tail = tail.then(async () => { if (before) await before(); await decide(); }).catch(onError); return tail; };
 }
+async function shellRequestHeaders(origin: string, signal: AbortSignal): Promise<HeadersInit> {
+  const shell = await fetchDeadline(origin, {}, signal);
+  const token = (await shell.text()).match(/<meta name="achilles-shell" content="([^"]+)">/)?.[1];
+  if (!token) throw new Error("achilles shell secret is unavailable");
+  return { "X-Achilles-Shell": token };
+}
+
 async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal, armProviderError: (fault?: ProviderError) => void = () => undefined) {
   const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("task deadline exceeded")), TASK_TIMEOUT_MS); const signal = AbortSignal.any([outerSignal, timeout.signal]);
   const pages = await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
-  const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
+  const shellHeaders = await shellRequestHeaders(stack.achillesOrigin, signal);
+  const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, { headers: shellHeaders }, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   let discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const starts = new Map<string, Array<{ step: string; from: number }>>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
@@ -485,7 +493,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
       row.pre_history_ids = (await protocol.sessionHistory(session.id)).map((item: any) => item.id).filter(Boolean);
       row.records_before = ((await databaseSnapshot(stack)).records ?? []).filter(item => item.page_id === session.page_id).map(item => ({ collection: item.collection, id: item.id, data: item.data }));
       const old = protocol; Object.assign(row, await stack.restartZeta()); await old.close().catch(() => undefined);
-      const fresh = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!fresh.ok) throw new Error(`zeta discovery after restart failed (${fresh.status})`);
+      const fresh = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, { headers: shellHeaders }, signal); if (!fresh.ok) throw new Error(`zeta discovery after restart failed (${fresh.status})`);
       discovery = await fresh.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
       protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal });
       const resumed = await protocol.resume(session.id, session.binding!); row.resumed_session_id = String(resumed.session?.session_id ?? resumed.session_id ?? "");

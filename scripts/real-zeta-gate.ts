@@ -1066,7 +1066,10 @@ with _database() as db:
   await trimmedPagination;
   await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"]:not([data-loaded-count="${beforeTrim}"])`), "waitFor", { timeout: 20_000 });
   const own = await readDiscovery(ownDiscovery);
-  const connected = await fetch(discoveryUrl).then((response) => response.json()) as { url: string };
+  const shellHtml = await fetch(origin).then((response) => response.text());
+  const shellToken = shellHtml.match(/<meta name="achilles-shell" content="([^"]+)">/)?.[1];
+  if (!shellToken) throw new Error("achilles shell secret is unavailable");
+  const connected = await fetch(discoveryUrl, { headers: { "X-Achilles-Shell": shellToken } }).then((response) => response.json()) as { url: string };
   if (sharedProcess.exitCode !== null || zetaProcess.exitCode !== null) throw new Error("one of the unrelated zeta serves exited during chat");
   if (shared.pid === own.pid || shared.port === own.port) throw new Error("shared and achilles zeta serves did not remain distinct");
   if (new URL(connected.url).port !== String(own.port)) throw new Error("achilles connected to the shared zeta serve");
