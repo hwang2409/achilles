@@ -1228,3 +1228,20 @@ test("a new chat's composer shows zeta's default model", async () => {
     expect((await app.findByText("default-model", { selector: '[data-part="composer-model"]' })).textContent).toBe("default-model");
   });
 });
+
+test.each([["allow", "ask"], ["ask", "allow"]] as const)("an observer shows the chat's own modes and model (server %s, session %s)", async (server, session) => {
+  await withApp("observer", { attached: true, page: { approval_mode: server }, rpc: { session_settings: () => ({ result: { model: "chat-model", approval_mode: session } }) } }, async (app) => {
+    expect(select(app, tag("composer.auto-approve")).getAttribute("aria-checked")).toBe("false");
+    expect(select(app, '[data-part="composer-model"]').textContent).toBe("chat-model");
+  });
+});
+
+test("a create mode failure that cannot be retried shows once on a page with blocks", async () => {
+  const expired = { error: { code: -32005, message: "refresh failed", data: { reason: "MCP HTTP 404: Session not found" } } };
+  await withApp("controller", { ...docked, rpc: { mcp_refresh_tools: () => expired },
+    http: (path, method) => method === "POST" && path.endsWith("/create-mode") ? Response.json({ create_mode: true }) : undefined }, async (app) => {
+    await click(select(app, tag("composer.create-mode")));
+    expect(app.getAllByText(/restart zeta serve/)).toHaveLength(1);
+    expect(app.getByText(/restart zeta serve/).closest('[role="alert"]')?.hasAttribute("hidden")).toBe(false);
+  });
+});

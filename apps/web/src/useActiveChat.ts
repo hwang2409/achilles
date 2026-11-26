@@ -152,13 +152,13 @@ export async function attachPage(
     const observer = !canWrite;
 
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
-      // A docked observer can read the true per-session mode without resuming the session or writing settings.
-      const observed = observer && page.layout.blocks.length && serverApprovalMode !== "ask"
+      // An observer reads the true per-session mode and model without resuming the session or writing settings.
+      const observed = observer
         ? await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { model?: string; approval_mode?: string | null } | null
         : null;
       requireCurrent(owner, token);
       const session = observer
-        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: observed?.approval_mode ?? serverApprovalMode, model: observed?.model ?? null, pending: false, rebind: false, cwd: null }
+        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode === "ask" ? "ask" : observed?.approval_mode ?? serverApprovalMode, model: observed?.model ?? null, pending: false, rebind: false, cwd: null }
         : await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token));
       requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
@@ -495,7 +495,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   // "retry creating chat" re-runs the attach: the failed-create screen and its header stay until the retry settles
   const retryingCreation = useRef(false);
   const [listRefresh, setListRefresh] = useState(0);
-  const [approvalChange, setApprovalChange] = useState<{ pending: boolean; error?: string; savedAt?: Date } | null>(null);
+  const [approvalChange, setApprovalChange] = useState<{ pending: boolean; error?: string } | null>(null);
   const approvalRequest = useRef<number | null>(null);
   const authority = useRef(canWrite);
   authority.current = canWrite;
@@ -774,7 +774,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
           : "rebind" in update ? { ...value, rebind: false }
           : { ...value, page: { ...value.page, approval_mode: update.approvalMode }, pendingApprovalMode: update.pendingApprovalMode });
         if (!("rebind" in update) && !update.pendingApprovalMode) {
-          setApprovalChange((change) => change?.pending ? { pending: false, savedAt: new Date() } : change);
+          setApprovalChange((change) => change?.pending ? { pending: false } : change);
         }
       },
       failed: (caught) => {
@@ -910,7 +910,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       const result = await applyApprovalMode(client, ready.sessionId, desired, current);
       if (!current()) return;
       updateReady(token, (value) => ({ ...value, page: { ...value.page, approval_mode: result.approvalMode }, model: result.model, pendingApprovalMode: result.pending ? desired : null }));
-      if (!result.pending) setApprovalChange({ pending: false, savedAt: new Date() });
+      if (!result.pending) setApprovalChange({ pending: false });
     } catch {
       if (current()) setApprovalChange({ pending: false, error: "could not change tool approval; try again" });
     } finally {
