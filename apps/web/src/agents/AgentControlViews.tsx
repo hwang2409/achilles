@@ -9,7 +9,8 @@ import type { AgentRun } from "./reads";
 type Props = { client: ZetaClient | null; owner: ChildControls; refresh: () => void };
 const reason = (client: ZetaClient | null) => !client ? "connect to zeta to make changes." : !supportsFeature(client, controlFeature) ? newerControls : undefined;
 
-export function AgentSpawn({ client, owner, refresh }: Props) {
+// sessionId: the chat on screen; spawn refuses a parent that is not that chat.
+export function AgentSpawn({ client, owner, refresh, sessionId }: Props & { sessionId?: string }) {
   const [open, setOpen] = useState(false);
   const [parent, setParent] = useState<ControlParent | null>();
   const [name, setName] = useState("");
@@ -24,11 +25,12 @@ export function AgentSpawn({ client, owner, refresh }: Props) {
     const stop = new AbortController();
     void readControlParent(client, stop.signal).then((result) => {
       if (stop.signal.aborted) return;
-      setParent(result);
-      setNote(result ? !result.profiles.length ? "no agent profiles are mounted in the active session." : "" : "open a parent session in zeta first.");
+      const other = !!result && !!sessionId && result.id !== sessionId;
+      setParent(other ? null : result);
+      setNote(other ? "this chat is not attached in this tab. reload the chat, then try again." : result ? !result.profiles.length ? "no agent profiles are mounted in the active session." : "" : "open a parent session in zeta first.");
     }, () => { if (!stop.signal.aborted) setNote("could not read the active session. reopen the form to retry."); });
     return () => stop.abort();
-  }, [open, client, unavailable]);
+  }, [open, client, unavailable, sessionId]);
   const profile = parent?.profiles.find((entry) => entry.name === name);
   return <section className="agents-spawn" aria-label="spawn an agent">
     <button type="button" className="ui-button" disabled={!!unavailable} aria-expanded={open} onClick={() => {

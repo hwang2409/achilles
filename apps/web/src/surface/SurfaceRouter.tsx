@@ -103,7 +103,7 @@ export function SurfaceRouter() {
   const observerBanner = observer && route?.id !== "accounts" && <ObserverBanner connection={connection} readOnly={readOnly} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!readOnly) {
-    return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
+    return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} childControls={childControls} childSend={childSend} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
       current={route ?? chatsRoute} homeAlias={chatsRoute.path} connectionStatus={connectionStatus} /></AccountSwitchProvider>;
   }
   if (!route) return null;
@@ -119,7 +119,7 @@ export function SurfaceRouter() {
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
   } else if (route.id === "agents") {
-    content = <AgentsModule controls={childControls} send={childSend} client={client} connecting={connecting} retry={() => connection.retryNow()} />;
+    content = <AgentsModule client={client} connecting={connecting} retry={() => connection.retryNow()} />;
   } else if (route.id === "connections") {
     content = <McpModule client={client} observer={connectionState.phase === "connected" && connectionState.authority === "observer"} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
   } else if (route.id === "settings") {

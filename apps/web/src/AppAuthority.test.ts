@@ -604,38 +604,46 @@ test.each(["start", "logout"] as const)("OAuth %s refuses a stale review after b
   await withApp("controller", row.options ?? {}, (app, writes, requests) => row.check(app, "controller", writes, requests));
 });
 
+const agentRun = (fields: object) => ({ session_id: "session", run_id: "fixture-run", parent_run_id: null, agent_type: "fixture-profile",
+  description: "fixture task", turns_used: 1, tool_count: 0, started_at: "2026-01-01", finished_at: null, elapsed_seconds: 1, ...fields });
+// the chat tab's agents dialog: every agent write targets the chat on screen ("session").
+const agentOptions = (methods: string[], status: string, rpc: Options["rpc"] = {}, roles?: string[]): Options => ({ attached: true, roles, rpc: {
+  hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+    requests: ["agent_run_catalog", ...(params.role === "controller" ? methods : [])] } } }),
+  agent_run_catalog: () => ({ result: { revision: "1", data: { items: [agentRun({ status, accepts_follow_ups: status === "idle", current_step: status })] } } }),
+  ...rpc,
+} });
+const openAgents = async (app: RenderResult, run?: string) => {
+  await click(await app.findByRole("button", { name: "Agents" }));
+  if (run) await click(await app.findByRole("button", { name: run }));
+};
+
 function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
   const spawning = id === "agents.spawn";
   const method = spawning ? "child_run_spawn" : "child_run_cancel";
   const roles: string[] = [];
-  return { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, roles, rpc: {
-    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
-      requests: ["agent_run_catalog", ...(params.role === "controller" ? [method] : [])] } } }),
-    status: () => ({ result: { state: "idle", session: { session_id: spawning ? "active-parent" : "session", cwd: "/fixture",
+  return { kind: "visible", options: agentOptions([method], "running", {
+    status: () => ({ result: { state: "idle", session: { session_id: "session", cwd: "/fixture",
       agent_catalog: [{ name: "fixture-profile", description: "fixture profile", tools: [] }] } } }),
-    agent_run_catalog: ({ root_session_id }) => ({ result: { revision: "1", data: { items: root_session_id === "active-parent" ? [] : [{
-      session_id: "session", run_id: "fixture-run", parent_run_id: null, agent_type: "fixture-profile", description: "fixture task",
-      status: "running", accepts_follow_ups: false, turns_used: 1, tool_count: 0, current_step: "working", started_at: "2026-01-01",
-      finished_at: null, elapsed_seconds: 1,
-    }] } } }),
     [method]: (params) => {
-      expect(params).toEqual(spawning ? { session_id: "active-parent", agent_type: "fixture-profile", task: "reviewed task", background: true }
+      expect(params).toEqual(spawning ? { session_id: "session", agent_type: "fixture-profile", task: "reviewed task", background: true }
         : { session_id: "session", run_id: "fixture-run", reason: "user_cancelled" });
       return { result: { data: { accepted: true, run_id: spawning ? "new-fixture-run" : "fixture-run", state: "cancelling" } } };
     },
-  } }, check: async (app, authority, writes) => {
+  }, roles), check: async (app, authority, writes) => {
+    await openAgents(app, spawning ? undefined : "fixture-profile fixture task running");
     const before = roles.length;
-    expect(roles.at(-1)).toBe("observer");
-    await app.findByRole("heading", { name: /fixture task/ });
+    const written = writes.length;
+    expect(roles.at(-1)).toBe(authority);
     if (spawning) {
       await click(app.getByRole("button", { name: "+ spawn agent" }));
       await app.findByRole("option", { name: "fixture-profile" });
       await change(app.getByRole("combobox", { name: "profile" }), "fixture-profile");
       await change(app.getByRole("textbox", { name: "task" }), "reviewed task");
       await act(async () => { fireEvent.submit((select(app, tag(id)) as HTMLButtonElement).form!); });
-    } else await click(select(app, tag(id)));
+    } else await click(await app.findByRole("button", { name: "cancel run" }));
     expect(roles).toHaveLength(before);
-    expect(writes).toEqual([]);
+    expect(writes.slice(written)).toEqual([]);
     const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
     expect(confirm.disabled).toBe(true);
     if (spawning) await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
@@ -644,38 +652,54 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
     await act(async () => { fireEvent.submit(confirm.form!); });
     if (authority === "observer") {
       expect(app.getByRole("alert").textContent).toContain("another tab had control");
-      expect(roles.slice(before)).toEqual(["controller"]);
     } else {
       expect(await app.findByText(spawning ? /spawned fixture-profile as/ : /cancellation requested\./)).toBeTruthy();
-      expect(writes).toEqual([method]);
-      expect(roles.slice(before)).toEqual(["controller", "observer"]);
+      expect(writes.slice(written)).toEqual([method]);
+      expect(roles.slice(before)).toEqual([]);
     }
   } };
 }
+
+test("spawn from a chat refuses a parent that is not the chat on screen", async () => {
+  await withApp("controller", agentOptions(["child_run_spawn"], "running", {
+    status: () => ({ result: { state: "idle", session: { session_id: "other", cwd: "/fixture", agent_catalog: [{ name: "fixture-profile", tools: [] }] } } }),
+  }), async (app, writes) => {
+    await openAgents(app);
+    await click(app.getByRole("button", { name: "+ spawn agent" }));
+    expect(await app.findByText("this chat is not attached in this tab. reload the chat, then try again.")).toBeTruthy();
+    expect(app.queryByRole("option", { name: "fixture-profile" })).toBeNull();
+    expect(writes.filter((write) => write.startsWith("child_run"))).toEqual([]);
+  });
+});
+
+test("/agents is read-only: no agent write surface, and a run says where to control it", async () => {
+  await withApp("controller", { ...agentOptions(["child_run_spawn", "child_run_cancel", "child_run_send"], "idle"), attached: false, path: "/agents/session/fixture-run", observerBanner: false }, async (app) => {
+    await app.findByRole("heading", { name: /fixture task/ });
+    expect(app.getByText("control this run from its chat.")).toBeTruthy();
+    expect(app.container.querySelector('[data-write-surface^="agents."]')).toBeNull();
+  });
+});
 
 const rows: Record<WriteSurfaceId, Row> = {
   "accounts.login": browserLogin(false),
   "accounts.login-cancel": browserLogin(true),
   "agents.spawn": agentControl("agents.spawn"),
   "agents.cancel": agentControl("agents.cancel"),
-  "agents.send": { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, rpc: {
-    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: ["agent_run_catalog_v1", "child_runs"],
-      requests: ["agent_run_catalog", ...(params.role === "controller" ? ["child_run_send"] : [])] } } }),
-    agent_run_catalog: () => ({ result: { revision: "1", data: { items: [{ session_id: "session", run_id: "fixture-run", parent_run_id: null,
-      agent_type: "fixture-profile", description: "fixture task", status: "idle", accepts_follow_ups: true, turns_used: 1,
-      tool_count: 0, current_step: "waiting", started_at: "2026-01-01", finished_at: null, elapsed_seconds: 1 }] } } }),
+  "agents.send": { kind: "visible", options: agentOptions(["child_run_send"], "idle", {
     child_run_send: (params) => {
       expect(params).toEqual({ session_id: "session", run_id: "fixture-run", text: "fixture follow-up" });
       return { result: { accepted: true, run_id: "fixture-run" } };
     },
-  } }, check: async (app, authority, writes) => {
+  }), check: async (app, authority, writes) => {
+    await openAgents(app, "fixture-profile fixture task idle");
+    const written = writes.length;
     const field = await app.findByRole("textbox", { name: "message fixture-profile" }) as HTMLTextAreaElement;
     const control = select(app, tag("agents.send"));
     expect(control.textContent).toBe("send to fixture-profile");
     expect(disabled(control)).toBe(true);
     await change(field, "fixture follow-up");
     expect(disabled(control)).toBe(false);
-    expect(writes).toEqual([]);
+    expect(writes.slice(written)).toEqual([]);
     await click(control);
     if (authority === "observer") {
       expect(await app.findByText(/another tab had control\./)).toBeTruthy();

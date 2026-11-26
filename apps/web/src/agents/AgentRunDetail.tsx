@@ -20,20 +20,21 @@ export function StateTag({ row }: { row: AgentRun }) {
 
 export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follow, client, send, controls, reportedAt, refreshing, refresh }: {
   chosen?: AgentRun; parent?: AgentRun; title?: string; id?: string; invalid?: boolean;
-  back: Ref<HTMLAnchorElement>; follow: (event: MouseEvent<HTMLAnchorElement>) => void;
-  client: ZetaClient | null; send: ChildSendOwner; controls: ChildControls; reportedAt: number; refreshing: boolean; refresh: () => void;
+  back?: Ref<HTMLAnchorElement>; follow?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  client: ZetaClient | null; send?: ChildSendOwner; controls?: ChildControls; reportedAt: number; refreshing: boolean; refresh: () => void;
 }) {
   return <section className="agents-detail" aria-label="agent run detail">
     <div className="agents-detail-scroll">
-      {(id || invalid) && <a className="agents-back" ref={back} href={surfaceHref("/agents")} data-back="true" onClick={follow}>‹ all runs</a>}
+      {back && (id || invalid) && <a className="agents-back" ref={back} href={surfaceHref("/agents")} data-back="true" onClick={follow}>‹ all runs</a>}
       {chosen ? <RunDetail key={id} row={chosen} parent={parent} rootTitle={title!} />
         : <ModuleState kind="empty" title={id || invalid ? "run not in this view" : "select a run"}
           detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
-      <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh}
-        elapsed={chosen?.elapsedSeconds === undefined ? "elapsed unavailable" : `${duration(chosen.elapsedSeconds)} at last refresh`} />
+      {chosen && !controls && <p className="agents-cancel">control this run from its chat.</p>}
+      {controls && <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh}
+        elapsed={chosen?.elapsedSeconds === undefined ? "elapsed unavailable" : `${duration(chosen.elapsedSeconds)} at last refresh`} />}
       {chosen && <RunActivity client={client} row={chosen} />}
     </div>
-    {chosen && <ChildComposer key={id} client={client} row={chosen} owner={send} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
+    {chosen && send && <ChildComposer key={id} client={client} row={chosen} owner={send} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
   </section>;
 }
 
