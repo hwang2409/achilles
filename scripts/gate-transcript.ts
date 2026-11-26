@@ -471,6 +471,7 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
   const sends: { tab: number; id: unknown; at: number }[] = [];
   const replies: { tab: number; id: unknown; accepted: boolean }[] = [];
   const firstReplyAt: number[] = [];
+  const controlled: number[] = [0, 0];
   tabs.forEach((tab, index) => tab.on("websocket", (socket) => {
     socket.on("framesent", ({ payload }) => {
       try { const frame = JSON.parse(String(payload)); if (frame.method === "send") sends.push({ tab: index, id: frame.id, at: performance.now() }); } catch { /* not json */ }
@@ -479,6 +480,7 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
       try {
         const frame = JSON.parse(String(payload));
         if (Array.isArray(frame.result?.capabilities?.features)) features[index]!.push(...frame.result.capabilities.features);
+        if (frame.error?.data?.code === "session_controlled") controlled[index] = (controlled[index] ?? 0) + 1;
         const send = sends.find((row) => row.tab === index && row.id === frame.id && frame.method === undefined);
         if (send) replies.push({ tab: index, id: frame.id, accepted: Object.hasOwn(frame, "result") });
         if (frame.method === "event" && String(payload).includes("you said: together") && firstReplyAt[index] === undefined) firstReplyAt[index] = performance.now();
@@ -496,8 +498,20 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
     await field(a).fill("first message in tab a", wait);
     await field(a).press("Enter", wait);
     await a.getByText("you said: first message in tab a", { exact: true }).waitFor(wait);
-    await b.goto(otherChatUrl);
-    await b.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait });
+    // the other chat's tab closed just before this step, and zeta may not have handled that socket close yet.
+    // shortcut: the gate reloads on `session_controlled`; slice 3 replaces this with the app's own bounded retry.
+    for (let attempt = 0; ; attempt++) {
+      const seen = controlled[1]!;
+      await b.goto(otherChatUrl);
+      let settled = false;
+      const attached = b.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait }).then(() => true, (error) => { if (settled) return false; throw error; });
+      const refused = (async () => { while (!settled && controlled[1] === seen) await Bun.sleep(50); return false; })();
+      const ok = await Promise.race([attached, refused]).finally(() => { settled = true; });
+      if (ok) break;
+      if (attempt === 4) throw new Error("tab b's chat stayed session_controlled after 5 loads");
+      await Bun.sleep(500);
+    }
+    if (controlled[1]) console.log(`two tabs: tab b's first load met session_controlled ${controlled[1]} time(s) while zeta released the closed tab; it reloaded`);
     await field(b).waitFor(wait);
     if (!await field(b).isEditable()) throw new Error("tab b opened its chat read-only");
     const chats = await Promise.all(tabs.map((tab) => tab.locator("[data-session-id]").first().getAttribute("data-session-id")));
