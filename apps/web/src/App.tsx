@@ -70,11 +70,12 @@ function ChatNotification({ id }: { id: string }) {
 
 const renderers: Renderers = { notification: ChatNotification, message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: CompactTool, error: ErrorRow };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
-// inside the reply that is still streaming. it shows here once delivery settles.
+// inside the reply that is still streaming. it shows here once delivery settles (a drop its turn did not read stays
+// hidden while it goes out again as a new message, which then takes over this row).
 function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
   const item = useItem(id);
   const event = item?.type === "user" && item.event.type === "user_message" ? item.event : undefined;
-  if (event?.mode === "steer" && event.delivery_id && !event.delivery_status && queued.has(event.delivery_id)) return null;
+  if (event?.mode === "steer" && event.delivery_id && queued.has(event.delivery_id)) return null;
   return <Fallback id={id} />;
 }
 
