@@ -3,11 +3,8 @@ import { RunProvider, Timeline } from "@fulcrum/react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleState } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
-import { AgentCancel } from "./AgentControlViews";
-import { runDisplayId, type ChildControls } from "./childControls";
-import { ChildComposer } from "./ChildComposer";
+import { runDisplayId } from "./childControls";
 import { childHistorySupported, createChildRunsController, newerHistory } from "./childRuns";
-import type { ChildSendOwner } from "./childSend";
 import type { AgentRun } from "./reads";
 
 export const short = (id: string) => id.length > 12 ? `${id.slice(0, 7)}…${id.slice(-5)}` : id;
@@ -18,10 +15,10 @@ export function StateTag({ row }: { row: AgentRun }) {
   return <span className="agents-state" data-status={row.status}>{row.status}</span>;
 }
 
-export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follow, client, send, controls, reportedAt, refreshing, refresh }: {
+export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follow, client }: {
   chosen?: AgentRun; parent?: AgentRun; title?: string; id?: string; invalid?: boolean;
   back: Ref<HTMLAnchorElement>; follow: (event: MouseEvent<HTMLAnchorElement>) => void;
-  client: ZetaClient | null; send: ChildSendOwner; controls: ChildControls; reportedAt: number; refreshing: boolean; refresh: () => void;
+  client: ZetaClient | null;
 }) {
   return <section className="agents-detail" aria-label="agent run detail">
     <div className="agents-detail-scroll">
@@ -29,11 +26,8 @@ export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follo
       {chosen ? <RunDetail key={id} row={chosen} parent={parent} rootTitle={title!} />
         : <ModuleState kind="empty" title={id || invalid ? "run not in this view" : "select a run"}
           detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
-      <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh}
-        elapsed={chosen?.elapsedSeconds === undefined ? "elapsed unavailable" : `${duration(chosen.elapsedSeconds)} at last refresh`} />
       {chosen && <RunActivity client={client} row={chosen} />}
     </div>
-    {chosen && <ChildComposer key={id} client={client} row={chosen} owner={send} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
   </section>;
 }
 

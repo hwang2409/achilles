@@ -1,7 +1,6 @@
 import { ReadingMarkdown, ReadingPanel } from "../surface/ReadingPanel";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ZetaError, type ZetaClient } from "@fulcrum/zeta";
-import { NoAnswer } from "../zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
 import type { MemoryActions } from "./MemoryActions";
@@ -13,7 +12,7 @@ import "./projects.css";
 type Tab = "memory" | "inbox";
 type Problem = { message: string; retry: boolean };
 const tabs: Tab[] = ["memory", "inbox"];
-/** Borrows control for one read and gives it back: see `Connection.withControl`. */
+/** Runs one read as controller, taking control first on an observer tab: see `Connection.withControl`. */
 export type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;
 /** What a reveal needs from the page: the current role, the borrow, and the reveals a dropped socket cut short. */
 export type Control = { observer: boolean; withControl: WithControl; dropped: Set<string> };
@@ -32,7 +31,6 @@ function parse(path: string): { id: string; tab: Tab; known: boolean } | null {
 const hrefOf = (id?: string, tab?: Tab) => id ? `/projects/${encodeURIComponent(id)}${tab ? `/${tab}` : ""}` : "/projects";
 
 function problemOf(error: unknown): Problem | "observer" {
-  if (error instanceof NoAnswer) return { message: "zeta did not answer; show again", retry: true };
   if (error instanceof Unreadable) return { message: "zeta sent data this view cannot read", retry: true };
   const code = (error as { code?: unknown } | null)?.code;
   if (error instanceof ZetaError && error.kind === "closed") return dropped;
@@ -222,7 +220,7 @@ const kindLabel = { brief: "Brief", decision: "Decisions", state: "State", backl
 
 /** One line under the tabs for a tab that is not in control, so Memory and Inbox start at the same height. */
 const ControlNote = ({ control }: { control: Borrow }) => control.observer
-  ? <p id={CONTROL_NOTE} className="projects-note">Zeta lets only the tab in control read full text. This read will not interrupt another tab.</p> : null;
+  ? <p id={CONTROL_NOTE} className="projects-note">Zeta lets only a controlling tab read full text. This read takes control first.</p> : null;
 
 function MemoryTab({ client, projectId, projectName, control, actions, refresh }: {
   client: ZetaClient; projectId: string; projectName: string; control: Borrow; actions?: MemoryActions; refresh: number;
@@ -335,7 +333,7 @@ type Shown = null | { state: "loading" } | { state: "data"; body: Body } | { sta
 const longBody = (text: string) => text.length > 2000 || text.split("\n").length > 30;
 
 /**
- * One explicit read per click. As an observer, the click borrows control for this one read and gives it back. The
+ * One explicit read per click. As an observer, the click takes control first and keeps it. The
  * text lives only in this instance's state: hiding it or leaving drops it.
  */
 function Reveal({ id, noun, context, client, control, load, markdown }: { markdown?: boolean; id: string; noun: string; context?: string; client: ZetaClient; control: Borrow; load: (client: ZetaClient, signal: AbortSignal) => Promise<Body> }) {

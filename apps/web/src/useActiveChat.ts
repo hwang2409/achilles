@@ -152,13 +152,8 @@ export async function attachPage(
     const observer = !canWrite;
 
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
-      // An observer reads the true per-session mode and model without resuming the session or writing settings.
-      const observed = observer
-        ? await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { model?: string; approval_mode?: string | null } | null
-        : null;
-      requireCurrent(owner, token);
-      const session = observer
-        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode === "ask" ? "ask" : observed?.approval_mode ?? serverApprovalMode, model: observed?.model ?? null, pending: false, rebind: false, cwd: null }
+      let session: { id: string; name: string | null; approvalMode?: string | null; model: string | null; pending: boolean; rebind: boolean; cwd: string | null } = observer
+        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode, model: null, pending: false, rebind: false, cwd: null }
         : await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token));
       requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
@@ -166,6 +161,13 @@ export async function attachPage(
       if (continued) lease.store.dispatch({ type: "notification", notification_id: continuationNotification, data: { text: `today · continuing session ${session.id}. zeta keeps the full history; new messages append to it.` } });
       if (!owner.accept(token, lease)) throw new StaleAttachment();
       ownsLease = true;
+      if (observer) {
+        // An observer reads the true per-session mode and model without resuming the session or writing settings.
+        // After the join: zeta answers an observer's session_settings only for a session it joined.
+        const observed = await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { model?: string; approval_mode?: string | null } | null;
+        requireCurrent(owner, token);
+        session = { ...session, approvalMode: serverApprovalMode === "ask" ? "ask" : observed?.approval_mode ?? serverApprovalMode, model: observed?.model ?? null };
+      }
       page.approval_mode = session.approvalMode;
       const storedChat = selectedChat ?? (await findChat(session.id)); requireCurrent(owner, token);
       const userTitled = Boolean(storedChat?.titled_by_user);
@@ -603,6 +605,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         history.replaceState(history.state, "", location.pathname + location.search);
         setFocusSessionId(next.sessionId);
       }
+      // name the default chat in the url, so a reload reclaims this tab's chat instead of the page's newest one
+      if (next.phase === "ready" && !landing && !selectedFromUrl()) history.replaceState(history.state, "", routeWithChat(location.pathname, next.sessionId));
       setCreationPageId(next.page.id);
       if (next.phase === "busy") void showBusy(token, next.busySessionId, "attach");
       applyActive(token, { kind: "snapshot", state: next, readAt });

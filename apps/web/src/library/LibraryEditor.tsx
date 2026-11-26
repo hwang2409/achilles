@@ -82,9 +82,9 @@ function EditorActions({ dirty, what, onDiscard, save, status }: { dirty: boolea
   </div>;
 }
 
-/** A tab that lost control (another tab took it while this one reconnected) says so before save. */
+/** A tab that reconnected as observer (zeta had no free control slot) says so before save. */
 const Demoted = ({ show }: { show: boolean }) => show
-  ? <p role="status" className="library-flag">this tab is read-only now. save takes control first, if no other tab has it.</p> : null;
+  ? <p role="status" className="library-flag">this tab is read-only now. save takes control first, if zeta has a free slot.</p> : null;
 
 /** The form's save outcomes from the writer, also one that settled while the form was unmounted by a socket drop.
  * Returns whether a save of this form is in flight now. */

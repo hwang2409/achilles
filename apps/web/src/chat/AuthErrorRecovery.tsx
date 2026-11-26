@@ -68,6 +68,6 @@ export function AuthErrorRecovery({ client, chat, canWrite, onNewChat, code, log
       effect={`start browser sign-in for ${review.target.account}` as ReviewText} scope={reviewText("zeta account store on this computer")}
       current={reviewText("sign-in required")} after={reviewText("credentials may be saved; the failed request is not retried")}
       undo={reviewText("cancel while pending; after credentials save, sign-out is not available here")}
-      proof={{ kind: "scope" }} execute={async () => { await login.start(review.target, false); return started; }} checkResult={async () => started} />}
+      proof={{ kind: "scope" }} execute={async () => { await login.start(review.target); return started; }} checkResult={async () => started} />}
   </div>;
 }

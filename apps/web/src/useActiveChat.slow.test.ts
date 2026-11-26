@@ -761,7 +761,7 @@ test("new chat while another chat's turn runs keeps the new chat and never sends
   await act(async () => { sent = harness.active.send("second story", { steer }, () => {}); await sent.catch(() => {}); });
   expect(delivered, "text written for the new chat reached the running chat").toEqual([]);
   expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
-  await expect(sent!).rejects.toThrow("another chat was running");
+  await expect(sent!).rejects.toThrow("this tab's chat is still running");
   expect(harness.active.state.phase).toBe("empty");
   expect(harness.active.busy).toMatchObject({ sessionId: "chat", retry: "new" });
 });
@@ -867,7 +867,7 @@ test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
       const box = composer("new:home");
       box.edit(UNSENT_TEXT);
       await act(async () => { await box.submit(); });
-      expect(box.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("another chat was running") }]);
+      expect(box.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("this tab's chat is still running") }]);
       expect(draftStore.get("new:home")).toBe("");
       await load();
       // the page opens its newest chat (the running one): the row was written for a new chat, so it is not there
@@ -881,7 +881,7 @@ test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
       expect(requests.filter((method) => method === "new_session"), "open made a chat").toHaveLength(0);
       await flushUntil(() => harness.active.state.phase === "empty");
       const box2 = composer("new:home");
-      expect(box2.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("another chat was running") }]);
+      expect(box2.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("this tab's chat is still running") }]);
       expect(sendsOfText()).toEqual([]);
       // retry makes the chat the text was written for, and sends it there once
       await act(async () => { await box2.retry(box2.getModel().queue[0]!.id); });

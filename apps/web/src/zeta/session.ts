@@ -17,10 +17,19 @@ export async function runningSession(client: ZetaClient): Promise<string | null>
   return status.state === "idle" ? null : status.session?.session_id ?? null;
 }
 
-/** zeta refuses `resume` and `new_session` (-32004) while a turn runs; sessionId names the running chat. */
+/** zeta refuses `resume` and `new_session` (-32004) while this tab's turn runs; sessionId names the running chat. */
 export class ChatBusyError extends Error {
-  constructor(readonly sessionId: string | null) { super(sessionId ? "another chat was running, so zeta could not start a new chat" : "zeta was busy a moment ago and is ready now"); }
+  constructor(readonly sessionId: string | null) { super(sessionId ? "this tab's chat is still running, so zeta could not open another chat here" : "zeta was busy a moment ago and is ready now"); }
 }
+
+/** zeta refuses `resume` and `new_session` (-32004, `data.reason: "resident_limit"`) while it holds all the open chats it allows. */
+export class TooManyChatsError extends Error {
+  constructor() { super("zeta has too many open chats. close a chat tab or wait, then try again."); }
+}
+export const isResidentLimit = (caught: unknown) => {
+  const error = caught as { code?: unknown; data?: { reason?: unknown } | null } | null;
+  return error?.code === -32004 && error.data?.reason === "resident_limit";
+};
 
 type SessionSettings = { model: string; approval_mode?: string | null };
 type ApprovalModeResult = { approvalMode?: string | null; model: string; pending: boolean };
@@ -66,6 +75,7 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
       const reason = (caught as { data?: { code?: string } }).data?.code;
       if (reason === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
       if (reason === "session_owned") throw new Error(sessionOwned);
+      if (isResidentLimit(caught)) throw new TooManyChatsError();
       if ((caught as { code?: unknown }).code !== -32004) throw caught;
       const running = await runningSession(client);
       rebind = running === id;

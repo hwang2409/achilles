@@ -1,4 +1,4 @@
-export const READ_ONLY_REASON = "this tab is read-only; take control to make changes";
+export const READ_ONLY_REASON = "this tab is read-only: too many tabs control zeta. take control to make changes";
 
 export const WRITE_SURFACE = {
   agentsSend: "agents.send",
