@@ -49,7 +49,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   if (unnamedControls.length) throw new Error(`settings controls have no accessible name: ${unnamedControls.join(", ")}`);
   await gateWait.playwright(page.getByRole("switch", { name: "vim mode" }), "waitFor");
   await gateWait.playwright(page.getByRole("switch", { name: "auto-approve default" }), "waitFor");
-  const switchSizes = await page.getByRole("switch").evaluateAll((switches) => switches.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
+  const switchSizes = await page.getByRole("dialog", { name: "settings" }).getByRole("switch").evaluateAll((switches) => switches.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
   if (switchSizes.some(({ width, height }) => width !== 38 || height < 24)) throw new Error(`settings switches have the wrong target size: ${JSON.stringify(switchSizes)}`);
   if (screenshots) await page.screenshot({ path: `${screenshots}/04-settings-dialog.png` });
   await page.getByRole("option", { name: "Light", exact: true }).click();
