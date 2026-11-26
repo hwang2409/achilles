@@ -336,9 +336,15 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
   };
 }
 
-// Never resend text automatically: zeta (>= 5c517d85) settles every accepted steer as delivered or dropped,
-// including one sent while the final reply streams (it starts the next turn).
+// zeta (>= 5c517d85) settles every accepted steer as delivered or dropped; one sent while the final reply streams
+// starts the next turn. The one automatic resend is a steer its turn ended without reading (see `deliverChatMessage`).
 export class DroppedSteerDeliveryError extends Error {}
+
+export const TURN_ENDED_UNREAD = "the turn ended before zeta read it.";
+class TurnEndedUnreadError extends SendRefused {}
+// drops that mean "the turn ended before zeta read it": `turn_end`, and `disconnect` while this connection still answers
+// (zeta found no controller to start the next turn). A stop, a clear, a failed turn, or a restart is never resent.
+const UNREAD_DROPS = new Set(["turn_end", "disconnect"]);
 
 const TURN_RUNNING = -32004;
 const NO_TURN = -32005;
@@ -358,20 +364,56 @@ export async function deliverChatMessage(
   deliveryId: string,
   steer: boolean,
   track: (id: string) => void,
+  dropReason: (deliveryId: string) => Promise<string | undefined>,
 ): Promise<"send" | "steer"> {
+  // the delivery id is the message's intent: a resend with a fresh id takes over its row instead of adding one
+  const intent = deliveryId;
   try {
-    return await deliverOnce(client, sessionId, text, deliveryId, steer, track);
+    return await deliverOnce(client, sessionId, text, deliveryId, steer, track, intent);
   } catch (error) {
+    if (error instanceof DroppedSteerDeliveryError && UNREAD_DROPS.has(await dropReason(deliveryId) ?? "")) return await sendUnreadSteer(client, sessionId, text, track, intent);
     const outcome = classify(error);
     if (outcome === "sent") return steer ? "steer" : "send";
     if (outcome !== "resend") throw outcome === "maybe" ? new Error(MAYBE_SENT) : refusal(error);
   }
   try {
-    return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track);
+    return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track, intent);
   } catch (error) {
     // the one resend: zeta's answer is shown and nothing goes out again by itself
     throw classify(error) === "rethrow" || error instanceof DroppedDuplicateError ? refusal(error) : new Error(MAYBE_SENT);
   }
+}
+
+// a dropped steer was never read, so zeta holds nothing: one `send` with a fresh id starts the turn that carries it.
+// If zeta refuses (another turn already started), the row stays unsent with the true reason and its retry.
+async function sendUnreadSteer(client: Pick<ZetaClient, "request">, sessionId: string, text: string, track: (id: string) => void, intent: string): Promise<"send"> {
+  const deliveryId = crypto.randomUUID();
+  track(deliveryId);
+  try {
+    accepted(await client.request("send", { session_id: sessionId, text, delivery_id: deliveryId }, { intent }));
+    return "send";
+  } catch (error) {
+    if (classify(error) !== "rethrow") throw new Error(MAYBE_SENT);
+    if (errorCode(error) === TURN_RUNNING) throw new TurnEndedUnreadError(TURN_ENDED_UNREAD, { cause: error });
+    throw refusal(error);
+  }
+}
+
+// zeta names a drop's reason only in its live `delivery_status` event, which the poll's answer can overtake: wait briefly
+export function steerDropReason(store: SessionLease["store"], deliveryId: string, waitMs = 1_000): Promise<string | undefined> {
+  const read = () => {
+    for (const { id } of store.getState().outline) {
+      const item = store.getItem(id);
+      if (item?.type === "user" && item.event.type === "user_message" && item.event.delivery_id === deliveryId) return item.event.delivery_reason;
+    }
+  };
+  return new Promise((resolve) => {
+    const known = read();
+    if (known !== undefined) return resolve(known);
+    const done = (reason: string | undefined) => { clearTimeout(timer); unsubscribe(); resolve(reason); };
+    const timer = setTimeout(() => done(undefined), waitMs);
+    const unsubscribe = store.subscribe(() => { const reason = read(); if (reason !== undefined) done(reason); });
+  });
 }
 
 // zeta's answer, so the row's composer knows zeta holds nothing under the refused id
@@ -404,13 +446,14 @@ async function deliverOnce(
   deliveryId: string,
   steer: boolean,
   track: (id: string) => void,
+  intent: string,
 ): Promise<"send" | "steer"> {
   const first: "send" | "steer" = steer ? "steer" : "send";
   let used = first;
   // tracked before the request: zeta echoes an accepted message before it answers
   track(deliveryId);
   try {
-    accepted(await client.request(first, { session_id: sessionId, text, delivery_id: deliveryId }));
+    accepted(await client.request(first, { session_id: sessionId, text, delivery_id: deliveryId }, { intent }));
   } catch (error) {
     if (error instanceof DroppedDuplicateError) throw error;
     // zeta serve-protocol: "A `send` that arrives right after `turn_end` either starts the turn that carries the steer,
@@ -418,7 +461,7 @@ async function deliverOnce(
     // A refused request records no delivery ID, so the one retry reuses it; a second refusal is shown, not retried.
     if (errorCode(error) !== (steer ? NO_TURN : TURN_RUNNING)) throw error;
     used = steer ? "send" : "steer";
-    accepted(await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId }));
+    accepted(await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId }, { intent }));
   }
   if (used === "steer") await confirmSteerDelivery(client, deliveryId);
   return used;
@@ -443,11 +486,11 @@ export async function trackQueuedSteer<T>(
   add: (id: string) => void,
   remove: (id: string) => void,
 ): Promise<T> {
-  let tracked: string | undefined;
+  const tracked: string[] = [];
   try {
-    return await send((id) => { tracked = id; add(id); });
+    return await send((id) => { tracked.push(id); add(id); });
   } finally {
-    if (tracked !== undefined) remove(tracked);
+    for (const id of tracked) remove(id);
   }
 }
 
@@ -793,9 +836,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const sendReady = useCallback(async (client: ZetaClient, target: ReadyState, token: number, text: string, deliveryId: string, steer: boolean, track: (id: string) => void) => {
     requireCurrent(owner.current, token);
     try {
-      await deliverChatMessage(client, target.sessionId, text, deliveryId, steer, track);
+      await deliverChatMessage(client, target.sessionId, text, deliveryId, steer, track, (id) => steerDropReason(target.lease.store, id));
     } catch (error) {
       if (pendingSelection.current?.sessionId === target.sessionId) pendingSelection.current = null;
+      // the bubble says why too: zeta may have named the drop `disconnect` although this connection still answers
+      if (error instanceof TurnEndedUnreadError) target.lease.store.dispatch({ type: "delivery_status", delivery_id: deliveryId, method: "steer", status: "dropped", content: "", reason: "turn_end" });
       throw error;
     }
     // not gated on the owner token: a chat switch mid-send must still record the send

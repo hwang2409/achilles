@@ -85,7 +85,7 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
     onSubmit: async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
       const id = `delivery-${deliveryIds.length + 1}`;
       deliveryIds.push(id);
-      await deliverChatMessage(client as never, "session", text, id, intent.steer, track);
+      await deliverChatMessage(client as never, "session", text, id, intent.steer, track, async () => undefined);
     },
   };
   const owner = createComposerDelivery(options);
@@ -477,7 +477,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
           return { accepted: true, ...(duplicate ? { duplicate } : {}) };
         } };
         const track_ = (deliveryId: string) => { deliveries.set(text, deliveryId); track(deliveryId); };
-        await deliverChatMessage(zeta as never, key(chat), text, (intent as SendIntent).deliveryId ?? `delivery ${++nextDelivery}`, false, track_);
+        await deliverChatMessage(zeta as never, key(chat), text, (intent as SendIntent).deliveryId ?? `delivery ${++nextDelivery}`, false, track_, async () => undefined);
       },
     }, fromNewChat && key(fromNewChat));
     return { chat, owner, mounted: () => { const detach = owner.attach(); owner.sync(turn, draftStore.get(key(chat))); return detach; } };
