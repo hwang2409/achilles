@@ -26,12 +26,17 @@ class PageBuildError(ValueError):
 def _run_container(
     docker: str,
     workspace: Path,
-    cache: Path,
+    cache: Path | None,
     command: list[str],
     *,
     network: str,
 ):
     try:
+        mounts = ["--mount", f"type=bind,src={workspace},dst=/workspace"]
+        cache_env: list[str] = []
+        if cache is not None:
+            mounts += ["--mount", f"type=bind,src={cache},dst=/cache"]
+            cache_env = ["--env=BUN_INSTALL_CACHE_DIR=/cache"]
         return subprocess.run(
             [
                 docker,
@@ -42,13 +47,10 @@ def _run_container(
                 "host.docker.internal:127.0.0.1",
                 "--user",
                 f"{os.getuid()}:{os.getgid()}",
-                "--mount",
-                f"type=bind,src={workspace},dst=/workspace",
-                "--mount",
-                f"type=bind,src={cache},dst=/cache",
+                *mounts,
                 "--workdir=/workspace",
                 "--env=HOME=/tmp/home",
-                "--env=BUN_INSTALL_CACHE_DIR=/cache",
+                *cache_env,
                 _BUILD_IMAGE,
                 *command,
             ],
@@ -82,11 +84,11 @@ def _install(docker: str, workspace: Path, cache: Path) -> None:
     _check_step(result, "package.json")
 
 
-def _bundle(docker: str, workspace: Path, cache: Path) -> None:
+def _bundle(docker: str, workspace: Path) -> None:
     result = _run_container(
         docker,
         workspace,
-        cache,
+        None,
         [
             "sh",
             "-c",
@@ -99,7 +101,7 @@ def _bundle(docker: str, workspace: Path, cache: Path) -> None:
     _check_step(result, "src/Page.tsx")
 
 
-def _collect(docker: str, workspace: Path, cache: Path, dependencies: list[str]) -> dict[str, Any]:
+def _collect(docker: str, workspace: Path, dependencies: list[str]) -> dict[str, Any]:
     script = """import {readFileSync} from 'node:fs';
 const names=JSON.parse(process.argv[1]);
 const resolved=Object.fromEntries(names.map(name=>{
@@ -117,7 +119,7 @@ console.log(value);
     result = _run_container(
         docker,
         workspace,
-        cache,
+        None,
         ["bun", "-e", script, json.dumps(dependencies)],
         network="none",
     )
@@ -178,8 +180,8 @@ def build_page(
             json.dumps(package, sort_keys=True), encoding="utf-8"
         )
         _install(docker, workspace, package_cache)
-        _bundle(docker, workspace, package_cache)
-        result = _collect(docker, workspace, package_cache, list(package["dependencies"]))
+        _bundle(docker, workspace)
+        result = _collect(docker, workspace, list(package["dependencies"]))
         artifact = result.pop("artifact")
         digest = hashlib.sha256(artifact).hexdigest()
         destination = root / "bundles" / f"{digest}.js"

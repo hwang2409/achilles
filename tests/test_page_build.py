@@ -55,6 +55,7 @@ def test_build_uses_network_only_for_scriptless_install(monkeypatch, tmp_path: P
     mounts = [calls[0][index + 1] for index, value in enumerate(calls[0]) if value == "--mount"]
     assert len(mounts) == 2
     assert all(str(tmp_path.resolve()) in mount for mount in mounts)
+    assert all("dst=/cache" not in value for command in calls[1:] for value in command)
     assert not any(str(Path.home()) in mount for mount in mounts)
     assert not any("docker.sock" in mount for mount in mounts)
 
