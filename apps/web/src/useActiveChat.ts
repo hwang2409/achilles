@@ -9,7 +9,7 @@ import { draftStore } from "./draftStore";
 import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
-import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
+import { applyApprovalMode, ChatBusyError, ChatControlledError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
@@ -17,7 +17,8 @@ type PageAttachment = { page: Page; serverApprovalMode: string | null; credentia
 // newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
 type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
 // rebind: attached during a live turn without `resume`, so the page MCP binding must be re-sent once zeta is idle.
-type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; continued?: true; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean; cwd: string | null; model: string | null };
+// controlledElsewhere: another tab controls this chat, so this tab reads it live and cannot write to it.
+type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; continued?: true; controlledElsewhere?: true; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean; cwd: string | null; model: string | null };
 type BusyState = PageAttachment & { phase: "busy"; busySessionId: string | null };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | EmptyState | ReadyState | BusyState;
 type BusyChat = { sessionId: string | null; chat: Chat | null; retry: "attach" | "new" };
@@ -152,18 +153,24 @@ export async function attachPage(
     const observer = !canWrite;
 
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
-      let session: { id: string; name: string | null; approvalMode?: string | null; model: string | null; pending: boolean; rebind: boolean; cwd: string | null } = observer
-        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode, model: null, pending: false, rebind: false, cwd: null }
-        : await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token));
+      const unresumed = { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode, model: null, pending: false, rebind: false, cwd: null };
+      // another tab controls this chat: zeta has no handoff, so read it here with no `resume` and no page binding
+      let controlledElsewhere = false;
+      let session: { id: string; name: string | null; approvalMode?: string | null; model: string | null; pending: boolean; rebind: boolean; cwd: string | null } = unresumed;
+      if (!observer) {
+        try { session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token)); }
+        catch (caught) { if (!(caught instanceof ChatControlledError)) throw caught; controlledElsewhere = true; }
+      }
+      const reader = observer || controlledElsewhere;
       requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
-      const continued = continuing && canWrite && owner.current(token);
+      const continued = continuing && !reader && owner.current(token);
       if (continued) lease.store.dispatch({ type: "notification", notification_id: continuationNotification, data: { text: `today · continuing session ${session.id}. zeta keeps the full history; new messages append to it.` } });
       if (!owner.accept(token, lease)) throw new StaleAttachment();
       ownsLease = true;
-      if (observer) {
-        // An observer reads the true per-session mode and model without resuming the session or writing settings.
-        // After the join: zeta answers an observer's session_settings only for a session it joined.
+      if (reader) {
+        // A reader gets the true per-session mode and model without resuming the session or writing settings, or shows
+        // them as unknown. After the join: zeta answers an observer's session_settings only for a session it joined.
         const observed = await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { model?: string; approval_mode?: string | null } | null;
         requireCurrent(owner, token);
         session = { ...session, approvalMode: serverApprovalMode === "ask" ? "ask" : observed?.approval_mode ?? serverApprovalMode, model: observed?.model ?? null };
@@ -173,12 +180,12 @@ export async function attachPage(
       const userTitled = Boolean(storedChat?.titled_by_user);
       // a chat whose first-message record was lost (a failed PATCH, a closed tab) is repaired from its history
       const historyTitle = storedChat && !userTitled && !(storedChat.message_sent && (storedChat.title || storedChat.first_title)) ? cutTitle(firstUserText(lease.store)) : "";
-      if (historyTitle && canWrite) persistFirstMessage(session.id, historyTitle, () => {});
+      if (historyTitle && !reader) persistFirstMessage(session.id, historyTitle, () => {});
       const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || storedChat?.first_title?.trim() || historyTitle || "new chat";
       const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
-      if (canWrite && !userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
+      if (!reader && !userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, ...(continued ? { continued: true } as const : {}), credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind, cwd: session.cwd, model: session.model };
+      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, ...(continued ? { continued: true } as const : {}), credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind, cwd: session.cwd, model: session.model, ...(controlledElsewhere ? { controlledElsewhere: true } as const : {}) };
     };
     const busy = (busySessionId: string | null): BusyState => ({ phase: "busy", page, serverApprovalMode, credential, busySessionId });
 
@@ -967,7 +974,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (lastState === "running") pending.sawRunning = true;
       if (lastState === "idle" && pending.sawRunning) { setSelectedId(pending.sessionId); pendingSelection.current = null; }
     }
-    if (state.phase !== "ready" || !canWrite) return;
+    // the tab that controls the chat records its state; a tab that only reads it does not
+    if (state.phase !== "ready" || !canWrite || state.controlledElsewhere) return;
     const token = owner.current.token();
     void persistChatState(state.sessionId, lastState)
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });

@@ -42,7 +42,7 @@ import "./chat/transcript.css";
 import "./composer/composer.css";
 import "./chat/markdown.css";
 import "./chat/fulcrum-g1.css";
-import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
+import { CHAT_CONTROLLED_REASON, READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 import "./jumpToLatest.css";
 
 export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
@@ -218,6 +218,9 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite, homeAlias, createRoute.path);
   const landing = location.pathname === createRoute.path;
   const ready = active.state.phase === "ready" ? active.state : null;
+  // another tab controls the open chat: writes to this chat go there; tab writes (new chat, settings, page data) stay here
+  const chatCanWrite = canWrite && !ready?.controlledElsewhere;
+  const chatReadOnlyReason = canWrite && ready?.controlledElsewhere ? CHAT_CONTROLLED_REASON : readOnlyReason;
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
   const activePage = ready?.page ?? empty?.page ?? null;
@@ -265,7 +268,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   // after every composer of this commit has attached to its chat's queue owner
   useLayoutEffect(() => chatQueues.settle());
   const send: typeof active.send = (text, intent, track) => {
-    if (!canWrite) return Promise.reject(new Error(readOnlyReason));
+    if (!chatCanWrite) return Promise.reject(new Error(chatReadOnlyReason));
     setFollowRequest((value) => value + 1);
     return trackQueuedSteer(
       (queue) => active.send(text, intent, queue),
@@ -370,12 +373,12 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     return () => removeEventListener("beforeunload", warn);
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
-  const recovery = ready && client ? { id: authErrorId ?? "", client, chat: { id: ready.sessionId, title: ready.title }, sessionId: ready.sessionId, login: accountLogin, canWrite, onNewChat: active.newChat } : null;
-  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} took={tookControl} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
+  const recovery = ready && client ? { id: authErrorId ?? "", client, chat: { id: ready.sessionId, title: ready.title }, sessionId: ready.sessionId, login: accountLogin, canWrite: chatCanWrite, onNewChat: active.newChat } : null;
+  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} took={tookControl} disabledReason={!chatCanWrite ? chatReadOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!chatCanWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!chatCanWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "Ask about this page" : "Message Zeta";
-  const composerProps: ComposerProps = !canWrite ? { state: "read-only", reason: readOnlyReason, onSubmit: send, placeholder: "Read-only" }
+  const composerProps: ComposerProps = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "Read-only" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); }, placeholder);
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
@@ -406,10 +409,10 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   }, [state]);
   const title = ready?.title ?? "New chat";
   const newPageChatReason = !connected ? "new chat is off until zeta is back" : !canWrite ? readOnlyReason
-    : active.creatingChat ? "creating chat…" : empty || (ready && !ready.sent) ? "already in a new chat"
+    : active.creatingChat ? "creating chat…" : ready?.controlledElsewhere ? undefined : empty || (ready && !ready.sent) ? "already in a new chat"
     : state === "running" || state === "approval" || active.busy ? "wait for the running chat to finish" : undefined;
   const createMode: CreateModeOwner | undefined = !landing && activePage ? {
-    available: connected && canWrite && !active.creatingChat && (!active.toggleBlocked || active.toggleRetryable),
+    available: connected && chatCanWrite && !active.creatingChat && (!active.toggleBlocked || active.toggleRetryable),
     enabled: activePage.create_mode, pending: active.toggling, error: active.toggleError,
     async toggle() {
       if (!createMode?.available || createMode.pending) return;
@@ -428,9 +431,9 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const serverForcesAsk = (ready ?? empty)?.serverApprovalMode === "ask";
   const composerModes = activePage && <ComposerModes model={ready?.model ?? defaultModel}
     create={createMode && { on: createMode.enabled, toggle: createMode.available ? createMode.toggle : undefined, busy: createMode.pending ? "saving…" : undefined,
-      reason: !canWrite ? readOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined }}
-    approval={{ on: ready ? activePage.approval_mode === "allow" : active.build.approvalMode === "allow", toggle: canWrite ? active.toggleApprovalMode : undefined,
-      reason: !canWrite ? readOnlyReason : serverForcesAsk ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
+      reason: !chatCanWrite ? chatReadOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined }}
+    approval={{ on: ready ? activePage.approval_mode === "allow" : active.build.approvalMode === "allow", toggle: chatCanWrite ? active.toggleApprovalMode : undefined,
+      reason: !chatCanWrite ? chatReadOnlyReason : serverForcesAsk ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
       busy: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
       error: active.approvalChange?.error }} />;
   const content = <>
@@ -438,6 +441,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
+    {ready?.controlledElsewhere && <div className="create-mode-alert" role="status"><span>this chat is open in another tab. you can read it here.</span><span><button type="button" onClick={() => void active.newChat()} disabled={!canWrite}>new chat</button><button type="button" onClick={active.retryAttachment}>try again</button></span></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
@@ -448,7 +452,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
-        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
+        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={chatCanWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
         <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetClosed ? " page-chat-sheet-closed" : ""}`}>
         {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>Page chat</span>{state !== "idle" && <span className="page-chat-bar-state">{stateLabel}</span>}<span aria-hidden="true">⌃</span></button>}
         {pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
@@ -456,7 +460,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
         {hasBlocks && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${pageChatSheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
           onSelect={active.selectChat} newChat={newPageChatReason ? undefined : active.newChat} newReason={canWrite ? newPageChatReason : undefined}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId} cwd={ready.cwd}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={chatCanWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId} cwd={ready.cwd}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
@@ -464,7 +468,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "auto" });
         }} aria-label="jump to latest" title="jump to latest"><span data-jump-label="full">jump to latest</span><span data-jump-label="compact" aria-hidden="true">↓</span></button></div>}
         </section>
-        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={canWrite && settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} chat={ready ? { id: ready.sessionId, title } : null} canWrite={canWrite} controls={composerModes} />
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={chatCanWrite && settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} chat={ready ? { id: ready.sessionId, title } : null} canWrite={chatCanWrite} controls={composerModes} />
         </div>
         </div>
         </div>
