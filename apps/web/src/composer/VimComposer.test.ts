@@ -5,18 +5,9 @@ import React from "react";
 import { cleanup, render } from "@testing-library/react";
 import { createRunStore } from "@fulcrum/core";
 import { RunProvider } from "@fulcrum/react";
-import { AppShell } from "../AppShell";
-import { useAgentNavAdapter } from "../surface/AgentNavAdapter";
-import { chatsRoute } from "../surface/routes";
 import { VimComposer } from "./VimComposer";
 
 afterEach(cleanup);
-
-function VimTestShell({ children }: { children: React.ReactNode }) {
-  const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
-  const activity = { rows: [], latestReceipt: null, building: 0, needsYou: 0, announcement: null, markAnnounced: () => {}, refresh: () => {}, dismissReceipt: () => {} };
-  return React.createElement(AppShell, { activity, current: chatsRoute, nav, newChat: { available: false, run: () => {} }, connectionStatus: { label: "zeta connected", connected: true }, hasComposer: true }, children);
-}
 
 let chatSeq = 0;
 
@@ -69,72 +60,6 @@ test("typing : in normal mode shows the ex-off note and keeps the draft", async 
   expect(composer.draft()).toBe("hello");
   const hint = composer.container.querySelector('[data-part="composer-hint"]') as HTMLElement;
   expect(hint.textContent).toContain("ex commands are off");
-});
-
-test("app ctrl+b toggles the sidebar from vim normal mode", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response(JSON.stringify({ chats: [], pages: [] }), { status: 200 })) as typeof fetch;
-  try {
-    const store = createRunStore();
-    let container!: HTMLElement;
-    await act(async () => {
-      const result = render(
-        React.createElement(VimTestShell, null, React.createElement(RunProvider, { store }, React.createElement(VimComposer, {
-          state: "idle" as const,
-          onSubmit: async () => {},
-          onDraftChange: () => {},
-          onDraftSubmit: () => {},
-          chatId: `vim-shell-test-${chatSeq++}`,
-          label: "message",
-        }))),
-      );
-      container = result.container;
-      await Promise.resolve();
-    });
-    const content = container.querySelector(".cm-content") as HTMLElement;
-    const sidebar = container.querySelector(".app-shell") as HTMLElement;
-    expect(sidebar.classList.contains("sidebar-collapsed")).toBe(false);
-    await act(async () => {
-      content.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-      content.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true }));
-      await Promise.resolve();
-    });
-    expect(sidebar.classList.contains("sidebar-collapsed")).toBe(true);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("mac ctrl+b stays with vim instead of collapsing the sidebar", async () => {
-  const originalPlatform = navigator.platform;
-  Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response(JSON.stringify({ chats: [], pages: [] }), { status: 200 })) as typeof fetch;
-  try {
-    const store = createRunStore();
-    let container!: HTMLElement;
-    await act(async () => {
-      const result = render(
-        React.createElement(VimTestShell, null, React.createElement(RunProvider, { store }, React.createElement(VimComposer, {
-          state: "idle" as const, onSubmit: async () => {}, onDraftChange: () => {}, onDraftSubmit: () => {},
-          chatId: `vim-mac-shell-test-${chatSeq++}`, label: "message",
-        }))),
-      );
-      container = result.container;
-      await Promise.resolve();
-    });
-    const content = container.querySelector(".cm-content") as HTMLElement;
-    const shell = container.querySelector(".app-shell") as HTMLElement;
-    await act(async () => {
-      content.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-      content.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true }));
-      await Promise.resolve();
-    });
-    expect(shell.classList.contains("sidebar-collapsed")).toBe(false);
-  } finally {
-    globalThis.fetch = originalFetch;
-    Object.defineProperty(navigator, "platform", { configurable: true, value: originalPlatform });
-  }
 });
 
 test("blurred j/k scroll the real transcript scroller, not the .transcript section", async () => {

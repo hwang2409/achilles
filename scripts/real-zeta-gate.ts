@@ -3141,8 +3141,7 @@ with _database() as db:
   const draft = "this draft must remain after zeta disconnects";
   const droppedField = page.getByRole("textbox", { name: "message" });
   await droppedField.fill(draft);
-  await page.keyboard.press(appShortcut("b"));
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-connected-review-1440x900.png"), fullPage: true });
   await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
     const discoveryFailure = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
     await listTokens(ownDiscovery);
@@ -3154,7 +3153,7 @@ with _database() as db:
   if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
   if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-connection-lost-review-1440x900.png"), fullPage: true });
   await restartZeta("zeta reconnect after dropped connection");
   // automatic reconnect can clear the compact banner before the manual retry click.
   // A bounded click makes disappearance during the action equivalent to automatic recovery.
@@ -3167,7 +3166,7 @@ with _database() as db:
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
   await gateWait.playwright(recoveredField, "waitFor", { timeout: 20_000 });
   if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-connection-recovered-review-1440x900.png"), fullPage: true });
 
   if (screenshotDir) {
     await listTokens(ownDiscovery);

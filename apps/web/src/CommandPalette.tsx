@@ -82,7 +82,7 @@ export function CommandPalette({ commands, pages, searchChats, onClose }: { comm
 }
 
 const shortcuts: Array<[string, Array<[string, string]>]> = [
-  ["anywhere", [[modKey("K"), "command palette"], [modKey("⇧O"), "new chat"], [modKey("B"), "collapse sidebar"], [modKey(","), "settings"], [modKey("."), "toggle create mode"]]],
+  ["anywhere", [[modKey("K"), "command palette"], [modKey("⇧O"), "new chat"], [modKey(","), "settings"], [modKey("."), "toggle create mode"]]],
   ["outside text fields", [["/", "search chats and pages"], ["?", "keyboard shortcuts"], ["F2", "rename the open or focused chat"]]],
   ["lists", [["↑ ↓", "move"], ["enter", "open"], ["esc", "close or clear"]]],
   ["vim mode", [["esc", "INSERT to NORMAL, then leave the composer"], ["i, enter", "focus the composer"], ["j / k", "scroll the chat"]]],

@@ -40,9 +40,6 @@
 .create-landing li b { font-size: inherit; }
 .create-landing section ul > li { border-bottom: 1px solid var(--g1-rule); }
 .create-landing .build-meta, .create-made small { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
-@media (min-width: 761px) and (min-height: 501px) {
-  .sidebar-collapsed .create-split button { display: none; }
-}
 @media (max-width: 760px), (max-height: 500px) {
   .create-split { flex: 1; min-height: 44px; }
   .create-split button { min-width: 44px; }
