@@ -1,6 +1,6 @@
 {
   "id": "browser-controller-slot",
-"suite": "focused",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "home",
@@ -51,7 +51,7 @@
       "id": "visible",
       "type": "browser_text",
       "page": "smoke",
-      "text": "smoke"
+      "text": "Eval Smoke"
     }
   ]
 }

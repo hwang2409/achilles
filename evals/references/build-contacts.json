@@ -166,15 +166,6 @@
         }
       }
     ],
-    "form_submits": [
-      {
-        "page_id": "contacts",
-        "tool": "add_contact",
-        "collection": "contacts",
-        "status": 200,
-        "new_records": 1
-      }
-    ],
     "related_page_ids": [
       "contacts"
     ]
@@ -340,14 +331,6 @@
           "email": "ada@example.test",
           "group": "work"
         }
-      }
-    ],
-    "form_submits": [
-      {
-        "page_id": "contacts",
-        "tool": "add_contact",
-        "collection": "contacts",
-        "unsupported": "group"
       }
     ],
     "related_page_ids": [

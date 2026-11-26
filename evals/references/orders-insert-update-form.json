@@ -147,14 +147,6 @@
         }
       }
     ],
-    "form_submits": [
-      {
-        "page_id": "pg-orders",
-        "tool": "add_order",
-        "collection": "orders",
-        "new_records": 1
-      }
-    ],
     "turns": 9
   },
   "bad": {
@@ -285,14 +277,6 @@
             }
           ]
         }
-      }
-    ],
-    "form_submits": [
-      {
-        "page_id": "pg-orders",
-        "tool": "add_order",
-        "collection": "orders",
-        "new_records": 1
       }
     ],
     "turns": 9

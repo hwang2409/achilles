@@ -66,7 +66,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const page = { id: "home", route: "/", title: "home", zeta_session_id: "chat", workspace: "/tmp", create_mode: false, approval_mode: "allow", layout: { blocks: [] } };
+const page = { id: "home", route: "/", title: "home", zeta_session_id: "chat", workspace: "/tmp", create_mode: false, approval_mode: "allow" };
 const chat = { purpose: "chat" as const, session_id: "chat", page_id: "home", title: "chat", last_state: "idle" };
 
 function client(firstResume?: Promise<unknown>) {

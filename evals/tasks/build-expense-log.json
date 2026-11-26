@@ -68,16 +68,6 @@
       "value": "Synthetic Lunch"
     },
     {
-      "id": "form-submit",
-      "type": "form_submit",
-      "page": "expenses",
-      "value": {
-        "string": "Form Expense",
-        "integer": "3",
-        "number": "3.25"
-      }
-    },
-    {
       "id": "page-tools-only",
       "type": "assigned_tools_only",
       "page": "expenses"

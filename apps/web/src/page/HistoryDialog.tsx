@@ -1,19 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { wrapTab } from "../keyboard";
-import { layoutSummary } from "./layoutSummary";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "../writeSurfaces";
 import "../settings-dialog.css";
 
-type LayoutVersion = { version: number; created_at: string; block_types: string[]; summary: string | null; active: boolean; action: string | null; restored_from: number | null };
+type CodeRevision = { version: number; created_at: string; active: boolean; failed: boolean };
 type ToolVersion = { name: string; version: number; created_at: string; active: boolean; restored_from: number | null };
-type Versions = { layout: LayoutVersion[]; tools: ToolVersion[] };
+type Versions = { code: CodeRevision[]; tools: ToolVersion[] };
 
-const actions: Record<string, string> = { create_page: "created", update_layout: "edited", restore_layout: "restored" };
 const when = (stamp: string) => new Date(stamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-// the page's layout and tool versions; restore goes through the same guarded store paths as the agent's restore_version
+// the page's code revisions and tool versions; a tool restore goes through the same guarded store path as the agent's restore_version
 // onChanged refreshes the page behind the dialog: after a restore, and after a 409 or 403 that means the page changed elsewhere
-export function HistoryDialog({ pageId, credential, createMode, opener, onClose, onChanged, canWrite = false, disabledReason = READ_ONLY_REASON }: { pageId: string; credential: string; createMode: boolean; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canWrite?: boolean; disabledReason?: string }) {
+export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, canWrite = false, disabledReason = READ_ONLY_REASON }: { pageId: string; credential: string; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canWrite?: boolean; disabledReason?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
@@ -61,7 +59,6 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
       else {
         const body = await response.json().catch(() => ({})) as { error?: { hint?: string } };
         setNote({ text: body.error?.hint ?? `could not restore (${response.status})`, error: true });
-        // a 403 means create mode went off in another tab; the refreshed page disables the layout restores
         if (response.status === 403) onChanged();
       }
     } catch { setNote({ text: "could not restore: achilles is not reachable", error: true }); }
@@ -74,11 +71,10 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
     }
   };
 
-  const activeLayout = versions?.layout.find((row) => row.active)?.version;
   const toolNames = [...new Set(versions?.tools.map((row) => row.name))];
-  const button = (key: string, row: { active: boolean }, blocked = false) => row.active
+  const button = (key: string, row: { active: boolean }) => row.active
     ? <span className="history-current">current</span>
-    : <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={busy || blocked || !canWrite} title={!canWrite ? disabledReason : undefined} aria-describedby={blocked ? "history-layout-hint" : undefined} onClick={() => setPending(key)}>restore</button>;
+    : <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={busy || !canWrite} title={!canWrite ? disabledReason : undefined} onClick={() => setPending(key)}>restore</button>;
   // the row in its confirm state; only "confirm" sends the restore
   const confirmRow = (key: string, version: number, kind: string, run: () => void) => <li key={version} data-row={key} className="history-confirm">
     <span id={`${key}-ask`}>restore version {version}? the current {kind} stays in history</span>
@@ -99,20 +95,15 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
         <p ref={noteRef} tabIndex={-1} className={note?.error ? "history-note history-error" : "history-note"} role={note?.error ? "alert" : "status"}>{note?.text ?? (versions ? "" : "loading history…")}</p>
         {!canWrite && <p className="history-hint" role="note">{disabledReason ?? "this tab is read-only; take control to make changes"}</p>}
         {versions && <>
-          <section className="history-group" aria-labelledby="history-layout">
-            <h3 id="history-layout">layout</h3>
-            {!createMode && versions.layout.length > 1 && <p id="history-layout-hint" className="history-hint">turn on create mode to restore a layout.</p>}
-            {versions.layout.length === 0 ? <p className="history-hint">this page has no saved layout yet.</p>
-              : <ol>{versions.layout.map((row) => {
-                const key = `layout-${row.version}`;
-                if (pending === key) return confirmRow(key, row.version, "layout", () => void restore("layout", `/api/pages/${pageId}/layout/restore`, row.version, activeLayout!));
-                return <li key={row.version} data-row={key}>
-                  <span className="history-version">v{row.version}</span>
-                  <span className="history-detail">{row.restored_from ? `restored from v${row.restored_from} · ` : row.action ? `${actions[row.action] ?? row.action} · ` : ""}{layoutSummary(row.block_types.length, row.summary)}</span>
-                  <time dateTime={row.created_at}>{when(row.created_at)}</time>
-                  {button(key, row, !createMode)}
-                </li>;
-              })}</ol>}
+          <section className="history-group" aria-labelledby="history-code">
+            <h3 id="history-code">page</h3>
+            {versions.code.length === 0 ? <p className="history-hint">this page has no code yet.</p>
+              : <ol>{versions.code.map((row) => <li key={row.version} data-row={`code-${row.version}`}>
+                <span className="history-version">v{row.version}</span>
+                <span className="history-detail">{row.failed ? "build failed" : ""}</span>
+                <time dateTime={row.created_at}>{when(row.created_at)}</time>
+                {row.active && <span className="history-current">current</span>}
+              </li>)}</ol>}
           </section>
           {toolNames.map((name) => {
             const rows = versions.tools.filter((row) => row.name === name);

@@ -29,5 +29,5 @@ export function PageFrame({ pageId, credential, revision, onRuntimeError }: Prop
     addEventListener("message", onMessage);
     return () => removeEventListener("message", onMessage);
   }, [credential, pageId, revision, onRuntimeError]);
-  return <iframe ref={frame} title="custom page" sandbox="allow-scripts allow-forms allow-downloads" src={`/api/pages/${encodeURIComponent(pageId)}/frame`} style={{ width: "100%", minHeight: "560px", border: 0 }} />;
+  return <iframe ref={frame} title="custom page" sandbox="allow-scripts allow-forms allow-downloads" src={`/api/pages/${encodeURIComponent(pageId)}/frame`} style={{ width: "100%", height: "100%", minHeight: "560px", border: 0 }} />;
 }

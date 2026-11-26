@@ -156,15 +156,6 @@
           ]
         }
       }
-    ],
-    "form_submits": [
-      {
-        "page_id": "reading",
-        "tool": "add_book",
-        "collection": "books",
-        "status": 200,
-        "new_records": 1
-      }
     ]
   },
   "bad": {
@@ -323,14 +314,6 @@
             }
           ]
         }
-      }
-    ],
-    "form_submits": [
-      {
-        "page_id": "reading",
-        "tool": "add_book",
-        "collection": "books",
-        "unsupported": "tags"
       }
     ]
   }

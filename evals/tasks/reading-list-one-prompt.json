@@ -102,38 +102,9 @@
       "value": "Synthetic Book"
     },
     {
-      "id": "visible-book",
-      "type": "browser_text",
-      "page": "reading",
-      "text": "Synthetic Book"
-    },
-    {
-      "id": "visible-status",
-      "type": "browser_text",
-      "page": "reading",
-      "text": "read",
-      "synonyms": [
-        "finished",
-        "done",
-        "completed",
-        "have_read"
-      ]
-    },
-    {
       "id": "same-page",
       "type": "same_page",
       "page": "reading"
-    },
-    {
-      "id": "form-submit",
-      "type": "form_submit",
-      "page": "reading",
-      "required": false,
-      "value": {
-        "string": "Form Book",
-        "integer": "1",
-        "number": "1"
-      }
     }
   ],
   "goal_capabilities": [
