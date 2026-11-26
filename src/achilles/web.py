@@ -13,7 +13,7 @@ import anyio
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
@@ -215,9 +215,9 @@ def create_app() -> Starlette:
 
         html = (
             "<!doctype html><meta charset='utf-8'><div id='root'></div>"
-            "<script>addEventListener('error',e=>parent.postMessage({runtimeError:String(e.message)},'*'));"
-            "addEventListener('unhandledrejection',e=>parent.postMessage({runtimeError:String(e.reason)},'*'));</script>"
-            f"<script type='module' src='/api/pages/{row['id']}/"
+            f"<script crossorigin='anonymous' src='/api/pages/{row['id']}/"
+            f"frame-bootstrap.js?revision={code['version']}'></script>"
+            f"<script crossorigin='anonymous' type='module' src='/api/pages/{row['id']}/"
             f"artifact/{code['digest']}'></script>"
         )
         return HTMLResponse(
@@ -225,8 +225,39 @@ def create_app() -> Starlette:
             headers={
                 "content-security-policy": (
                     "default-src 'self' https:; script-src 'self' https:; "
-                    "connect-src https: http:; frame-ancestors 'self'"
+                    "connect-src https: http:; frame-ancestors 'self'; "
+                    "sandbox allow-scripts allow-forms allow-downloads"
                 ),
+                "cache-control": "no-store",
+            },
+        )
+
+    async def frame_bootstrap(request):
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
+        code = await anyio.to_thread.run_sync(store.page_code, row["id"]) if row else None
+        if not code or request.query_params.get("revision") != str(code["version"]):
+            raise HTTPException(404, "page revision not found")
+        identity = json.dumps({"pageId": row["id"], "revision": code["version"]})
+        script = f"""const identity={identity};
+const pending=new Map();let request=0;
+function call(method,collection,document){{return new Promise((resolve,reject)=>{{
+ const requestId=String(++request);pending.set(requestId,{{resolve,reject}});
+ parent.postMessage({{...identity,requestId,method,collection,document}},'*');
+}})}}
+window.achilles={{records:{{list:(collection)=>call('list',collection),insert:(collection,document)=>call('insert',collection,document)}}}};
+addEventListener('message',event=>{{if(event.source!==parent||event.origin===\"null\")return;
+ const item=pending.get(event.data?.requestId);if(!item)return;pending.delete(event.data.requestId);
+ event.data.ok?item.resolve(event.data.result):item.reject(event.data.result);
+}});
+addEventListener('error',event=>parent.postMessage({{...identity,runtimeError:String(event.message)}},'*'));
+addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,runtimeError:String(event.reason)}},'*'));
+"""
+        return Response(
+            script,
+            media_type="text/javascript",
+            headers={
+                "access-control-allow-origin": "*",
+                "cross-origin-resource-policy": "cross-origin",
                 "cache-control": "no-store",
             },
         )
@@ -239,7 +270,12 @@ def create_app() -> Starlette:
         if not code or code["digest"] != request.path_params["digest"]:
             raise HTTPException(404, "artifact not found")
         return FileResponse(
-            store.root / "bundles" / f"{code['digest']}.js", media_type="text/javascript"
+            store.root / "bundles" / f"{code['digest']}.js",
+            media_type="text/javascript",
+            headers={
+                "access-control-allow-origin": "*",
+                "cross-origin-resource-policy": "cross-origin",
+            },
         )
 
     async def runtime_error(request):
@@ -441,15 +477,13 @@ def create_app() -> Starlette:
 
     async def records(request):
         page_id = request.path_params["id"]
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(401, "missing bearer")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
         if request.method == "POST":
-            token = request.headers.get("authorization", "")
-            principal = (
-                await anyio.to_thread.run_sync(store.authenticate, token[7:])
-                if token.startswith("Bearer ")
-                else None
-            )
-            if principal is None or principal["id"] != page_id:
-                raise HTTPException(403, "forbidden")
             body = await request.json()
             if not isinstance(body, dict):
                 raise HTTPException(400, "record must be an object")
@@ -458,12 +492,6 @@ def create_app() -> Starlette:
                     store.insert_record, page_id, request.path_params["collection"], body
                 )
             )
-        token = request.headers.get("authorization", "")
-        if not token.startswith("Bearer "):
-            raise HTTPException(401, "missing bearer")
-        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
-        if principal is None or principal["id"] != page_id:
-            raise HTTPException(403, "forbidden")
         collection = request.path_params["collection"]
         field = request.query_params.get("field")
         raw_equals = request.query_params.get("equals")
@@ -589,6 +617,7 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/{id}/runtime-error", runtime_error, methods=["POST"]),
             Route("/api/pages/{id}/frame", page_frame),
+            Route("/api/pages/{id}/frame-bootstrap.js", frame_bootstrap),
             Route("/api/pages/{id}/artifact/{digest}", page_artifact),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
             Route("/api/pages/{id}/tools", page_tools),

@@ -1885,3 +1885,23 @@ def test_restore_version_guards_over_public_interfaces(creation_client, monkeypa
     assert state(root) == before
     assert store.layout("home") == LAYOUT_V3
     assert _active_tool_version(store) == 2
+
+
+def test_write_page_dispatch_is_create_mode_gated(creation_client):
+    root, store, client, headers = creation_client
+    created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    page_headers = initialize(client, store.ensure_credential(page_id), 3)
+    before = state(root)
+
+    refused = mcp(
+        client,
+        page_headers,
+        4,
+        "tools/call",
+        {"name": "write_page", "arguments": {"source": "export default 1", "dependencies": {}}},
+    )
+
+    assert refused["isError"] is True
+    assert refused["content"][0]["text"] == "forbidden: create mode is off"
+    assert state(root) == before

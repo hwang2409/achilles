@@ -626,8 +626,10 @@ class PageStore:
         );
         CREATE TABLE IF NOT EXISTS code_revision (
           page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
-          source TEXT NOT NULL, dependencies TEXT NOT NULL, digest TEXT, artifact_size INTEGER,
-          diagnostics TEXT, runtime_error TEXT, created_at TEXT NOT NULL,
+          source TEXT NOT NULL, dependencies TEXT NOT NULL,
+          resolved_dependencies TEXT NOT NULL DEFAULT '{}', lockfile TEXT NOT NULL DEFAULT '',
+          digest TEXT, artifact_size INTEGER, diagnostics TEXT, runtime_error TEXT,
+          created_at TEXT NOT NULL,
           PRIMARY KEY(page_id, version)
         );
         CREATE TABLE IF NOT EXISTS layout_version (
@@ -674,6 +676,8 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
         ensure_column(db, "page", "active_code_revision", "INTEGER")
+        ensure_column(db, "code_revision", "resolved_dependencies", "TEXT NOT NULL DEFAULT '{}'")
+        ensure_column(db, "code_revision", "lockfile", "TEXT NOT NULL DEFAULT ''")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(db, "chat", "purpose", "TEXT NOT NULL DEFAULT 'chat'")
         ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
@@ -1669,32 +1673,51 @@ class PageStore:
         if expected_revision is not None and expected_revision != current:
             raise ValidationError("/expected_revision", "current code revision", "conflict")
         stamp = now()
+        error_code = "compile_error"
         try:
             result = build_page(self.root, page_id, source, dependencies)
             diagnostics = None
             digest = result["digest"]
             size = result["size"]
         except PageBuildError as exc:
-            result = {"dependencies": dependencies}
+            result = {
+                "dependencies": dependencies,
+                "resolved_dependencies": {},
+                "lockfile": "",
+            }
             diagnostics = exc.diagnostics
+            error_code = exc.code
             digest = None
             size = None
         with self.transaction() as db:
+            active = db.execute(
+                "SELECT COALESCE(active_code_revision, 0) FROM page WHERE id=?", (page_id,)
+            ).fetchone()[0]
+            stale = active != current
+            if stale:
+                diagnostics = (
+                    f"build started at revision {current}, but revision {active} is now active"
+                )
+                error_code = "conflict"
+                digest = None
+                size = None
             version = db.execute(
                 "SELECT COALESCE(MAX(version), 0) + 1 FROM code_revision WHERE page_id=?",
                 (page_id,),
             ).fetchone()[0]
             db.execute(
                 (
-                    "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
-                    "artifact_size,diagnostics,"
-                    "runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)"
+                    "INSERT INTO code_revision(page_id,version,source,dependencies,"
+                    "resolved_dependencies,lockfile,digest,artifact_size,diagnostics,"
+                    "runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
                 ),
                 (
                     page_id,
                     version,
                     source,
                     json.dumps(result.get("dependencies", dependencies), sort_keys=True),
+                    json.dumps(result.get("resolved_dependencies", {}), sort_keys=True),
+                    result.get("lockfile", ""),
                     digest,
                     size,
                     diagnostics,
@@ -1713,13 +1736,15 @@ class PageStore:
                 (page_id, "write_page", digest, stamp, "page"),
             )
         if diagnostics:
-            raise ValidationError("/source", "valid TypeScript", "compile_error", diagnostics)
+            raise ValidationError("/source", "a current valid build", error_code, diagnostics)
         return {
             "page_id": page_id,
             "revision": version,
             "digest": digest,
             "size": size,
             "dependencies": result["dependencies"],
+            "resolved_dependencies": result["resolved_dependencies"],
+            "lockfile": result["lockfile"],
         }
 
     def page_code(self, page_id: str) -> dict[str, Any] | None:
@@ -1743,15 +1768,19 @@ class PageStore:
             "active_revision": next((r["version"] for r in rows if r["digest"]), None),
             "revisions": [
                 {
-                    key: r[key]
-                    for key in (
-                        "version",
-                        "digest",
-                        "artifact_size",
-                        "diagnostics",
-                        "runtime_error",
-                        "created_at",
-                    )
+                    **{
+                        key: r[key]
+                        for key in (
+                            "version",
+                            "digest",
+                            "artifact_size",
+                            "diagnostics",
+                            "runtime_error",
+                            "lockfile",
+                            "created_at",
+                        )
+                    },
+                    "resolved_dependencies": json.loads(r["resolved_dependencies"]),
                 }
                 for r in rows
             ],

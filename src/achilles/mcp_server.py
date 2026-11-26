@@ -464,6 +464,11 @@ def build_mcp(store: PageStore):
             )
         args = params.arguments or {}
         if params.name == "write_page":
+            if not page["create_mode"]:
+                return CallToolResult(
+                    isError=True,
+                    content=[TextContent(type="text", text="forbidden: create mode is off")],
+                )
             return await write_page(page, args)
         if params.name == "inspect_page":
             return await inspect_page(page, args)
