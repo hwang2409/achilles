@@ -1149,7 +1149,8 @@ test.each([
 test.each([
   { name: "a new turn starts: it goes out once as a new message", reason: "turn_end", send: () => ({ accepted: true }), sends: 1 },
   { name: "dropped as disconnect while this connection answers: it goes out once as a new message", reason: "disconnect", send: () => ({ accepted: true }), sends: 1 },
-  { name: "another turn already started: it stays unsent with the true reason", reason: "turn_end", send: () => { throw TURN_RUNNING_ERROR(); }, sends: 1, error: "the turn ended before zeta read it." },
+  { name: "another turn already started: it stays unsent with the true reason", reason: "disconnect", send: () => { throw TURN_RUNNING_ERROR(); }, sends: 1, error: "the turn ended before zeta read it." },
+  { name: "a different refusal stays unsent with zeta's reason", reason: "disconnect", send: () => { throw Object.assign(new Error("host binding required"), { code: -32003 }); }, sends: 1, error: "host binding required", bubbleReason: "disconnect" },
   { name: "a stop dropped it: never resent", reason: "abort", send: () => ({ accepted: true }), sends: 0, error: "zeta dropped this message before reading it." },
 ])("a steer its turn ended without reading: $name", async (row) => {
   setGlobals({
@@ -1212,6 +1213,6 @@ test.each([
   expect(failure === null ? null : String((failure as Error).message)).toBe(row.error ?? null);
   // one bubble: the delivered resend, or the dropped steer with the reason the composer row gives
   const users = store.getState().outline.map(({ id }) => store.getItem(id)).filter((item) => item?.type === "user");
-  expect(users.map((item) => item?.type === "user" && item.event.type === "user_message" ? `${item.event.mode}:${item.event.delivery_status ?? "ok"}:${item.event.delivery_reason ?? ""}` : "")).toEqual([row.sends && !row.error ? "send:ok:" : `steer:dropped:${row.error === TURN_ENDED ? "turn_end" : row.reason}`]);
+  expect(users.map((item) => item?.type === "user" && item.event.type === "user_message" ? `${item.event.mode}:${item.event.delivery_status ?? "ok"}:${item.event.delivery_reason ?? ""}` : "")).toEqual([row.sends && !row.error ? "send:ok:" : `steer:dropped:${row.bubbleReason ?? (row.error === TURN_ENDED ? "turn_end" : row.reason)}`]);
 });
 const TURN_ENDED = "the turn ended before zeta read it.";

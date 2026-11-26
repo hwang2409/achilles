@@ -341,6 +341,7 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
 export class DroppedSteerDeliveryError extends Error {}
 
 export const TURN_ENDED_UNREAD = "the turn ended before zeta read it.";
+class TurnEndedUnreadError extends SendRefused {}
 // drops that mean "the turn ended before zeta read it": `turn_end`, and `disconnect` while this connection still answers
 // (zeta found no controller to start the next turn). A stop, a clear, a failed turn, or a restart is never resent.
 const UNREAD_DROPS = new Set(["turn_end", "disconnect"]);
@@ -392,7 +393,9 @@ async function sendUnreadSteer(client: Pick<ZetaClient, "request">, sessionId: s
     accepted(await client.request("send", { session_id: sessionId, text, delivery_id: deliveryId }, { intent }));
     return "send";
   } catch (error) {
-    throw classify(error) === "rethrow" ? new SendRefused(TURN_ENDED_UNREAD, { cause: error }) : new Error(MAYBE_SENT);
+    if (classify(error) !== "rethrow") throw new Error(MAYBE_SENT);
+    if (errorCode(error) === TURN_RUNNING) throw new TurnEndedUnreadError(TURN_ENDED_UNREAD, { cause: error });
+    throw refusal(error);
   }
 }
 
@@ -837,7 +840,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     } catch (error) {
       if (pendingSelection.current?.sessionId === target.sessionId) pendingSelection.current = null;
       // the bubble says why too: zeta may have named the drop `disconnect` although this connection still answers
-      if (error instanceof SendRefused && error.message === TURN_ENDED_UNREAD) target.lease.store.dispatch({ type: "delivery_status", delivery_id: deliveryId, method: "steer", status: "dropped", content: "", reason: "turn_end" });
+      if (error instanceof TurnEndedUnreadError) target.lease.store.dispatch({ type: "delivery_status", delivery_id: deliveryId, method: "steer", status: "dropped", content: "", reason: "turn_end" });
       throw error;
     }
     // not gated on the owner token: a chat switch mid-send must still record the send
