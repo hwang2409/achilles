@@ -9,7 +9,7 @@ import { draftStore } from "./draftStore";
 import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
-import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
+import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionControlledError, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
@@ -92,6 +92,8 @@ export async function persistChatState(sessionId: string, lastState: string, fet
 function attachmentError(caught: unknown, context: "loading" | "creation" = "loading"): string {
   const message = caught instanceof Error ? caught.message : String(caught);
   if (message === "Failed to fetch" || message === "Load failed") return `achilles is unavailable while ${context === "creation" ? "creating the chat" : "loading the chat"}.`;
+  // only an observer (zeta was full) reads a chat without resuming it, and zeta refuses that when no tab has the chat open
+  if (message.includes("server has no active session")) return "this chat is not open in any tab. take control to open it here.";
   return message.includes("MCP server is not a trusted global server: achilles")
     ? "achilles is not trusted by zeta. add it to $ZETA_HOME/mcp.json, then restart zeta serve."
     : message;
@@ -550,6 +552,15 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     }
     return true;
   }, []);
+  // the /#new-chat path: this tab opens the page fresh and creates a chat once the page loads
+  const openFresh = useCallback((route: string, replace: boolean) => {
+    createAfterLoad.current = true;
+    owner.current.clear();
+    if (replace) history.replaceState({}, "", route + newChatIntent); else history.pushState({}, "", route + newChatIntent);
+    applyActive(owner.current.token(), { kind: "state", update: { phase: "loading" } });
+    setSelectedId(null);
+    setRouteRefresh((value) => value + 1);
+  }, [applyActive]);
 
   const showBusy = useCallback(async (token: number, sessionId: string | null, retry: BusyChat["retry"]) => {
     const chat = sessionId ? await findChat(sessionId).catch(() => null) : null;
@@ -617,13 +628,16 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       } else if (caught instanceof MissingChatError && owner.current.current(token)) {
         missingCreation.current = { input: caught.input, route: caught.route };
         applyActive(token, { kind: "state", update: { phase: "missing" } });
+      } else if (caught instanceof SessionControlledError && canWrite && !selectedId && !selectedFromUrl() && owner.current.current(token)) {
+        // a default attach met the page's newest chat open in another tab: this tab gets its own new chat instead
+        openFresh(location.pathname, true);
       } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) applyActive(token, { kind: "state", update: { phase: "error", error: attachmentError(caught) } });
     }).finally(() => {
       clock.clearTimeout(slowTimer);
       if (owner.current.current(token)) setAttachSlow(false);
     });
     return () => { clock.clearTimeout(slowTimer); owner.current.clear(token); };
-  }, [applyActive, applyPendingCreateMode, canWrite, client, clock, connected, createPath, homeAlias, publishReady, routeRefresh, selectedId, showBusy]);
+  }, [applyActive, applyPendingCreateMode, canWrite, client, clock, connected, createPath, homeAlias, openFresh, publishReady, routeRefresh, selectedId, showBusy]);
 
   useEffect(() => {
     const pop = () => { owner.current.clear(); applyActive(owner.current.token(), { kind: "state", update: { phase: "loading" } }); setSelectedId(selectedFromUrl()); setRouteRefresh((value) => value + 1); };
@@ -657,20 +671,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
 
   const newChat = useCallback(() => startChat("new", async () => {
     if (!canWrite || !client) return;
-    if (state.phase === "error" && state.error === "page not found") {
-      createAfterLoad.current = true;
-      owner.current.clear();
-      history.pushState({}, "", "/");
-      applyActive(owner.current.token(), { kind: "state", update: { phase: "loading" } });
-      setSelectedId(null);
-      setRouteRefresh((value) => value + 1);
-      return;
-    }
     setBusy(null);
     const context = state.phase === "ready" || state.phase === "empty" || state.phase === "busy"
       ? { route: state.page.route, pageId: state.page.id }
       : state.phase === "missing" && missingCreation.current ? { route: missingCreation.current.route, pageId: missingCreation.current.input.pageId } : null;
-    if (!context) return;
+    // no page to create in (an error, or still loading): open the page fresh, so "new chat" never does nothing
+    if (!context) return openFresh(state.phase === "error" && state.error === "page not found" ? "/" : location.pathname, false);
     const key = context.route === "/" ? "home" : context.route.slice(1);
     const token = owner.current.begin(`new:${key}`, true);
     const readAt = titleClock.current;
@@ -693,7 +699,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     } finally {
       focusClaim.release();
     }
-  }), [applyActive, applyPendingCreateMode, canWrite, client, publishReady, showBusy, startChat, state]);
+  }), [applyActive, applyPendingCreateMode, canWrite, client, openFresh, publishReady, showBusy, startChat, state]);
 
   // the unsent-rows notice: show the page's new-chat box with its rows; the chat is made only when one of them is sent
   const openNewChat = useCallback(() => {

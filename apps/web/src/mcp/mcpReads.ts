@@ -1,5 +1,5 @@
 import type { ZetaClient } from "@fulcrum/zeta";
-import { supportsFeature, supportsRequest } from "../zeta";
+import { observerRefused, supportsFeature, supportsRequest } from "../zeta";
 
 const METHOD = "mcp_server_list";
 const REDACTED = "<redacted>";
@@ -82,8 +82,9 @@ export function projectMcpList(value: unknown, scope: McpScope) {
   return projectMcpSnapshot(value, scope)?.rows ?? null;
 }
 
-export function mcpReadFailure(error: unknown) {
+export function mcpReadFailure(error: unknown, client?: ZetaClient) {
   const code = record(error)?.code;
+  if (observerRefused(client, error)) return { method: METHOD, code, reason: "observer" } as const;
   if (code === -32005) return { method: METHOD, code, reason: "state_unavailable" } as const;
   if (code === -32004) return { method: METHOD, code, reason: "operation_busy" } as const;
   if (code === -32601) return { method: METHOD, code, reason: "method_unavailable" } as const;
@@ -99,7 +100,7 @@ export async function readMcpScope(client: ZetaClient, scope: McpScope, signal?:
     const result = projectMcpSnapshot(await client.request(METHOD, { scope }, { signal, timeoutMs: 5_000 }), scope);
     return result ? { ...result, at: Date.now() } : { failure: { method: METHOD, reason: "invalid_response" } };
   } catch (error: unknown) {
-    return { failure: mcpReadFailure(error) };
+    return { failure: mcpReadFailure(error, client) };
   }
 }
 

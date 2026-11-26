@@ -1181,3 +1181,52 @@ test("a default attach names its chat in the url, so a reload or reconnect reope
   await flushUntil(() => resumed.length === 2 && active.state.phase === "ready");
   expect(resumed.at(-1), "the reconnect resumed the page's newest chat, not the url's").toBe("chat");
 });
+
+test("a new tab whose default chat is open in another tab gets its own new chat, not zeta's refusal", async () => {
+  const pushed: string[] = [];
+  const location = { pathname: "/", search: "", hash: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
+  const go = (path: string) => { const url = new URL(path, location.href); Object.assign(location, { pathname: url.pathname, search: url.search, hash: url.hash, href: url.href }); };
+  let created = false;
+  setGlobals({
+    localStorage: new MemoryStorage(), location,
+    history: { state: null, pushState(_state: unknown, _title: string, path: string) { pushed.push(path); go(path); }, replaceState(_state: unknown, _title: string, path: string) { go(path); } },
+    addEventListener() {}, removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: created ? [{ ...chat, session_id: "fresh" }, chat] : [chat], next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const resumed: string[] = [];
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq"],
+    request: async (method: string, params?: { session_id?: string }) => {
+      if (method === "resume") {
+        resumed.push(params?.session_id ?? "");
+        if (params?.session_id === "chat") throw Object.assign(new Error("session is controlled by another client"), { code: -32014, data: { code: "session_controlled" } });
+        return { session: { name: null } };
+      }
+      if (method === "new_session") { created = true; return { session: { session_id: "fresh" } }; }
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
+      if (method === "status") return { session: { session_id: "fresh" }, state: "idle" };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  for (let flush = 0; flush < 40 && !(active.state.phase === "ready" || active.state.phase === "error"); flush += 1) await act(async () => {});
+  expect(active.state.phase === "error" ? active.state.error : active.state.phase, "the tab showed zeta's refusal instead of opening a new chat").toBe("ready");
+  expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
+  expect(resumed[0]).toBe("chat");
+  expect(location.search).toBe("?chat=fresh");
+});

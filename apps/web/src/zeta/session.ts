@@ -55,6 +55,10 @@ export function creationApprovalMode(serverMode: string | null | undefined, auto
 }
 
 export class SessionNotFoundError extends Error {}
+/** zeta refuses `resume` (-32014, `data.code: "session_controlled"`) while another client holds the chat. */
+export class SessionControlledError extends Error {
+  constructor() { super("this chat is open in another tab."); }
+}
 
 export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null, current: () => boolean = () => true) {
   let name: string | null = null;
@@ -75,6 +79,7 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
       const reason = (caught as { data?: { code?: string } }).data?.code;
       if (reason === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
       if (reason === "session_owned") throw new Error(sessionOwned);
+      if (reason === "session_controlled") throw new SessionControlledError();
       if (isResidentLimit(caught)) throw new TooManyChatsError();
       if ((caught as { code?: unknown }).code !== -32004) throw caught;
       const running = await runningSession(client);

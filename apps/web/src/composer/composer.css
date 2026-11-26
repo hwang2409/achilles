@@ -75,6 +75,8 @@
   border-color: color-mix(in srgb, var(--fulcrum-accent) 30%, transparent);
   background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); color: var(--fulcrum-accent);
 }
+/* a switch held still (a read-only tab, or a reason) looks held, not live */
+[data-part="composer"] [data-part="composer-mode"][aria-disabled="true"]:not([aria-busy="true"]) { opacity: .5; cursor: not-allowed; }
 [data-part="composer-mode-dot"] { flex: none; width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1px currentColor; }
 [aria-checked="true"] > [data-part="composer-mode-dot"] { background: currentColor; }
 [data-part="composer-mode-note"] { color: var(--g1-muted); font-size: 12px; white-space: nowrap; }

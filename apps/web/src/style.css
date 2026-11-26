@@ -71,14 +71,15 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .observer-action { justify-items: end; flex: none; }
 #take-control-feedback { flex-basis: 100%; }
 #take-control-feedback:empty { position: absolute; }
-.observer-banner button { flex: 0 0 auto; min-height: 40px; padding: 0 12px; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }
+.observer-banner button { flex: 0 0 auto; min-height: 40px; padding: 0 12px; }
 .observer-banner button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .approval-control { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .approval-control button { min-height: 40px; padding: 0 12px; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }
 .approval-control button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 .approval-control span { color: var(--fulcrum-muted); text-wrap: pretty; }
-@media (max-width: 600px) { .observer-banner { align-items: flex-start; flex-direction: column; flex-wrap: nowrap; gap: 8px; } .observer-banner > div:first-child, #take-control-feedback { flex: none; } .observer-action { width: 100%; justify-items: start; } .observer-banner button { min-height: 44px; width: 100%; } }
+/* narrow: all text first, then the button, so the banner stays compact */
+@media (max-width: 600px) { .observer-banner { align-items: flex-start; flex-direction: column; flex-wrap: nowrap; gap: 6px; padding-block: 8px; } .observer-banner > div:first-child, #take-control-feedback { flex: none; } #take-control-feedback { order: 1; } .observer-action { order: 2; justify-items: start; } .observer-banner button { min-height: 44px; } }
 .sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, var(--g1-type-chat)) / var(--g1-leading-chat) var(--achilles-ui-font, var(--g1-font-ui)); }
 .page-view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 @media (width >= 1280px) {

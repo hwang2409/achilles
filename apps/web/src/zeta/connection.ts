@@ -60,7 +60,8 @@ type RoleState = { role: ZetaRole; reason: string | null };
 type RoleEvent = "controller_granted" | "observer_granted" | "takeover_refused" | "takeover_failed" | "controller_closed" | "retry";
 
 // zeta sends observers no "slot free" signal, so the refusal is a past result with its time: true for as long as it shows.
-export const refusedReason = (at: number) => `at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()} zeta had no free control slot: too many tabs control it, or another app does. close one, then try again.`;
+// the banner above already says why zeta is full, so this line does not repeat it.
+export const refusedReason = (at: number) => `zeta is still full at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}. close another zeta tab, then try again.`;
 
 /** The reason when a takeover failed for any cause other than an occupied controller slot. */
 export const TAKEOVER_FAILED = "could not take control. try again.";
@@ -117,6 +118,10 @@ export type Connection = {
 };
 
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
+
+/** A read zeta refused (-32003) because this tab fell back to observer: zeta was full when the tab connected. */
+export const observerRefused = (client: unknown, error: unknown) => (client as { authority?: unknown } | null)?.authority === "observer" && (error as { code?: unknown } | null)?.code === -32003;
+export const OBSERVER_READ_REASON = "zeta is full, so this tab cannot read this. close another zeta tab, then take control.";
 
 export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", "multi_controller", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "session_history_backward", "list_sessions_paging", "projects", "projects-memory-v2", "project_writes_v1", "state_read_v1", "agent_run_catalog_v1", "child_runs", "child_run_control_v1", "child_run_history", "child_run_events", "home_settings_v1", "mcp_management_v1", ACCOUNT_LIST_IDLE_FEATURE];
 

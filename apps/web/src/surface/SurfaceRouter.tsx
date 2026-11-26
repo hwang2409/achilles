@@ -87,7 +87,7 @@ export function SurfaceRouter() {
       continuing.current = false;
     }
   };
-  const observerBanner = observer && route?.id !== "accounts" && <ObserverBanner connection={connection} />;
+  const observerBanner = observer && <ObserverBanner connection={connection} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!catalog) {
     return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
@@ -116,7 +116,7 @@ export function SurfaceRouter() {
   } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
-  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}
+  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={observerBanner}
     sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow(), continueSession } : undefined}>{content}{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
 }
 
@@ -165,9 +165,9 @@ function ObserverBanner({ connection }: { connection: Connection }) {
   return <aside className="observer-banner" aria-label="observer mode">
     <div>
       <strong>zeta is full</strong>
-      <span id="tab-authority-description">this tab is read-only and stays live: too many tabs control zeta, or another app does.</span>
+      <span id="tab-authority-description">this tab is read-only and shows updates: too many tabs control zeta, or another app does. close another zeta tab, then take control.</span>
     </div>
-    <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
+    <div className="observer-action"><button type="button" className="primary" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
     {/* its own full-width row under the text and the button, so a long refusal does not squeeze the text */}
     <span id="take-control-feedback" role="status">{feedback}</span>
   </aside>;

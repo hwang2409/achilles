@@ -3388,7 +3388,7 @@ with _database() as db:
   await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
   await recordRenderedWriteSurfaces(observerPage);
   const observerBannerText = await observerBanner.innerText();
-  if (!observerBannerText.includes("too many tabs control zeta") || !observerBannerText.includes("stays live")) throw new Error(`observer banner did not explain the cap: ${observerBannerText}`);
+  if (!observerBannerText.includes("too many tabs control zeta") || !observerBannerText.includes("shows updates")) throw new Error(`observer banner did not explain the cap: ${observerBannerText}`);
   const fifthHello = observerSockets.find((row) => row.direction === "received" && row.method === "hello");
   if (fifthHello?.helloAccepted !== false) throw new Error("the fifth controller hello was not refused by zeta");
   await observerPage.setViewportSize({ width: 1440, height: 900 });
@@ -3548,7 +3548,7 @@ with _database() as db:
   const takeControl = observerBanner.getByRole("button", { name: "take control", exact: true });
   const helloRoles = () => observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(",");
   await takeControl.click();
-  const takeoverReason = observerPage.getByText(/^at .{1,15} zeta had no free control slot: too many tabs control it, or another app does\. close one, then try again\.$/);
+  const takeoverReason = observerPage.getByText(/^zeta is still full at .{1,15}\. close another zeta tab, then try again\.$/);
   await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
   if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });

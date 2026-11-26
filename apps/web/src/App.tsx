@@ -374,7 +374,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "Ask about this page" : "Message Zeta";
-  const composerProps: ComposerProps = !canWrite ? { state: "read-only", reason: readOnlyReason, onSubmit: send, placeholder: "Read-only" }
+  const composerProps: ComposerProps = !canWrite ? { state: "read-only", reason: readOnlyReason, onSubmit: send, placeholder: "read-only" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); }, placeholder);
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
