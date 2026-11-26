@@ -15,10 +15,10 @@ const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: n
 const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "mcp_auth_status", "agent_run_catalog", "list_sessions", "state_sessions", "state_session"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
-// `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
+// `path`: the route to open (default the chats route).
 // `slot`: like zeta, one controller at a time across every socket (a second controller hello gets -32001); `roles`
 // records each hello role.
-type Options = { path?: string; observerBanner?: false; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
+type Options = { path?: string; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   options.roles?.splice(0);
@@ -91,14 +91,14 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
     const { SurfaceRouter } = await import("./surface/SurfaceRouter");
     app = render(createElement(SurfaceRouter));
     await act(async () => {});
+    // an observer connects after a refused controller hello: give that fallback a few turns to land
+    for (let turn = 0; turn < 20 && authority === "observer" && !app.container.querySelector(".observer-banner"); turn++) await act(async () => {});
     const banner = app.container.querySelector(".observer-banner");
-    if (options.observerBanner === false) {
-      expect(banner).toBeNull();
-    } else if (authority === "observer") {
-      expect(banner?.textContent).toContain("live and read-only");
+    if (authority === "observer") {
+      expect(banner?.textContent).toContain("this tab is read-only and shows updates. close another zeta tab, then take control.");
       expect(banner?.getAttribute("hidden")).toBeNull();
     } else {
-      expect(banner).toBeNull();
+      expect(banner === null, "a controller tab showed the observer banner").toBe(true);
       expect(requests).toContain("hello");
     }
     await check(app, writes, requests, emit);
@@ -132,7 +132,7 @@ const select = (app: RenderResult, selector: string) => {
 };
 
 const sessionDetail = (metadata: object = {}): Options => ({
-  path: "/sessions/session", observerBanner: false,
+  path: "/sessions/session",
   rpc: { status: () => ({ result: { session: null, state: "idle" } }), list_sessions: () => ({ result: { sessions: [{ session_id: "session", name: "Fixture session", project_id: "other-project", parent_session_id: null, in_use: false, ...metadata }], next_offset: null } }) },
 });
 
@@ -177,7 +177,7 @@ const composer = (action: "send" | "steer" | "abort", options: Options = { attac
   const control = app.container.querySelector<HTMLElement>(`button${tag(`composer.${action}`)}`);
   if (authority === "observer") {
     expect(Boolean(control)).toBe(false);
-    expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("Read-only");
+    expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("read-only");
     await keydown(field ?? select(app, '[data-part="composer"]'), "Enter");
   } else {
     expect(Boolean(control) && !disabled(control!), `${action}: ${field?.outerHTML}; ${control?.outerHTML}`).toBe(true);
@@ -223,7 +223,7 @@ const pendingKey = "achilles-pending-chats";
 const sha256 = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 // The skills route with library_read_v1, and library_write_v1 + skill_write when `writes` (each part can be withheld).
 // Like zeta, hello lists a controller-write method only to a controller.
-const library = (writes: boolean, feature = writes, method = writes): Options => ({ path: "/skills", observerBanner: false, rpc: {
+const library = (writes: boolean, feature = writes, method = writes): Options => ({ path: "/skills", rpc: {
   hello: (params) => ({ result: { protocol_version: "1.2", capabilities: {
     features: (params.features as string[]).filter((name) => name !== "library_write_v1" || feature),
     requests: ["skill_catalog", "skill_read", ...(method && params.role === "controller" ? ["skill_write"] : [])],
@@ -236,7 +236,7 @@ const libraryFile: Options = { ...library(true), rpc: { ...library(true).rpc,
   skill_catalog: () => ({ result: { revision: "r", data: { items: [{ name: "fixture-skill", description: "synthetic skill", keywords: [], source: "home", scope: "home", editable: true, diagnostics: [] }] } } }),
   skill_read: async () => ({ result: { revision: await sha256(fixtureFile), data: { name: "fixture-skill", frontmatter: {}, body: "body\n", source: "home", editable: true, redacted: false, document: fixtureFile } } }),
 } };
-const homeSettings: Options = { path: "/settings", observerBanner: false, rpc: {
+const homeSettings: Options = { path: "/settings", rpc: {
   hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: params.role === "controller" ? ["home_settings_get", "home_settings_update"] : ["home_settings_get"] } } }),
   // a read after the update sees it: the borrow reconnects, and each new socket reads again
   home_settings_get: (_params, requests) => ({ result: { revision: `sha256:${(requests.includes("home_settings_update") ? "b" : "a").repeat(64)}`, settings: { telemetry: requests.includes("home_settings_update") ? { enabled: true, source: "builtin", editable: true } : { enabled: false, source: "off", editable: true } }, settings_malformed: false } }),
@@ -335,22 +335,6 @@ const recoveryWrite = (id: WriteSurfaceId, request: string): Row => {
   } };
 };
 
-const pageSwitch = (): Row => {
-  const options = accountFixture([]);
-  return { kind: "visible", options: { ...options, path: "/accounts", attached: false, observerBanner: false, slot: true }, check: async (app, authority, writes) => {
-    const control = select(app, tag("accounts.switch"));
-    expect(disabled(control)).toBe(authority === "observer");
-    if (authority === "observer") {
-      expect(app.getByText(/another tab had control/, { selector: "#account-switch-reason" })).toBeTruthy();
-      return;
-    }
-    await click(control);
-    await click(await proveSwitch(app, writes));
-    didWrite(writes, "account_switch");
-    expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
-  } };
-};
-
 test("chat account switch busy refusal permits one retry; a dropped reply is settled only by reading", async () => {
   const sockets: EventTarget[] = [];
   const state = { account: fromAccount };
@@ -387,14 +371,15 @@ test("chat account switch busy refusal permits one retry; a dropped reply is set
 
 const browserLogin = (cancel: boolean): Row => {
   const sentinel = "https://signin.invalid/browser-only-fixture";
-  return { kind: "visible", options: { path: "/accounts", observerBanner: false, rpc: {
+  return { kind: "visible", options: { path: "/accounts", rpc: {
     account_list: () => ({ result: { revision: "a".repeat(64), data: { accounts: [] } } }),
     login_start: () => ({ result: { state: "pending", authorization_url: sentinel } }),
     login_status: () => ({ result: { state: "pending" } }),
     login_cancel: () => ({ result: { state: "succeeded" } }),
   } }, check: async (app, authority, writes, requests) => {
     if (authority === "observer") {
-      expect(await app.findByText(/a chat tab keeps it while it is open/)).toBeTruthy();
+      // an observer waits for the banner's take control: no automatic take control, no red read error
+      expect(await app.findByText("this tab cannot read this while zeta is full.")).toBeTruthy();
       expect(requests).not.toContain("account_list");
       expect(app.container.querySelector(tag("accounts.login"))).toBeNull();
       expect(app.container.querySelector(tag("accounts.login-cancel"))).toBeNull();
@@ -421,7 +406,7 @@ const browserLogin = (cancel: boolean): Row => {
         expect(writes).toEqual(["login_start", "login_cancel"]);
         expect(app.getByText(/^signed in at/)).toBeTruthy();
         expect(requests.filter(method => method === "account_list")).toHaveLength(2);
-        expect(requests.filter(method => method !== "status" && !method.includes(" ")).at(-1)).toBe("hello");
+        expect(requests.filter(method => method !== "status" && !method.includes(" ")).at(-1)).toBe("account_list");
       }
       const contents = [document.documentElement.outerHTML, location.href, history.state,
         ...[localStorage, sessionStorage].map(store => Array.from({ length: store.length }, (_, i) => [store.key(i), store.getItem(store.key(i)!)])),
@@ -439,7 +424,7 @@ function mcpAdd(): Row {
   const after = { revision: "b".repeat(64), data: { items: [{ name: "fixture-user", scope: "user", enabled: true,
     trusted: true, status: "configured", auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } }] } };
   let applied = false;
-  return { kind: "visible", options: { path: "/connections", observerBanner: false, roles, rpc: {
+  return { kind: "visible", options: { path: "/connections", roles, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
     mcp_server_list: ({ scope }) => ({ result: applied && scope !== "project" ? after : before }),
@@ -469,12 +454,12 @@ function mcpAdd(): Row {
     expect(location.href).toBe(url);
     expect(JSON.stringify([localStorage, sessionStorage])).not.toContain(mcpAddCanary);
     if (authority === "observer") {
-      expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+      expect(app.getByRole("alert").textContent).toContain("too many tabs control zeta");
       expect(roles.slice(start)).toEqual(["controller"]);
       expect(writes).toEqual([]);
     } else {
       expect(app.getByText(/new sessions use this configuration/)).toBeTruthy();
-      expect(roles.slice(start)).toEqual(["controller", "observer"]);
+      expect(roles.slice(start)).toEqual([]);
       expect(writes).toEqual([method]);
     }
   } };
@@ -486,7 +471,7 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test",
     auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } };
   const view = (items: object[] = [fixture]) => ({ revision: "a".repeat(64), data: { items } });
   const roles: string[] = [];
-  return { kind: "visible", options: { path: "/connections/project/fixture-project", observerBanner: false, roles, rpc: {
+  return { kind: "visible", options: { path: "/connections/project/fixture-project", roles, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
     mcp_server_list: ({ scope }) => ({ result: view(scope === "user" ? [] : [fixture]) }),
@@ -494,7 +479,7 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test",
       restart: { serve: false, sessions: [], complete: true } } }),
   } }, check: async (app, authority, writes) => {
     const requestStart = roles.length;
-    expect(roles.at(-1)).toBe("observer");
+    expect(roles.at(-1)).toBe(authority);
     const trigger = select(app, tag(id));
     await click(trigger);
     expect(writes).toEqual([]);
@@ -506,11 +491,11 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test",
     if (id === "mcp.enabled") await click(confirm);
     else await act(async () => { fireEvent.submit(confirm.form!); });
     if (authority === "observer") {
-      expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+      expect(app.getByRole("alert").textContent).toContain("too many tabs control zeta");
       expect(roles.slice(requestStart)).toEqual(["controller"]);
       expect(writes).toEqual([]);
     } else {
-      expect(roles.slice(requestStart)).toEqual(["controller", "observer"]);
+      expect(roles.slice(requestStart)).toEqual([]);
       expect(writes).toEqual([method]);
     }
   } };
@@ -520,13 +505,14 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
   const name = "fixture-oauth";
   const sentinel = "http://127.0.0.1:31234/launch/browser-only-fixture";
   const roles: string[] = [];
+  // `changed`: the configuration changes after the review opened, before the write is confirmed
+  let edited = false;
   const fixture = { name, scope: "user", enabled: true, trusted: true, status: "configured", auth: "none", tool_count: 0,
     config: { transport: "streamable-http", url: "<redacted-url>", auth: { type: "oauth" } } };
-  return { kind: "visible", options: { path: `/connections/user/${name}`, observerBanner: false, roles, rpc: {
+  return { kind: "visible", options: { path: `/connections/user/${name}`, roles, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", "mcp_auth_status", ...(params.role === "controller" ? ["mcp_auth_start", "mcp_auth_cancel", "mcp_auth_logout"] : [])] } } }),
     mcp_server_list: ({ scope }) => {
-      const edited = changed && roles.includes("controller");
       const revision = (edited && action === "start" ? "b" : "a").repeat(64);
       const row = edited && action === "logout" ? { ...fixture,
         config: { ...fixture.config, auth: { type: "oauth", client_secret: "<redacted>" } } } : fixture;
@@ -549,6 +535,7 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
         const dialog = app.getByRole("dialog", { name: "review OAuth sign-in" });
         expect(disabled(dialog.querySelector("button[type=submit]")!)).toBe(true);
         await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
+        edited = changed;
         await act(async () => {
           fireEvent.submit(dialog.querySelector("form")!);
           expect(open).toHaveBeenCalledTimes(1);
@@ -563,13 +550,14 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
         expect(disabled(dialog.querySelector("button[type=submit]")!)).toBe(true);
         await change(proof, name);
         expect(roles).toHaveLength(initial);
+        edited = changed;
         await act(async () => { fireEvent.submit(dialog.querySelector("form")!); });
       } else {
         expect(app.container.querySelector(tag("mcp.auth-cancel"))).toBeNull();
         await startReview();
       }
       if (authority === "observer") {
-        expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+        expect(app.getByRole("alert").textContent).toContain("too many tabs control zeta");
         expect(roles.slice(initial)).toEqual(["controller"]);
         expect(writes).toEqual([]);
         expect(replacements).toEqual([]);
@@ -578,7 +566,7 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
       if (changed) {
         expect(writes, `${action}: stale review must not send an OAuth write`).toEqual([]);
         expect(app.getByRole("alert").textContent).toContain("configuration changed elsewhere");
-        expect(roles.slice(initial)).toEqual(["controller", "observer"]);
+        expect(roles.slice(initial)).toEqual([]);
         expect(replacements).toEqual([]);
         if (action === "start") expect(popup.closed).toBe(true);
         return;
@@ -590,7 +578,7 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
         await click(group.querySelector(".confirmation-primary")!);
       }
       expect(writes).toEqual(action === "cancel" ? ["mcp_auth_start", "mcp_auth_cancel"] : [`mcp_auth_${action}`]);
-      expect(roles.slice(initial)).toEqual(action === "cancel" ? ["controller", "observer", "controller", "observer"] : ["controller", "observer"]);
+      expect(roles.slice(initial)).toEqual([]);
       expect(replacements).toEqual(action === "logout" ? [] : [sentinel]);
       expect(JSON.stringify([document.documentElement.outerHTML, location.href, history.state,
         ...[localStorage, sessionStorage].map(store => Array.from({ length: store.length }, (_, i) => store.getItem(store.key(i)!))),
@@ -599,93 +587,33 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
   } };
 }
 
-test.each(["start", "logout"] as const)("OAuth %s refuses a stale review after borrowing control", async (action) => {
+test.each(["start", "logout"] as const)("OAuth %s refuses a review that went stale before confirm", async (action) => {
   const row = mcpOAuth(action, true);
   await withApp("controller", row.options ?? {}, (app, writes, requests) => row.check(app, "controller", writes, requests));
 });
 
-function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
-  const spawning = id === "agents.spawn";
-  const method = spawning ? "child_run_spawn" : "child_run_cancel";
-  const roles: string[] = [];
-  return { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, roles, rpc: {
-    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
-      requests: ["agent_run_catalog", ...(params.role === "controller" ? [method] : [])] } } }),
-    status: () => ({ result: { state: "idle", session: { session_id: spawning ? "active-parent" : "session", cwd: "/fixture",
-      agent_catalog: [{ name: "fixture-profile", description: "fixture profile", tools: [] }] } } }),
-    agent_run_catalog: ({ root_session_id }) => ({ result: { revision: "1", data: { items: root_session_id === "active-parent" ? [] : [{
-      session_id: "session", run_id: "fixture-run", parent_run_id: null, agent_type: "fixture-profile", description: "fixture task",
-      status: "running", accepts_follow_ups: false, turns_used: 1, tool_count: 0, current_step: "working", started_at: "2026-01-01",
-      finished_at: null, elapsed_seconds: 1,
-    }] } } }),
-    [method]: (params) => {
-      expect(params).toEqual(spawning ? { session_id: "active-parent", agent_type: "fixture-profile", task: "reviewed task", background: true }
-        : { session_id: "session", run_id: "fixture-run", reason: "user_cancelled" });
-      return { result: { data: { accepted: true, run_id: spawning ? "new-fixture-run" : "fixture-run", state: "cancelling" } } };
-    },
-  } }, check: async (app, authority, writes) => {
-    const before = roles.length;
-    expect(roles.at(-1)).toBe("observer");
+// /agents is read-only: a catalog tab is its own zeta controller with no session, so it cannot act on a chat's children.
+// the controls stay registered for the chat tab, which gets them in a later slice.
+function agentReadOnly(id: "agents.spawn" | "agents.cancel" | "agents.send"): Row {
+  return { kind: "visible", options: { path: "/agents/session/fixture-run", rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: ["agent_run_catalog"] } } }),
+    agent_run_catalog: () => ({ result: { revision: "1", data: { items: [{ session_id: "session", run_id: "fixture-run", parent_run_id: null,
+      agent_type: "fixture-profile", description: "fixture task", status: "idle", accepts_follow_ups: true, turns_used: 1,
+      tool_count: 0, current_step: "waiting", started_at: "2026-01-01", finished_at: null, elapsed_seconds: 1 }] } } }),
+  } }, check: async (app, _authority, writes) => {
     await app.findByRole("heading", { name: /fixture task/ });
-    if (spawning) {
-      await click(app.getByRole("button", { name: "+ spawn agent" }));
-      await app.findByRole("option", { name: "fixture-profile" });
-      await change(app.getByRole("combobox", { name: "profile" }), "fixture-profile");
-      await change(app.getByRole("textbox", { name: "task" }), "reviewed task");
-      await act(async () => { fireEvent.submit((select(app, tag(id)) as HTMLButtonElement).form!); });
-    } else await click(select(app, tag(id)));
-    expect(roles).toHaveLength(before);
+    expect(app.getByText("control a chat's agents from its tab.")).toBeTruthy();
+    expect(app.container.querySelector(tag(id))).toBeNull();
     expect(writes).toEqual([]);
-    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
-    expect(confirm.disabled).toBe(true);
-    if (spawning) await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
-    else await change(app.getByRole("textbox", { name: /type fixture-profile · ture-run to confirm/ }), "fixture-profile · ture-run");
-    expect(confirm.disabled).toBe(false);
-    await act(async () => { fireEvent.submit(confirm.form!); });
-    if (authority === "observer") {
-      expect(app.getByRole("alert").textContent).toContain("another tab had control");
-      expect(roles.slice(before)).toEqual(["controller"]);
-    } else {
-      expect(await app.findByText(spawning ? /spawned fixture-profile as/ : /cancellation requested\./)).toBeTruthy();
-      expect(writes).toEqual([method]);
-      expect(roles.slice(before)).toEqual(["controller", "observer"]);
-    }
   } };
 }
 
 const rows: Record<WriteSurfaceId, Row> = {
   "accounts.login": browserLogin(false),
   "accounts.login-cancel": browserLogin(true),
-  "agents.spawn": agentControl("agents.spawn"),
-  "agents.cancel": agentControl("agents.cancel"),
-  "agents.send": { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, rpc: {
-    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: ["agent_run_catalog_v1", "child_runs"],
-      requests: ["agent_run_catalog", ...(params.role === "controller" ? ["child_run_send"] : [])] } } }),
-    agent_run_catalog: () => ({ result: { revision: "1", data: { items: [{ session_id: "session", run_id: "fixture-run", parent_run_id: null,
-      agent_type: "fixture-profile", description: "fixture task", status: "idle", accepts_follow_ups: true, turns_used: 1,
-      tool_count: 0, current_step: "waiting", started_at: "2026-01-01", finished_at: null, elapsed_seconds: 1 }] } } }),
-    child_run_send: (params) => {
-      expect(params).toEqual({ session_id: "session", run_id: "fixture-run", text: "fixture follow-up" });
-      return { result: { accepted: true, run_id: "fixture-run" } };
-    },
-  } }, check: async (app, authority, writes) => {
-    const field = await app.findByRole("textbox", { name: "message fixture-profile" }) as HTMLTextAreaElement;
-    const control = select(app, tag("agents.send"));
-    expect(control.textContent).toBe("send to fixture-profile");
-    expect(disabled(control)).toBe(true);
-    await change(field, "fixture follow-up");
-    expect(disabled(control)).toBe(false);
-    expect(writes).toEqual([]);
-    await click(control);
-    if (authority === "observer") {
-      expect(await app.findByText(/another tab had control\./)).toBeTruthy();
-      expect(field.value).toBe("fixture follow-up");
-    } else {
-      expect(await app.findByText("message accepted by zeta.")).toBeTruthy();
-      didWrite(writes, "child_run_send");
-      expect((app.getByRole("textbox", { name: "message fixture-profile" }) as HTMLTextAreaElement).value).toBe("");
-    }
-  } },
+  "agents.spawn": agentReadOnly("agents.spawn"),
+  "agents.cancel": agentReadOnly("agents.cancel"),
+  "agents.send": agentReadOnly("agents.send"),
   "create.retry": creationAction("retry"),
   "create.discard": creationAction("discard"),
   "busy.retry": { kind: "visible", absent: true, options: { rpc: { status: (_params, requests) => ({ result: requests.filter((request) => request === "status").length <= 2 ? { state: "running", session: { session_id: "other" } } : { state: "idle" } }) } }, check: async (app, authority, writes) => {
@@ -725,7 +653,6 @@ const rows: Record<WriteSurfaceId, Row> = {
     if (authority === "controller") didWrite(writes, "POST /api/pages/page/tools/edit_book/invoke");
   } },
 
-  "accounts.switch": pageSwitch(),
   "auth.login": recoveryWrite("auth.login", "login_start"),
   "auth.switch": recoveryWrite("auth.switch", "account_switch"),
   "auth.new-chat": recoveryWrite("auth.new-chat", "new_session"),
@@ -736,7 +663,7 @@ const rows: Record<WriteSurfaceId, Row> = {
       await keydown(field, "Enter");
     };
     if (authority === "observer") {
-      expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("Read-only");
+      expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("read-only");
       expect(requests).not.toContain("account_list");
       return;
     }
@@ -816,7 +743,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     // library tabs start as observers either way; "+ new" takes control only if the controller slot is free.
     await click(select(app, tag("library.create")));
     if (authority === "observer") {
-      expect(app.getByText(/another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/)).toBeTruthy();
+      expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
@@ -832,7 +759,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(app.getByText("show skill text", { selector: "button", exact: true }));
     await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
     if (authority === "observer") {
-      expect(app.getByText(/another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/)).toBeTruthy();
+      expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
@@ -850,13 +777,13 @@ const rows: Record<WriteSurfaceId, Row> = {
   "mcp.auth-logout": mcpOAuth("logout"),
   "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
-    // the settings place browses as an observer; confirming the change borrows control for the one update.
+    // a controller tab sends the one update; a fallback observer tab (zeta full) is refused before it sends.
     await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
     const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
     await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
     await click(dialog.querySelector<HTMLElement>(".confirmation-primary")!);
     if (authority === "observer") {
-      expect((await app.findByRole("alert")).textContent).toBe("not changed. another tab has control; a chat tab keeps it while it is open. try again after it finishes or closes.");
+      expect((await app.findByRole("alert")).textContent).toBe("not changed. too many tabs control zeta, or another app does. close one, then try again.");
       return;
     }
     // the time is its own element: match the receipt's whole text
@@ -885,14 +812,15 @@ const rows: Record<WriteSurfaceId, Row> = {
   "sessions.continue": { kind: "visible", options: { ...sessionDetail(), roles: [] }, check: async (app, authority, writes, requests) => {
     const action = await app.findByRole("button", { name: "continue in chat" });
     expect(disabled(action)).toBe(false);
-    expect(requests.filter((method) => method === "hello")).toHaveLength(1);
-    expect(rows["sessions.continue"].options!.roles).toEqual(["observer"]);
+    // an observer here is the zeta-full case: its controller hello was refused first
+    const opened = authority === "observer" ? ["controller", "observer"] : ["controller"];
+    expect(rows["sessions.continue"].options!.roles).toEqual(opened);
     expect(writes).toEqual([]);
     action.focus();
     await click(action);
-    expect(rows["sessions.continue"].options!.roles).toEqual(["observer", "controller"]);
+    expect(rows["sessions.continue"].options!.roles).toEqual(authority === "observer" ? [...opened, "controller"] : opened);
     if (authority === "observer") {
-      expect(await app.findByText(/^at .+ another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/)).toBeTruthy();
+      expect(await app.findByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(location.pathname).toBe("/sessions/session");
       expect(document.activeElement).toBe(action);
       expect(writes).toEqual([]);
@@ -1006,18 +934,17 @@ test.each([
   ["the controller lacks skill_write", library(true, true, false), true, false],
   ["neither", library(false), false, false],
   ["both", library(true), true, true],
-] as const)("library create control renders only with the write capability: %s", async (_name, options, observer, controller) => {
+] as const)("library create control renders only with the write capability: %s", async (_name, options, shown, saves) => {
   await withApp("controller", options, async (app, writes) => {
     await app.findByText("no skills found");
-    // an observer hello never lists write methods, so the observer view depends on the feature alone.
-    expect(Boolean(app.container.querySelector(tag("library.create")))).toBe(observer);
-    if (observer) await click(select(app, tag("library.create")));
-    // after take control the form opens; without the write method it is read-only, says why, and has no save.
-    expect(Boolean(app.container.querySelector(".library-editor"))).toBe(observer);
-    if (observer) {
-      expect(Boolean(app.queryByText(/^save/, { selector: "button" }))).toBe(controller);
-      expect(Boolean(app.queryByText("this zeta does not allow saving here. your text is kept; nothing was sent."))).toBe(!controller);
-      expect((select(app, ".library-editor textarea") as HTMLTextAreaElement).readOnly).toBe(!controller);
+    expect(Boolean(app.container.querySelector(tag("library.create")))).toBe(shown);
+    if (shown) {
+      // without the write method the control stays, disabled, and says why; with it, the form opens with save.
+      expect(disabled(select(app, tag("library.create")))).toBe(!saves);
+      expect(Boolean(app.queryByText("this zeta does not allow saving here"))).toBe(!saves);
+      await click(select(app, tag("library.create")));
+      expect(Boolean(app.container.querySelector(".library-editor"))).toBe(saves);
+      expect(Boolean(app.queryByText(/^save/, { selector: "button" }))).toBe(saves);
     }
     expect(writes).toEqual([]);
   });
@@ -1029,15 +956,15 @@ test("a library take-control refusal still shows after the observer socket is re
   const hello = base.rpc!.hello!;
   const options: Options = { ...base, sockets: sockets as EventTarget[], rpc: { ...base.rpc, hello: async (params, requests) => {
     if (params.role !== "controller") return hello(params, requests);
-    sockets[0]!.close(); // the observer drops while the controller handshake is in flight
+    if (sockets.length > 1) sockets.at(-2)!.close(); // after load: the observer drops while the controller handshake is in flight
     return { error: { code: -32001, message: "controller occupied" } };
   } } };
   await withApp("observer", options, async (app) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
-    expect(await app.findByText(/another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/, {}, { timeout: 3_000 })).toBeTruthy();
+    expect(await app.findByText(/^zeta is still full at .+\.$/, {}, { timeout: 3_000 })).toBeTruthy();
     expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
-    expect(app.getByText(/another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/)).toBeTruthy();
+    expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
   });
 });
 
@@ -1055,64 +982,6 @@ test("a typed create draft comes back after the socket drops and reconnects", as
     expect((text as HTMLTextAreaElement).value).toBe("---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
     expect((select(app, '.library-editor input[aria-describedby$="-rules"]') as HTMLInputElement).value).toBe("fixture-draft");
     expect(writes.filter((write) => write.endsWith("_write"))).toEqual([]);
-  });
-});
-
-// A second tab asking zeta for the controller slot: the hello reply says whether it got it.
-const chatTabHello = () => new Promise<{ result?: object; error?: { code: number } }>((resolve) => {
-  const tab = new WebSocket("ws://fixture.invalid");
-  tab.addEventListener("message", (event) => { resolve(JSON.parse((event as MessageEvent).data)); tab.close(); });
-  tab.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hello", params: { role: "controller", features: [] } }));
-});
-
-test.each([
-  ["create + save", library(true), async (app: RenderResult) => {
-    await app.findByText("no skills found");
-    await click(select(app, tag("library.create")));
-    expect((await chatTabHello()).error?.code).toBe(-32001); // the library tab holds the slot while its editor is open
-    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
-    await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
-    await click(app.getByText("save skill", { selector: "button", exact: true }));
-    await app.findByText(/^saved fixture-skill to home · skills\/fixture-skill\.md\. running sessions/);
-  }],
-  ["edit + save + close", libraryFile, async (app: RenderResult) => {
-    await click(await app.findByRole("button", { name: /fixture-skill/ }));
-    await click(app.getByText("show skill text", { selector: "button", exact: true }));
-    await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
-    expect((await chatTabHello()).error?.code).toBe(-32001);
-    await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
-    await click(app.getByText("save skill", { selector: "button", exact: true }));
-    await app.findByText(/^saved fixture-skill/);
-    await click(app.getByText("close", { selector: ".library-editor button", exact: true }));
-  }],
-] as const)("a library tab gives control back after %s, so a chat tab can then take control", async (_name, options, write) => {
-  const roles: string[] = [];
-  await withApp("controller", { ...options, slot: true, roles }, async (app, writes) => {
-    await write(app);
-    didWrite(writes, "skill_write");
-    await act(async () => {});
-    expect((await chatTabHello()).result, `hello roles ${JSON.stringify(roles)}`).toBeTruthy();
-    expect(roles).toEqual(["observer", "controller", "controller", "observer", "controller"]);
-  });
-});
-
-test("a library tab reconnects as observer once its editor closed, and as controller while one is open", async () => {
-  const roles: string[] = [];
-  const sockets: (EventTarget & { close(): void })[] = [];
-  await withApp("controller", { ...library(true), slot: true, roles, sockets: sockets as EventTarget[] }, async (app) => {
-    await app.findByText("no skills found");
-    await click(select(app, tag("library.create")));
-    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-draft");
-    await act(async () => { sockets.at(-1)!.close(); });
-    expect(await app.findByDisplayValue("fixture-draft", {}, { timeout: 3_000 })).toBeTruthy();
-    expect(roles.at(-1)).toBe("controller");
-    await click(app.getByText("discard", { selector: "button", exact: true }));
-    await click(app.getByText("discard changes", { selector: "button", exact: true }));
-    await act(async () => {});
-    await act(async () => { sockets.at(-1)!.close(); });
-    expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
-    await act(async () => {});
-    expect(roles).toEqual(["observer", "controller", "controller", "observer", "observer"]);
   });
 });
 

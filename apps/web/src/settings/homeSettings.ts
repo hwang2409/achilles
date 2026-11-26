@@ -108,8 +108,8 @@ export const receipt = (enabled: boolean) => enabled
 type Committed = { status: "committed"; receipt: ReviewText; value: ReviewText };
 type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;
 
-/** One attempt to set `telemetry.enabled`, for `Confirmation`. `execute` sends at most one update, inside one borrow of
- * control; `checkResult` reads once on the live client and never sends the update again.
+/** One attempt to set `telemetry.enabled`, for `Confirmation`. `execute` sends at most one update, on the controller
+ * client (an observer tab takes control first); `checkResult` reads once on the live client and never sends the update again.
  * `committed`: the row's new state. `reread`: the row must read the file again. */
 export function telemetryChange({ before, enabled, withControl, live, committed, reread, allowed = (client) => supportsRequest(client, "home_settings_update") }: {
   before: HomeSettings;
@@ -124,9 +124,9 @@ export function telemetryChange({ before, enabled, withControl, live, committed,
   const done = (): Committed => ({ status: "committed", receipt: receipt(enabled), value: enabled ? reviewText("on") : reviewText("off") });
   return {
     async execute(): Promise<Result<Committed>> {
-      let borrowed;
+      let result;
       try {
-        borrowed = await withControl(async (client) => {
+        result = await withControl(async (client) => {
           // an observer hello never lists write methods: check the controller's after take control
           if (!allowed(client)) return null;
           return await client.request("home_settings_update", { expected_revision: before.revision, changes: [{ key: "telemetry.enabled", value: enabled }] });
@@ -137,9 +137,9 @@ export function telemetryChange({ before, enabled, withControl, live, committed,
         if (mapped.reread) reread();
         return mapped.result;
       }
-      if ("refused" in borrowed) return failed(borrowed.refused === TAKEOVER_FAILED ? "not-applied" : "refused");
-      if (borrowed.value === null) return failed("not-applied", NOT_ALLOWED);
-      const parsed = parseUpdate(borrowed.value);
+      if ("refused" in result) return failed(result.refused === TAKEOVER_FAILED ? "not-applied" : "refused");
+      if (result.value === null) return failed("not-applied", NOT_ALLOWED);
+      const parsed = parseUpdate(result.value);
       if (!parsed) return { status: "unknown" };
       committed(parsed.settings, parsed.restart);
       return done();

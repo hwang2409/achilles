@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { Browser, Page } from "../apps/web/node_modules/playwright";
 
 export type Discovery = { url: string; controller_token: string; observer_token: string };
-export const agentControlArtifacts = ["spawn-review-1440.png", "spawn-observer-refusal-1440.png", "cancel-review-1440.png", "cancel-review-390.png", "cancel-review-390-200pct.png", "canceled-run-390.png"];
+export const agentControlArtifacts = ["spawn-review-1440.png", "cancel-review-1440.png", "cancel-review-390.png", "cancel-review-390-200pct.png", "canceled-run-390.png"];
 const task = "inspect a synthetic child run";
 const spawnButton = '[data-write-surface="agents.spawn"]';
 const cancelButton = '[data-write-surface="agents.cancel"]';
@@ -72,17 +72,6 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await dialog.getByText("inherited cwd", { exact: true }).waitFor();
     await capture(main, "spawn-review-1440");
     await dialog.getByRole("checkbox", { name: "i reviewed the scope" }).check();
-    await dialog.getByRole("button", { name: "spawn agent" }).click();
-    await dialog.getByText(/another tab had control/).waitFor();
-    await capture(main, "spawn-observer-refusal-1440");
-    if (frames.length) throw new Error("observer refusal sent a child write");
-    await request("send", { text: "hold a synthetic parent turn" });
-    await waitFor(async () => (await request("status", {})).state === "running", "parent turn active");
-    await dialog.getByRole("button", { name: "spawn agent" }).click();
-    await dialog.getByText(/another tab had control/).waitFor();
-    if (frames.length) throw new Error("mid-turn refusal sent a child write");
-    await request("abort", {});
-    await waitFor(async () => (await request("status", {})).state === "idle", "parent turn idle");
     await closeDriver();
     await dialog.getByRole("button", { name: "spawn agent" }).click();
     await main.getByText(/spawned run as/).waitFor();
@@ -120,7 +109,7 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     if (frames.length !== 2 || spawn?.role !== "controller" || spawn.method !== "child_run_spawn" || spawn.params.session_id !== root || spawn.params.background !== true ||
       cancel?.role !== "controller" || cancel.method !== "child_run_cancel" || cancel.params.session_id !== root || cancel.params.reason !== "user_cancelled")
       throw new Error("agent control frames do not match confirmed controller requests");
-    console.log("agent controls: observer and mid-turn refusal; controller child_run_spawn → child_run_cancel → canceled");
+    console.log("agent controls: controller child_run_spawn → child_run_cancel → canceled");
     return ["agents.spawn", "agents.cancel"];
   } finally { driver?.close(); await main.close(); }
 }

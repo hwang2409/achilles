@@ -64,7 +64,7 @@ test("a create save that lands after discard does not close or clear a form open
     if (method !== "skill_write") return Promise.resolve({ revision: "r", data: { items: [] } });
     return new Promise((resolve) => { land = async () => resolve({ revision: await sha(params.mutation!.document), data: { name: params.name, scope: "home", redacted: false } }); });
   } } as unknown as ZetaClient;
-  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), writer: createLibraryWriter(undefined, () => client), releaseControl: () => {} };
+  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), writer: createLibraryWriter(undefined, () => client) };
   const view = render(createElement(LibraryModule, { client, kind: "skills", reads: { catalog: true, read: true }, write }));
   await view.findByText("no skills found");
   const fill = async (name: string) => {
@@ -111,7 +111,7 @@ test.each([
   } } as unknown as ZetaClient;
   // `liveClient` is the older shape of the same seam; `writer` is the router's writer, with a clock that does not wait.
   const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(),
-    liveClient: () => client, writer: createLibraryWriter(async () => {}, () => client), releaseControl: () => {} };
+    liveClient: () => client, writer: createLibraryWriter(async () => {}, () => client) };
   const props = { client, kind: "skills", reads: { catalog: true, read: true }, write } as const;
   const view = render(createElement(LibraryModule, props));
   await view.findByText("no skills found");
@@ -158,7 +158,7 @@ function editZeta(fixture: Fixture) {
   };
   return zeta;
 }
-const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), writer: createLibraryWriter(), releaseControl: () => {} });
+const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), writer: createLibraryWriter() });
 const textarea = (view: ReturnType<typeof render>, label: RegExp) => view.getByLabelText(label) as HTMLTextAreaElement;
 async function openEditor(zeta: ReturnType<typeof editZeta>, write: ReturnType<typeof writable> = writable()) {
   const view = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));
@@ -296,11 +296,11 @@ test("save on a tab that lost control takes control first, and sends nothing whe
   const write = { ...writable(), writer: createLibraryWriter(undefined, () => live) };
   const view = await openEditor(zeta, write);
   view.rerender(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true },
-    write: { ...write, controller: false, takeControl: async () => slotFree ? null : "at 10:31 am another tab had control. a chat tab keeps it while it is open; try again after it finishes or closes." } }));
-  expect(view.getByText("this tab is read-only now. save takes control first, if no other tab has it.")).toBeTruthy();
+    write: { ...write, controller: false, takeControl: async () => slotFree ? null : "zeta is still full at 10:31 am." } }));
+  expect(view.getByText("this tab is read-only now. save takes control first, if zeta has a free slot.")).toBeTruthy();
   await type(view, fileText.replace("original", "edited"));
   await press(view, "save skill");
-  expect(await view.findByText("at 10:31 am another tab had control. a chat tab keeps it while it is open; try again after it finishes or closes.", { selector: ".library-error" })).toBeTruthy();
+  expect(await view.findByText("zeta is still full at 10:31 am.", { selector: ".library-error" })).toBeTruthy();
   expect(zeta.writes()).toEqual([]);
   slotFree = true;
   await press(view, "save skill");

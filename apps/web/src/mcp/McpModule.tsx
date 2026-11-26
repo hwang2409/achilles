@@ -20,8 +20,8 @@ const detailOf = (path: string) => {
   catch { return null; }
 };
 
-export function McpModule({ client, observer, owner, pathname, connecting, retryConnection }: {
-  client: ZetaClient | null; observer: boolean; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
+export function McpModule({ client, owner, pathname, connecting, retryConnection }: {
+  client: ZetaClient | null; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
 }) {
   const { reads } = owner;
   const snapshot = useSyncExternalStore(reads.subscribe, reads.snapshot);
@@ -36,11 +36,11 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
   const connected = client !== null;
   const supported = client !== null && canReadMcp(client);
   useLayoutEffect(() => {
-    const update = () => owner.auth.observe(observer ? client : null, !document.hidden, Boolean(client));
+    const update = () => owner.auth.observe(client, !document.hidden, Boolean(client));
     update();
     document.addEventListener("visibilitychange", update);
     return () => document.removeEventListener("visibilitychange", update);
-  }, [owner, client, observer]);
+  }, [owner, client]);
   useLayoutEffect(() => () => owner.auth.observe(null, false, false), [owner]);
   useEffect(() => {
     if (!client) return;
@@ -186,7 +186,7 @@ function testReceipt(result: TestReceipt) {
 
 function testFailure(status: string | undefined) {
   switch (status) {
-    case "refused": return reviewText("test not sent. a chat tab keeps control while it is open; try again after it finishes or closes.");
+    case "refused": return reviewText("test not sent. too many tabs control zeta, or another app does. close one, then try again.");
     case "unsupported": return reviewText("test not sent. update zeta to test connections here.");
     case "busy": case "conflict": return reviewText("test not run. zeta or another connection action is busy; open a new review to try again.");
     case "stale": return reviewText("test not sent. the configuration changed. close this review and review the current definition before testing.");

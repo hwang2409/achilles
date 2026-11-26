@@ -1,4 +1,4 @@
-export const READ_ONLY_REASON = "this tab is read-only; take control to make changes";
+export const READ_ONLY_REASON = "this tab is read-only: too many tabs control zeta. take control to make changes";
 
 export const WRITE_SURFACE = {
   agentsSend: "agents.send",
@@ -14,7 +14,6 @@ export const WRITE_SURFACE = {
   approvalApprove: "approval.approve",
   approvalDeny: "approval.deny",
   accountLogin: "accounts.login",
-  accountPageSwitch: "accounts.switch",
   accountLoginCancel: "accounts.login-cancel",
   authLogin: "auth.login",
   authSwitch: "auth.switch",
@@ -72,7 +71,7 @@ export const WRITE_SURFACES: readonly WriteSurfaceMetadata[] = [
   ["emptySend", "websocket", "visible"], ["emptyCreate", "websocket", "visible"], ["emptyContinue", "websocket", "visible"],
   ["busyRetry", "websocket", "visible"], ["createRetry", "websocket", "visible"], ["createDiscard", "websocket", "visible"], ["missingNewChat", "websocket", "visible"],
   ["approvalApprove", "websocket", "visible"], ["approvalDeny", "websocket", "visible"], ["composerSend", "websocket", "visible"], ["composerSteer", "websocket", "visible"], ["composerAbort", "websocket", "visible"], ["deliveryRetry", "websocket", "visible"],
-  ["accountLogin", "websocket", "visible"], ["accountLoginCancel", "websocket", "visible"], ["accountPageSwitch", "websocket", "visible"],
+  ["accountLogin", "websocket", "visible"], ["accountLoginCancel", "websocket", "visible"],
   ["authLogin", "websocket", "visible"], ["authSwitch", "websocket", "visible"], ["authNewChat", "http-and-websocket", "visible"], ["composerAccountSwitch", "websocket", "command"],
   ["headerRename", "http", "visible"], ["sidebarRename", "http", "visible"], ["shellNewChat", "http", "visible"], ["keyboardCommands", "http", "command"], ["paletteCommands", "http-and-storage", "command", "browser-only"], ["pageChat", "websocket", "visible"], ["historyRestore", "http", "visible"], ["recordInsert", "http", "visible"], ["recordUpdate", "http", "visible"], ["recordAdd", "http", "visible"], ["libraryCreate", "websocket", "visible"], ["libraryEdit", "websocket", "visible"],
   ["sessionsContinue", "http-and-websocket", "visible"],

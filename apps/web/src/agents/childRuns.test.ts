@@ -80,7 +80,7 @@ test("selected report changes mark history stale and automatically reread at mos
 const id = rowKey(key.sessionId, key.runId);
 const otherId = rowKey("other", key.runId);
 const accepted = { kind: "accepted", runId: key.runId } as const;
-const refused = "another tab had control.";
+const refused = "zeta had no free control slot.";
 const unknown = "delivery is unknown; check the child transcript before sending again.";
 
 test.each([

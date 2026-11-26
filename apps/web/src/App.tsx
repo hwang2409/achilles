@@ -31,6 +31,7 @@ import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyb
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
+import { TOO_MANY_CHATS } from "./zeta/session";
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -201,12 +202,8 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
-    // zeta allows one controller; this fires for any other controller connection (a second achilles
-    // tab, or another client such as gamma, fulcrum, or the cli), and also when a reload's own
-    // cleanup has not finished within zeta's 10s handoff deadline, even with no other tab open.
-    // zeta never promotes an observer to controller, so there is no take-over to offer; the page
-    // retries by itself with backoff until the slot frees.
-    case "controller_taken": return "another client is using zeta (only one can control it at a time), maybe achilles in another tab. close it, and this page reconnects by itself.";
+    // both the controller and the observer hello were refused: zeta has no free slot. the page retries by itself with backoff.
+    case "controller_taken": return "zeta has no free slot for this tab: too many tabs or apps are connected. close one, and this page reconnects by itself.";
     default: return null;
   }
 }
@@ -217,7 +214,8 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const observerConnected = connectionState.phase === "connected" && connectionState.authority === "observer";
   // the approval a click took control for: a new client remounts the timeline, so it lives here, not in the card.
   const tookControl = useRef<TookControl>(null);
-  const readOnlyReason = READ_ONLY_REASON;
+  // a disconnected tab is read-only too, but not because zeta is full
+  const readOnlyReason = connectionState.phase === "connected" ? READ_ONLY_REASON : "zeta is not connected. this tab reconnects by itself.";
   const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite, homeAlias, createRoute.path);
   const landing = location.pathname === createRoute.path;
   const ready = active.state.phase === "ready" ? active.state : null;
@@ -378,7 +376,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "Ask about this page" : "Message Zeta";
-  const composerProps: ComposerProps = !canWrite ? { state: "read-only", reason: readOnlyReason, onSubmit: send, placeholder: "Read-only" }
+  const composerProps: ComposerProps = !canWrite ? { state: "read-only", reason: readOnlyReason, onSubmit: send, placeholder: "read-only" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); }, placeholder);
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
@@ -445,7 +443,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
-      : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
+      : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p>{active.state.error === TOO_MANY_CHATS && <button className="primary" type="button" onClick={active.retryAttachment}>try again</button>}</div>
       : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
@@ -581,7 +579,7 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRenam
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
   not_running: "start zeta, and this page connects by itself.",
-  controller_taken: "zeta is busy elsewhere",
+  controller_taken: "zeta is full",
   auth_failed: "zeta refused this page",
   incompatible: "zeta version mismatch",
 };

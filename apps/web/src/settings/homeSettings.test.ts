@@ -95,9 +95,9 @@ describe("write", () => {
   });
 
   test.each([
-    ["another tab has control", "at 10:00 another tab had control.", "refused"],
+    ["zeta is full", "at 10:00 zeta had no free control slot.", "refused"],
     ["take control failed", "could not take control. try again.", "not-applied"],
-  ])("a refused borrow (%s) sends no request", async (_name, refused, reason) => {
+  ])("a refused take control (%s) sends no request", async (_name, refused, reason) => {
     const zeta = fakeZeta({ home_settings_update: [updated(true)] });
     const { op } = change(zeta, { withControl: async () => ({ refused }) });
     expect(await op.execute()).toEqual({ status: "failed", reason } as never);

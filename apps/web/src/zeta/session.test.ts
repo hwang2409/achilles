@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./session";
+import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError, TooManyChatsError } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -77,6 +77,25 @@ describe("openHomeSession", () => {
     // the stored session cwd wins over the requested one: a resumed session keeps its own directory
     expect(result).toMatchObject({ id: "existing", name: "existing", cwd: "/stored/dir", rebind: false });
     expect(methods).toEqual(["status", "resume", "status", "resume", "session_settings"]);
+  });
+
+  // -32004 has two meanings in multi-controller mode: this tab's own turn runs, or zeta holds all the chats it allows
+  test.each([
+    ["resident_limit -> too many chats, not busy", { reason: "resident_limit" }, TooManyChatsError, "zeta has too many open chats. a closed tab keeps its chat open for about 90 s, so wait a minute or close a chat tab, then try again.", ["resume"]],
+    ["no reason, this tab's turn runs -> busy", undefined, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
+    ["another reason -> busy", { reason: "future_reason" }, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
+  ] as const)("a -32004 resume refusal: %s", async (_name, data, kind, message, sent) => {
+    const methods: string[] = [];
+    const client = { features: ["resume_attach"], request: async (method: string) => {
+      methods.push(method);
+      if (method === "resume") throw Object.assign(new Error("refused"), { code: -32004, ...(data ? { data } : {}) });
+      if (method === "status") return { session: { session_id: "running" }, state: "running" };
+      throw new Error(`unexpected ${method}`);
+    } };
+    const caught = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow").catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(kind);
+    expect((caught as Error).message).toBe(message);
+    expect(methods).toEqual([...sent]);
   });
 });
 
