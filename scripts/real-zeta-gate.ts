@@ -2069,8 +2069,8 @@ with _database() as db:
       dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
     };
   });
-  if (!shellChat.count() || shellGeometry.chatClass.includes("page-chat-docked") || shellGeometry.transcriptHeight <= 0 || !shellGeometry.composerVisible || shellGeometry.barCount !== 0 || shellGeometry.dialogCount !== 0 || !(await shellComposer.isVisible()) || await shellComposer.isDisabled())
-    throw new Error(`390px page chat gained sheet semantics or lost its geometry: ${JSON.stringify(shellGeometry)}`);
+  if (!(await shellChat.count()) || !shellGeometry.chatClass.includes("page-chat-docked") || shellGeometry.transcriptHeight <= 0 || !shellGeometry.composerVisible || shellGeometry.barCount !== 1 || shellGeometry.dialogCount !== 1 || !(await shellComposer.isVisible()) || await shellComposer.isDisabled())
+    throw new Error(`390px page chat lost its mobile sheet geometry: ${JSON.stringify(shellGeometry)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-390x760.png"), fullPage: true });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
