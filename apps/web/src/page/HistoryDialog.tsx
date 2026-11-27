@@ -3,7 +3,7 @@ import { wrapTab } from "../keyboard";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "../writeSurfaces";
 import "../settings-dialog.css";
 
-type CodeRevision = { version: number; created_at: string; active: boolean; failed: boolean; stale: boolean };
+type CodeRevision = { version: number; created_at: string; active: boolean; failed: boolean; stale: boolean; restored_from: number | null };
 type ToolVersion = { name: string; version: number; created_at: string; active: boolean; restored_from: number | null };
 type Versions = { code: CodeRevision[]; tools: ToolVersion[] };
 
@@ -98,12 +98,17 @@ export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, 
           <section className="history-group" aria-labelledby="history-code">
             <h3 id="history-code">page</h3>
             {versions.code.length === 0 ? <p className="history-hint">this page has no code yet.</p>
-              : <ol>{versions.code.map((row) => <li key={row.version} data-row={`code-${row.version}`}>
-                <span className="history-version">v{row.version}</span>
-                <span className="history-detail">{row.stale ? "skipped: the page changed" : row.failed ? "build failed" : ""}</span>
-                <time dateTime={row.created_at}>{when(row.created_at)}</time>
-                {row.active && <span className="history-current">current</span>}
-              </li>)}</ol>}
+              : <ol>{versions.code.map((row) => {
+                const key = `code-${row.version}`;
+                const active = versions.code.find((item) => item.active)?.version;
+                if (pending === key) return confirmRow(key, row.version, "page", () => void restore("page", `/api/pages/${pageId}/code/restore`, row.version, active!));
+                return <li key={row.version} data-row={key}>
+                  <span className="history-version">v{row.version}</span>
+                  <span className="history-detail">{row.restored_from ? `restored from v${row.restored_from}` : row.stale ? "skipped: the page changed" : row.failed ? "build failed" : ""}</span>
+                  <time dateTime={row.created_at}>{when(row.created_at)}</time>
+                  {row.failed || row.stale ? null : button(key, row)}
+                </li>;
+              })}</ol>}
           </section>
           {toolNames.map((name) => {
             const rows = versions.tools.filter((row) => row.name === name);

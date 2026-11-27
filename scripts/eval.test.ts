@@ -23,84 +23,6 @@ async function waitForProcess(child: ReturnType<typeof Bun.spawn>, operation: st
   throw new Error(`${operation} hung after ${timeoutMs / 1000} seconds; its process group was killed`);
 }
 
-test("setup verification accepts old and inspect_page layout shapes", () => {
-  const setup = { tools: [], records: [], initial_layout: { blocks: [{ type: "text", text: "seeded" }] } };
-  const base = { layout: setup.initial_layout, inspect: { tools: [] } };
-  expect(() => verifySetup(setup, { ...base, inspect: { tools: [], layout: { ...setup.initial_layout, version: 1, digest: "old" } } })).not.toThrow();
-  expect(() => verifySetup(setup, { ...base, inspect: { tools: [], layout: setup.initial_layout, layout_version: 1, layout_digest: "new" } })).not.toThrow();
-});
-
-test("every declared seed key is verified before setup and grading", () => {
-  const setup: TaskSetup = { tools: [{ name: "add_note", operation: "insert", collection: "notes", input_schema: { type: "object", required: ["text"] } }], records: [{ id: "note-1", collection: "notes", data: { text: "seeded" } }], initial_layout: { blocks: [{ type: "text", text: "seeded" }] } };
-  const stored = { tool_versions: [{ page_id: "home", ...setup.tools[0] }], records: [{ page_id: "home", ...setup.records[0] }], layouts: [{ page_id: "home", version: 1, document: setup.initial_layout }] } as Record<string, any>;
-  const taskFor = (seed: TaskSetup) => validateTask({ id: "declared-seeds", page_plan: [{ alias: "p", source: "setup", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "work", kind: "prompt", page: "p", chat: "c", prompt: "work" }], setup: seed, checks: [{ id: "page", type: "page_exists", page: "p" }] });
-  const grade = (seed: TaskSetup, initial: Record<string, any>) => gradeReference(taskFor(seed), { initial, pages: [{ id: "home", alias: "p" }] });
-  const mutations: Array<[string, (state: Record<string, any>) => void]> = [
-    ["tool name", state => { state.tool_versions[0].name = "wrong"; }],
-    ["tool operation", state => { state.tool_versions[0].operation = "list"; }],
-    ["tool collection", state => { state.tool_versions[0].collection = "wrong"; }],
-    ["tool input_schema", state => { state.tool_versions[0].input_schema = { type: "object", required: ["title"] }; }],
-    ["record id", state => { state.records[0].id = "wrong"; }],
-    ["record collection", state => { state.records[0].collection = "wrong"; }],
-    ["record data", state => { state.records[0].data = { text: "wrong" }; }],
-    ["initial_layout", state => { state.layouts[0].document = { blocks: [] }; }],
-  ];
-  for (const [key, mutate] of mutations) {
-    const changed = structuredClone(stored); mutate(changed);
-    expect(() => verifySetup(setup, changed), `${key} setup verification`).toThrow("seed mismatch");
-    expect(grade(setup, changed).status, `${key} grading precondition`).toBe("harness_error");
-  }
-  expect(() => verifySetup(setup, stored)).not.toThrow();
-  expect(grade(setup, stored).status).toBe("pass");
-
-  const withoutSchema = { ...setup, tools: [{ name: "add_note", operation: "insert" as const, collection: "notes" }] };
-  expect(() => verifySetup(withoutSchema, stored), "an undeclared default input_schema is ignored").not.toThrow();
-  expect(grade(withoutSchema, stored).status).toBe("pass");
-});
-
-test("setup seeds an initial layout on a fresh page at version 1", async () => {
-  const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-layout-setup-"));
-  try {
-    const source = await readFile(join(target, "scripts/eval.ts"), "utf8"); const script = source.match(/(?:export )?const SETUP_SCRIPT = `([\s\S]*?)`;/)?.[1];
-    expect(script).toBeDefined();
-    const layout = { blocks: [{ type: "text", text: "seeded dashboard" }] }; const setup = { tools: [], records: [], initial_layout: layout };
-    const seeded = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", script!, root, "home", JSON.stringify(setup)], target);
-    expect(seeded.exitCode, seeded.stderr).toBe(0);
-    expect(() => verifySetup(setup, JSON.parse(seeded.stdout))).not.toThrow();
-    const inspected = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", "import json,sys; from pathlib import Path; from achilles.pages import PageStore; store=PageStore(Path(sys.argv[1])); summary=store.inspect_page('home'); print(json.dumps({'layout':store.layout('home'),'version':summary.get('layout_version',summary['layout'].get('version'))}))", root], target);
-    expect(inspected.exitCode, inspected.stderr).toBe(0);
-    expect(JSON.parse(inspected.stdout)).toEqual({ layout, version: 1 });
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("turn cap report preserves the seeded initial snapshot", async () => {
-  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
-  const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-turn-cap-"));
-  const taskId = "turn-cap-seeded-snapshot"; const tasks = join(root, "tasks"); const taskPath = join(tasks, `${taskId}.json`); let child: ReturnType<typeof Bun.spawn> | undefined;
-  const layout = { blocks: [{ type: "text", text: "Seeded dashboard" }] }; const record = { id: "seed-1", collection: "notes", data: { text: "Seeded note" } };
-  try {
-    await mkdir(tasks);
-    await Bun.write(taskPath, JSON.stringify({ id: taskId, page_plan: [{ alias: "seeded", source: "setup", bind_chat: true, create_mode: true }], agent_turns: 1, steps: [{ id: "use-turn", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "keep using tools" }, { id: "exhaust", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "continue" }], setup: { tools: [], records: [record], initial_layout: layout }, checks: [{ id: "seeded-record", type: "record", page: "seeded", value: record.data }] }));
-    const revision = (await readFile(join(target, "zeta.rev"), "utf8")).trim(); const warmZeta = join(target, ".cache/zeta"); const runnerZeta = join(target, ".cache", `zeta-${revision}`);
-    if (await Bun.file(join(warmZeta, ".git/HEAD")).exists() && !await Bun.file(join(runnerZeta, ".git/HEAD")).exists()) await symlink(warmZeta, runnerZeta, "dir").catch(error => { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; });
-    if (!await Bun.file(join(target, ".venv/bin/achilles")).exists()) { const synced = await targetRun(target)("uv", ["sync", "--project", target, "--frozen"], target); expect(synced.exitCode, synced.stderr).toBe(0); }
-    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", taskId], { cwd: target, detached: true, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", EVAL_TASKS_DIR: tasks, REPORT_DIR: root, BASE: "none" }, stdout: "pipe", stderr: "pipe" });
-    const stdout = new Response(child.stdout).text(); const stderr = new Response(child.stderr).text();
-    const exitCode = await waitForProcess(child, "scripted turn-cap eval", 90_000);
-    expect(exitCode, `${await stdout}\n${await stderr}`).toBe(1);
-    const report = JSON.parse(await readFile(join(root, "report.json"), "utf8")); const result = report.tasks[0];
-    const snapshot = JSON.parse(await readFile(join(root, result.transcript), "utf8"));
-    expect(snapshot.initial, "turn-cap snapshot must retain initial setup").toBeDefined();
-    expect(snapshot.initial.layouts).toContainEqual(expect.objectContaining({ page_id: "home", version: 1, document: layout }));
-    expect(snapshot.initial?.records).toContainEqual(expect.objectContaining({ page_id: "home", ...record }));
-    expect(result).toEqual(expect.objectContaining({ status: "agent_fail", cap_hit: true }));
-    expect(JSON.stringify(result.checks)).not.toContain("setup precondition unverifiable");
-  } finally {
-    if (child?.exitCode === null) { child.kill(); await Promise.race([child.exited, Bun.sleep(500)]); }
-    await rm(root, { recursive: true, force: true });
-  }
-}, 100_000);
-
 test("scripted faults: a zeta restart mid-approval resumes the same chat, and a 529 run keeps its write and retries once", async () => {
   if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
   const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-faults-")); const tasks = join(root, "tasks"); let child: ReturnType<typeof Bun.spawn> | undefined;
@@ -126,32 +48,6 @@ test("scripted faults: a zeta restart mid-approval resumes the same chat, and a 
   }
 }, 160_000);
 
-test("suite selection validates every task and sums one command budget", async () => {
-  const tasks = await selectTasks();
-  expect(tasks.map(task => task.id)).toEqual([...tasks].map(task => task.id).sort());
-  expect(reserveTurns(tasks, 1)).toBe(tasks.reduce((total, task) => total + task.agent_turns, 0));
-  expect(() => assertTurnBudget(reserveTurns(tasks, 50))).toThrow("command budget");
-  expect(tasks.every(task => task.suite === "core")).toBe(true);
-  const hard = await selectTasks(undefined, undefined, "hard");
-  expect(hard.length).toBeGreaterThan(0);
-  expect(hard.every(task => task.suite === "hard")).toBe(true);
-  // the hard suite fits one command at N=1; N=3 runs take a TASK= subset
-  expect(() => assertTurnBudget(reserveTurns(hard, 1))).not.toThrow();
-  // LOOP budget: a full run of core or hard is at most 12 tasks; the loader refuses a 13th
-  expect(tasks.length).toBeLessThanOrEqual(12); expect(hard.length).toBeLessThanOrEqual(12);
-  const root = await mkdtemp(join(tmpdir(), "achilles-suite-budget-"));
-  try {
-    const task = JSON.parse(await readFile(new URL("../evals/tasks/harness-smoke.json", import.meta.url), "utf8"));
-    for (let index = 0; index < 13; index++) await Bun.write(join(root, `budget-${index}.json`), JSON.stringify({ ...task, id: `budget-${index}`, suite: "hard" }));
-    await expect(selectTasks(undefined, root, "hard")).rejects.toThrow("the hard suite has 13 tasks; a full run allows at most 12");
-    expect((await selectTasks("budget-0,budget-1", root, "hard")).length).toBe(2);
-  } finally { await rm(root, { recursive: true, force: true }); }
-  // a fault the real provider cannot take needs the scripted marker, so a real run reports it unsupported instead of spending turns
-  const faulted = JSON.parse(await readFile(new URL("../evals/tasks/provider-error-retried.json", import.meta.url), "utf8"));
-  expect(validateTask(faulted).backend).toBe("scripted");
-  expect(() => validateTask({ ...faulted, backend: undefined })).toThrow('set backend: "scripted"');
-});
-
 test("turn reservation is command-wide", () => {
   expect(reserveTurns([{ agent_turns: 20 }, { agent_turns: 20 }], 2)).toBe(80);
   expect(() => assertTurnBudget(241)).toThrow("command budget");
@@ -167,36 +63,6 @@ test("live turn budget allows the cap and aborts only excess work", async () => 
   expect(aborts).toBe(1);
 });
 
-test("capability probe keeps an unrelated internal ImportError as a harness_error", async () => {
-  const task = { id: "capability", requires: ["update_layout"] } as never;
-  const root = await mkdtemp(join(tmpdir(), "achilles-broken-target-"));
-  try {
-    await mkdir(join(root, "achilles"));
-    await Bun.write(join(root, "pyproject.toml"), '[project]\nname="broken-target"\nversion="0.0.0"\nrequires-python=">=3.11"\n');
-    await Bun.write(join(root, "achilles", "__init__.py"), "");
-    await Bun.write(join(root, "achilles", "tools.py"), "from achilles import unrelated\n");
-    await Bun.write(join(root, "achilles", "unrelated.py"), 'raise ImportError("unrelated dependency broke")\n');
-    const result = await classifyTaskSupport({ run: targetRun(root), achillesDir: root } as never, task, []);
-    expect(result?.status).toBe("harness_error");
-    expect(result?.checks[0].evidence).toEqual(expect.objectContaining({ message: expect.stringContaining("unrelated dependency broke") }));
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("reading metric baseline without update_layout is unsupported, not agent_fail", async () => {
-  const task = { id: "reading-metric-count", requires: ["update_layout"] } as never;
-  const root = await mkdtemp(join(tmpdir(), "achilles-old-metric-target-"));
-  try {
-    await mkdir(join(root, "achilles"));
-    await Bun.write(join(root, "pyproject.toml"), '[project]\nname="old-metric-target"\nversion="0.0.0"\nrequires-python=">=3.11"\n');
-    await Bun.write(join(root, "achilles", "__init__.py"), "");
-    await Bun.write(join(root, "achilles", "tools.py"), 'BUILTIN_TOOL_NAMES = ("create_page", "create_tool")\n');
-    await Bun.write(join(root, "achilles", "pages.py"), "class PageStore:\n    def create_page(self, page_id): pass\n");
-    const result = await classifyTaskSupport({ run: targetRun(root), achillesDir: root } as never, task, []);
-    expect(result?.status).toBe("unsupported");
-    expect(result?.checks[0].evidence).toEqual({ missing: ["update_layout"] });
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
 test("reserved bundle validation uses the target revision's validator after changing only the name", async () => {
   const valid = { format_version: 1, kind: "data_operation", name: "create_tool", description: "synthetic tool", input_schema: { type: "object", additionalProperties: true }, output_schema: { type: "object", additionalProperties: true, properties: { record_id: { type: "string" }, revision: { type: "integer" } }, required: ["record_id", "revision"] }, implementation: { operation: "insert", collection: "records", data_schema: { type: "object", additionalProperties: true } } };
   const invalid = [
@@ -210,20 +76,6 @@ test("reserved bundle validation uses the target revision's validator after chan
   const target = Bun.env.ACHILLES_DIR ?? resolve(new URL("..", import.meta.url).pathname);
   const validations = await validateReservedBundles({ run: targetRun(target), achillesDir: target } as never, calls, results);
   expect(validations.map(row => row.valid)).toEqual([true, false, false, false, false]);
-});
-
-test("related pages include both ends of successful page-tool calls only", () => {
-  const before = { pages: [{ id: "home" }], tools: [], records: [], layouts: [], assignments: [] };
-  const after = { pages: [{ id: "home" }, { id: "review" }], tools: [{ id: "tool-1", page_id: "review", name: "add_annotation" }], records: [], layouts: [], assignments: [] };
-  const calls = [
-    { page_id: "home", tool: "achilles__inspect_page", success: true },
-    { page_id: "home", tool: "achilles__create_page", success: true },
-    { page_id: "review", tool: "achilles__create_tool", success: true },
-    { page_id: "review", tool: "mcp_discover", success: true },
-    { page_id: "home", tool: "achilles__add_annotation", success: false },
-    { page_id: "home", tool: "achilles__add_annotation", success: true },
-  ];
-  expect(relatedPages(before, after, calls)).toEqual(["home", "review", "review", "review"]);
 });
 
 test("provider catalog is allow-only", () => {
@@ -291,4 +143,69 @@ test("a during action finishes before its approval is answered, and later answer
   await enqueue(async () => { order.push("answer 3"); }, async () => { throw new Error("write failed"); });
   await enqueue(async () => { order.push("answer 4"); });
   expect(order.slice(3)).toEqual(["answer 4"]); expect(errors.map(error => (error as Error).message)).toEqual(["write failed"]);
+});
+
+test("suite selection validates every task and sums one command budget", async () => {
+  const tasks = await selectTasks();
+  expect(tasks.map(task => task.id)).toEqual([...tasks].map(task => task.id).sort());
+  expect(reserveTurns(tasks, 1)).toBe(tasks.reduce((total, task) => total + task.agent_turns, 0));
+  expect(() => assertTurnBudget(reserveTurns(tasks, 50))).toThrow("command budget");
+  expect(tasks.every(task => task.suite === "core")).toBe(true);
+  const hard = await selectTasks(undefined, undefined, "hard");
+  expect(hard.length).toBeGreaterThan(0);
+  expect(hard.every(task => task.suite === "hard")).toBe(true);
+  // the hard suite fits one command at N=1; N=3 runs take a TASK= subset
+  expect(() => assertTurnBudget(reserveTurns(hard, 1))).not.toThrow();
+  // LOOP budget: a full run of core or hard is at most 12 tasks; the loader refuses a 13th
+  expect(tasks.length).toBeLessThanOrEqual(12); expect(hard.length).toBeLessThanOrEqual(12);
+  const root = await mkdtemp(join(tmpdir(), "achilles-suite-budget-"));
+  try {
+    const task = JSON.parse(await readFile(new URL("../evals/tasks/harness-smoke.json", import.meta.url), "utf8"));
+    for (let index = 0; index < 13; index++) await Bun.write(join(root, `budget-${index}.json`), JSON.stringify({ ...task, id: `budget-${index}`, suite: "hard" }));
+    await expect(selectTasks(undefined, root, "hard")).rejects.toThrow("the hard suite has 13 tasks; a full run allows at most 12");
+    expect((await selectTasks("budget-0,budget-1", root, "hard")).length).toBe(2);
+  } finally { await rm(root, { recursive: true, force: true }); }
+  // a fault the real provider cannot take needs the scripted marker, so a real run reports it unsupported instead of spending turns
+  const faulted = JSON.parse(await readFile(new URL("../evals/tasks/provider-error-retried.json", import.meta.url), "utf8"));
+  expect(validateTask(faulted).backend).toBe("scripted");
+  expect(() => validateTask({ ...faulted, backend: undefined })).toThrow('set backend: "scripted"');
+});
+test("related pages include both ends of successful page-tool calls only", () => {
+  const before = { pages: [{ id: "home" }], tools: [], records: [], assignments: [] };
+  const after = { pages: [{ id: "home" }, { id: "review" }], tools: [{ id: "tool-1", page_id: "review", name: "add_annotation" }], records: [], assignments: [] };
+  const calls = [
+    { page_id: "home", tool: "achilles__inspect_page", success: true },
+    { page_id: "home", tool: "achilles__create_page", success: true },
+    { page_id: "review", tool: "achilles__create_tool", success: true },
+    { page_id: "review", tool: "mcp_discover", success: true },
+    { page_id: "home", tool: "achilles__add_annotation", success: false },
+    { page_id: "home", tool: "achilles__add_annotation", success: true },
+  ];
+  expect(relatedPages(before, after, calls)).toEqual(["home", "review", "review", "review"]);
+});
+test("every declared seed key is verified before setup and grading", () => {
+  const setup: TaskSetup = { tools: [{ name: "add_note", operation: "insert", collection: "notes", input_schema: { type: "object", required: ["text"] } }], records: [{ id: "note-1", collection: "notes", data: { text: "seeded" } }] };
+  const stored = { tool_versions: [{ page_id: "home", ...setup.tools[0] }], records: [{ page_id: "home", ...setup.records[0] }] } as Record<string, any>;
+  const taskFor = (seed: TaskSetup) => validateTask({ id: "declared-seeds", page_plan: [{ alias: "p", source: "setup", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "work", kind: "prompt", page: "p", chat: "c", prompt: "work" }], setup: seed, checks: [{ id: "page", type: "page_exists", page: "p" }] });
+  const grade = (seed: TaskSetup, initial: Record<string, any>) => gradeReference(taskFor(seed), { initial, pages: [{ id: "home", alias: "p" }] });
+  const mutations: Array<[string, (state: Record<string, any>) => void]> = [
+    ["tool name", state => { state.tool_versions[0].name = "wrong"; }],
+    ["tool operation", state => { state.tool_versions[0].operation = "list"; }],
+    ["tool collection", state => { state.tool_versions[0].collection = "wrong"; }],
+    ["tool input_schema", state => { state.tool_versions[0].input_schema = { type: "object", required: ["title"] }; }],
+    ["record id", state => { state.records[0].id = "wrong"; }],
+    ["record collection", state => { state.records[0].collection = "wrong"; }],
+    ["record data", state => { state.records[0].data = { text: "wrong" }; }],
+  ];
+  for (const [key, mutate] of mutations) {
+    const changed = structuredClone(stored); mutate(changed);
+    expect(() => verifySetup(setup, changed), `${key} setup verification`).toThrow("seed mismatch");
+    expect(grade(setup, changed).status, `${key} grading precondition`).toBe("harness_error");
+  }
+  expect(() => verifySetup(setup, stored)).not.toThrow();
+  expect(grade(setup, stored).status).toBe("pass");
+
+  const withoutSchema = { ...setup, tools: [{ name: "add_note", operation: "insert" as const, collection: "notes" }] };
+  expect(() => verifySetup(withoutSchema, stored), "an undeclared default input_schema is ignored").not.toThrow();
+  expect(grade(withoutSchema, stored).status).toBe("pass");
 });

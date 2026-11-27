@@ -11,9 +11,7 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool, ToolAn
 
 from .pages import (
     CREATE_PAGE_SCHEMA,
-    LAYOUT_SCHEMA,
     RESTORE_VERSION_SCHEMA,
-    UPDATE_LAYOUT_SCHEMA,
     PageStore,
     bounded_inspect,
 )
@@ -60,89 +58,15 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
         "route": {"type": "string"},
         "title": {"type": "string"},
         "create_mode": {"type": "boolean"},
-        "layout": {
-            "description": (
-                "The complete stored layout to edit with update_layout, or null when "
-                "layout_complete is false."
-            ),
-            "anyOf": [LAYOUT_SCHEMA, {"type": "null"}],
-        },
-        "layout_complete": {
-            "type": "boolean",
-            "description": (
-                "When false, do not change the page; tell the user the page is too large "
-                "to edit from chat."
-            ),
-        },
-        "message": {"type": "string"},
-        "layout_version": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "The value to pass as update_layout expected_version.",
-        },
-        "layout_digest": {"type": ["string", "null"]},
-        "detail_filter_matches": {
-            "type": "array",
-            "description": "Match count and repair hint for each filtered detail block.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "block": {"type": "integer", "minimum": 0},
-                    "matched": {"type": "integer", "minimum": 0},
-                    "hint": {"type": "string"},
-                },
-                "required": ["block", "matched"],
-                "additionalProperties": False,
-            },
-        },
-        "metric_values": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "block": {"type": "integer", "minimum": 0},
-                    "value": {"type": "integer", "minimum": 0},
-                },
-                "required": ["block", "value"],
-                "additionalProperties": False,
-            },
-        },
+        "code": {"type": ["object", "null"]},
         "tools": {"type": "array", "items": {"type": "object"}},
-        "layout_versions": {
-            "type": "array",
-            "description": (
-                "Up to 20 recent stored layout versions, newest first; pass one as "
-                "restore_version version."
-            ),
-            "items": {
-                "type": "object",
-                "properties": {
-                    "version": {"type": "integer", "minimum": 1},
-                    "created_at": {"type": "string"},
-                    "block_types": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["version", "created_at", "block_types"],
-                "additionalProperties": False,
-            },
-        },
         "collections": {
             "type": "object",
             "additionalProperties": {"type": "integer", "minimum": 0},
         },
         "truncated": {"type": "boolean"},
-        "omitted": {
-            "type": "object",
-            "additionalProperties": {"type": "integer", "minimum": 0},
-        },
     },
-    "required": [
-        "route",
-        "create_mode",
-        "layout",
-        "layout_complete",
-        "layout_version",
-        "layout_digest",
-    ],
+    "required": ["route", "title", "create_mode", "code", "tools", "collections"],
     "additionalProperties": False,
 }
 
@@ -200,7 +124,6 @@ def _validate_create(name: str, args: Any) -> None:
     schema = {
         "create_page": CREATE_PAGE_SCHEMA,
         "create_tool": CREATE_TOOL_SCHEMA,
-        "update_layout": UPDATE_LAYOUT_SCHEMA,
         "restore_version": RESTORE_VERSION_SCHEMA,
     }[name]
     try:
@@ -244,23 +167,11 @@ def build_mcp(store: PageStore):
         if not connection.state.get(cleanup_key):
             connection.state[cleanup_key] = True
             connection.exit_stack.push_async_callback(remove_connection, page["id"], connection)
-        # inspect_page only reads, so every page chat can see what is on its page.
-        inspect_edit_hint = (
-            "when layout_complete is true, layout is the complete stored layout to edit "
-            "and layout_version is the value for update_layout expected_version; when "
-            "layout_complete is false, do not change the page and tell the user it is "
-            "too large to edit from chat"
-            if page["create_mode"]
-            else "use it to answer questions about the page; this chat cannot change the page"
-        )
         create_status = "ON" if page["create_mode"] else "OFF"
         tools: list[Tool] = [
             Tool(
                 name="write_page",
-                description=(
-                    "write and compile a React/TypeScript page; writes are immediate and audit "
-                    "as actor page."
-                ),
+                description="write and compile React/TypeScript that mounts into #root; writes are immediate and audited.",  # noqa: E501
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -278,14 +189,9 @@ def build_mcp(store: PageStore):
             Tool(
                 name="inspect_page",
                 description=(
-                    f"this chat is on the page at route {page['route']!r} "
-                    f"(title {page['title']!r}); create mode is currently {create_status} "
-                    "for this chat. "
-                    "read-only: this page's route, title, layout blocks, record counts, "
-                    "tools, metric_values and detail_filter_matches (by block index), and "
-                    "pages it created, and code: each revision's build diagnostics and "
-                    "runtime_error, the last error the page threw in the browser. "
-                    f"{inspect_edit_hint}"
+                    f"this chat is on the page at route {page['route']!r} (title {page['title']!r}); "  # noqa: E501
+                    f"create mode is currently {create_status}. read-only: inspect the active React package, "  # noqa: E501
+                    "code revision history, record counts, tools, and pages created by this page."
                 ),
                 inputSchema=INSPECT_PAGE_SCHEMA,
                 outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
@@ -294,70 +200,34 @@ def build_mcp(store: PageStore):
         ]
         if not page["create_mode"]:
             tools.pop(0)
-        if page["create_mode"]:
+        else:
             tools.extend(
                 [
                     Tool(
                         name="create_page",
                         description=(
-                            "create a page; available only in create mode. "
+                            "create and compile a React page; available only in create mode. "
+                            "Provide source that mounts into #root and its dependencies, or omit package for a minimal React shell. "  # noqa: E501
                             + _FIELD_GUIDANCE
-                            + "A detail block can "
-                            "select records with collection and filter, for example "
-                            '{"field":"run_id","equals":"run-002"}; use a field from the '
-                            "collection's assigned tool schema. The result reports how many "
-                            "records the filter matches and gives a repair hint for zero matches. "
-                            "It shows the highest creation time, with ties resolved by highest "
-                            "record id; without a filter it shows field labels only."
                         ),
                         inputSchema=CREATE_PAGE_SCHEMA,
                     ),
                     Tool(
                         name="create_tool",
                         description=(
-                            "create a page-owned immutable declarative tool version; "
+                            "create a page-owned immutable declarative data tool version; "
                             + _FIELD_GUIDANCE
                             + "For an update tool, use this minimal example: "
                             + _UPDATE_TOOL_EXAMPLE_TEXT
-                            + ". revision comes from list/get results and guards against "
-                            "overwriting a newer change. Results include record_id and revision; "
-                            "omit output_schema because it is derived; bundle <= 64 KB"
+                            + ". revision comes from list/get results; omit output_schema because it is derived; bundle <= 64 KB"  # noqa: E501
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
                     ),
                     Tool(
-                        name="update_layout",
-                        description=(
-                            "REPLACES the whole layout; any block you leave out is deleted. "
-                            "First call achilles__inspect_page. If layout_complete is false, do "
-                            "not change the page; tell the user it is too large to edit from chat. "
-                            "Otherwise, copy its `layout` exactly, change "
-                            "only what the user asked (insert, reorder, edit, or remove blocks), "
-                            "and pass the full layout with `layout_version` as expected_version. "
-                            "On a version conflict, inspect again and retry. To change another "
-                            "page, open that page's chat. A detail block can select records with "
-                            "collection and filter, for example "
-                            '{"field":"run_id","equals":"run-002"}; use a field from the '
-                            "collection's assigned tool schema. The result reports how many "
-                            "records the filter matches and gives a repair hint for zero matches. "
-                            "It shows the highest creation time, with ties resolved by highest "
-                            "record id; without a filter it shows field labels only."
-                        ),
-                        inputSchema=UPDATE_LAYOUT_SCHEMA,
-                    ),
-                    Tool(
                         name="restore_version",
                         description=(
-                            "Undo a layout or tool change on this page, for example when the "
-                            "user says undo or you need to take back your own change. First "
-                            "call achilles__inspect_page. For kind layout, pick a version from "
-                            "layout_versions and pass layout_version as expected_version. For "
-                            "kind tool, pass the tool name, an earlier version, and the tool's "
-                            "current version as expected_version. Either way this creates a new "
-                            "version that copies the old one, so history is kept and the "
-                            "restore can itself be undone. On a "
-                            "version conflict, inspect again and retry. To change another "
-                            "page, open that page's chat."
+                            "restore an earlier code or tool revision by appending a copy, so history is kept. "  # noqa: E501
+                            "First call inspect_page. Pass the active revision as expected_version."
                         ),
                         inputSchema=RESTORE_VERSION_SCHEMA,
                     ),
@@ -427,7 +297,6 @@ def build_mcp(store: PageStore):
             ):
                 return _inspect_error()
             summary = await anyio.to_thread.run_sync(store.inspect_page, target["id"])
-            summary["code"] = await anyio.to_thread.run_sync(store.inspect_code, target["id"])
             return _inspect_result(summary)
         except ValidationError as exc:
             return _safe_error(exc)
@@ -439,17 +308,11 @@ def build_mcp(store: PageStore):
             raise ValidationError(
                 "/route", "this page", "forbidden", "To change another page, open that page's chat."
             )
-        if args["kind"] == "layout":
-            version, digest, detail_summary = await anyio.to_thread.run_sync(
-                store.restore_layout, page["id"], args["version"], args["expected_version"]
+        if args["kind"] == "code":
+            restored = await anyio.to_thread.run_sync(
+                store.restore_code, page["id"], args["version"], args["expected_version"]
             )
-            return {
-                "kind": "layout",
-                "version": version,
-                "restored_from": args["version"],
-                "digest": digest,
-                "detail_filter_matches": detail_summary,
-            }
+            return {"kind": "code", **restored}
         if "name" not in args:
             raise ValidationError("/name", "a tool name when kind is tool")
         restored = await anyio.to_thread.run_sync(
@@ -486,13 +349,12 @@ def build_mcp(store: PageStore):
                         created,
                         digest,
                         existing,
-                        detail_summary,
                         note,
                     ) = await anyio.to_thread.run_sync(
                         store.create_page,
                         args["route"],
                         args["title"],
-                        args["layout"],
+                        args.get("package"),
                         page["id"],
                         args.get("tools"),
                     )
@@ -502,24 +364,11 @@ def build_mcp(store: PageStore):
                             "route": created["route"],
                             "digest": digest,
                             "existing": existing,
-                            "detail_filter_matches": detail_summary,
                         },
                         note,
                     )
                 elif params.name == "restore_version":
                     result = await restore_version(page, args)
-                elif params.name == "update_layout":
-                    version, digest, detail_summary = await anyio.to_thread.run_sync(
-                        store.update_layout,
-                        page["id"],
-                        args["layout"],
-                        args["expected_version"],
-                    )
-                    result = {
-                        "version": version,
-                        "digest": digest,
-                        "detail_filter_matches": detail_summary,
-                    }
                 else:
                     created, digest, note = await anyio.to_thread.run_sync(
                         store.create_tool, page["id"], args["bundle"], "/bundle", args.get("page")
@@ -529,10 +378,13 @@ def build_mcp(store: PageStore):
                         await notify(created["page_id"])
             except ValidationError as exc:
                 return _safe_error(exc)
+            # PermissionError is an OSError: catch it first, so create mode off says forbidden
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
                 return CallToolResult(
                     isError=True, content=[TextContent(type="text", text=str(exc))]
                 )
+            except OSError:
+                return _safe_error(ValidationError("", "atomic page creation", "create_failed"))
             await notify(page["id"])
             return _text(result)
         listed_versions = context.session._connection.state.get(

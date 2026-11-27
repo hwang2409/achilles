@@ -97,8 +97,8 @@ jobs:
           PY
       - name: eval setup accepts the baseline achilles revision
         run: |
-          git fetch --depth=1 origin 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
-          git worktree add --detach .cache/achilles-baseline 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
+          git fetch --depth=1 origin 4d29685b2f53ed666232be33eb5b08f564ae0ba8
+          git worktree add --detach .cache/achilles-baseline 4d29685b2f53ed666232be33eb5b08f564ae0ba8
           # earlier steps let the pinned zeta create ~/.zeta at its storage epoch; an older baseline zeta refuses a newer home
           ZETA_HOME="$RUNNER_TEMP/baseline-zeta-home" EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 ACHILLES_DIR="$PWD/.cache/achilles-baseline" BASE=none REPORT_DIR=.cache/eval-ci-baseline-setup bun scripts/eval.ts
       - run: |
@@ -106,10 +106,10 @@ jobs:
           import json, os, subprocess
           from pathlib import Path
           env = {**os.environ, 'EVAL_BACKEND': 'scripted', 'EVAL_SKIP_EXPLICIT_EXIT': '1', 'REPORT_DIR': '.cache/eval-ci-success', 'BASE': 'none'}
-          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'judge-page-and-annotate'], env=env, timeout=30)
+          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'harness-smoke'], env=env, timeout=30)
           report = json.loads((Path('.cache/eval-ci-success') / 'report.json').read_text())
           if any(check['id'] == 'harness' for task in report['tasks'] for check in task['checks']):
-              raise AssertionError('judge page-switch harness failure')
+              raise AssertionError('code-page smoke harness failure')
           if result.returncode not in (0, 1):
               raise SystemExit(result.returncode)
 
@@ -134,7 +134,9 @@ jobs:
           assert 'browser page did not become ready' in task['checks'][0]['evidence']['message'], task
 
           env['REPORT_DIR'] = '.cache/eval-ci-missing-page'
-          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'reading-list-one-prompt'], env=env, timeout=30)
+          env['EVAL_SKIP_CREATE_PAGE'] = '1'
+          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'browser-controller-slot'], env=env, timeout=30)
+          env.pop('EVAL_SKIP_CREATE_PAGE')
           report = json.loads((Path('.cache/eval-ci-missing-page') / 'report.json').read_text())
           task = report['tasks'][0]
           assert result.returncode == 1

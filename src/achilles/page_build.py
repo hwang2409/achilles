@@ -212,6 +212,11 @@ console.log(value);
     return {"artifact": artifact, "lockfile": lockfile, "resolved_dependencies": resolved}
 
 
+def effective_dependencies(dependencies: dict[str, str]) -> dict[str, str]:
+    """The dependency map a build installs and stores: the react pins plus the requested deps."""
+    return {"react": "19.0.0", "react-dom": "19.0.0", **dependencies}
+
+
 def build_page(
     root: Path, page_id: str, source: str, dependencies: dict[str, str]
 ) -> dict[str, Any]:
@@ -240,7 +245,7 @@ def build_page(
     package = {
         "private": True,
         "type": "module",
-        "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", **dependencies},
+        "dependencies": effective_dependencies(dependencies),
     }
     try:
         (workspace / "src").mkdir()

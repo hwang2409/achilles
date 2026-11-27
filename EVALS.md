@@ -7,7 +7,7 @@ how to run the eval harness, read its report, and add a task.
 the harness drives the real product: a private `achilles serve`, a private
 `zeta serve`, and a real model, over the same mcp wire a browser would use. for
 each task it starts a fresh stack, sends the task prompts, snapshots the
-database and layout, then grades the snapshot.
+database and page state, then grades the snapshot.
 
 the stack is isolated. `scripts/eval-stack.ts` starts both servers on ephemeral
 `127.0.0.1` ports, points `ACHILLES_HOME` and `ZETA_HOME` at a throwaway temp
@@ -133,7 +133,7 @@ each task row carries:
 - tokens (usage): input, output, reasoning, and cache tokens; `unavailable` when
   a run did not report them.
 - transcripts and snapshots: the graded evidence is the snapshot json (pages,
-  layouts, tool calls and results, approvals, session history). the full model
+  records, tool calls and results, approvals, session history). the full model
   transcript and serve logs live in the retained stack under `.cache/evals/`.
 - `make eval-selfcheck-real DIR=/path/to/eval-run` re-grades a run's snapshots
   against the current task definitions, to confirm a grader change did not move a
@@ -167,10 +167,10 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
 - `page_plan`: the pages. each has an `alias`, a `source` (`fixture`, `setup`, or
   `created`), `bind_chat`, `create_mode`, and an optional `route`. every
   `fixture` or `setup` page is the home page, except a `fixture` page with a
-  `route`: the harness creates that second page (one text block) before the
+  `route`: the harness creates that second page with a minimal React shell before the
   run. a `created` page's `route` names the page the agent creates.
 - `setup` (optional): the seeds. `tools` (name, operation, collection, optional
-  `input_schema`), `records` (id, collection, data), and an `initial_layout`.
+  `input_schema`) and `records` (id, collection, data).
 - `steps`: the prompts and events, in order. each has an `id`, a `kind`, the
   `page`, and the `chat`. the kinds:
   - `prompt` and `annotate`: send the `prompt` text to the chat over zeta's
@@ -230,10 +230,6 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     while that step's turn ran counts), `no_duplicate_writes` (no two
     successful calls with the same arguments; with `collection` and `fields`,
     no two records share those values).
-  - layouts: `layout_contains`, `layout_update` (one block added to v1 on this
-    page only), `layout_restore` (a `restore_version` made the active layout),
-    `list_shows`, `detail_selects`, `metric_count` (the first block counts
-    `where` records and `inspect_page` reports the count).
   - errors: `no_error`, `no_unrecovered_error` (every failed call of `tool` was
     followed by a success), `error_shown` (the chat shows a failed turn with
     HTTP status `value`).

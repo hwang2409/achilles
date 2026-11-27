@@ -196,26 +196,6 @@
         }
       }
     ],
-    "layouts": [
-      {
-        "page_id": "expenses",
-        "version": 1,
-        "document": {
-          "blocks": [
-            {
-              "type": "list",
-              "title": "expenses",
-              "collection": "expenses"
-            },
-            {
-              "type": "form",
-              "title": "add",
-              "tool": "add_expense"
-            }
-          ]
-        }
-      }
-    ],
     "calls": [
       {
         "id": "call-1",
@@ -536,26 +516,6 @@
           "description": "Synthetic Taxi",
           "amount": 20,
           "category": "food"
-        }
-      }
-    ],
-    "layouts": [
-      {
-        "page_id": "expenses",
-        "version": 1,
-        "document": {
-          "blocks": [
-            {
-              "type": "list",
-              "title": "expenses",
-              "collection": "expenses"
-            },
-            {
-              "type": "form",
-              "title": "add",
-              "tool": "add_expense"
-            }
-          ]
         }
       }
     ],

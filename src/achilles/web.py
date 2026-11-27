@@ -22,9 +22,8 @@ from .pages import CHAT_PURPOSES, PageStore
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
 
-UNSUPPORTED_BLOCK_PAGE = (
-    "this page uses the old block format, which achilles no longer shows. "
-    "ask the agent in page chat to rebuild it as a react page with write_page."
+EMPTY_PAGE = (
+    "this page has no compiled revision. ask the agent in page chat to build it with write_page."
 )
 
 
@@ -192,7 +191,6 @@ def create_app() -> Starlette:
             row = await anyio.to_thread.run_sync(store.page, key)
         if row is None:
             raise HTTPException(404, "page not found")
-        layout = await anyio.to_thread.run_sync(store.layout, row["id"])
         code = await anyio.to_thread.run_sync(store.page_code, row["id"])
         return JSONResponse(
             {
@@ -202,7 +200,6 @@ def create_app() -> Starlette:
                     "route",
                     "title",
                     "zeta_session_id",
-                    "active_layout_version",
                 )
             }
             | {
@@ -210,13 +207,10 @@ def create_app() -> Starlette:
             }
             | {
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
-                "layout": layout,
                 "create_mode": bool(row["create_mode"]),
                 "code": code,
-                # the web app renders only compiled pages; an old block page is named, never drawn
-                "unsupported_format": UNSUPPORTED_BLOCK_PAGE
-                if layout["blocks"] and not code
-                else None,
+                # create_page always builds code: only home or a migrated block page lacks it
+                "unsupported_format": EMPTY_PAGE if not code and row["id"] != "home" else None,
             }
         )
 
@@ -577,7 +571,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             headers={"cache-control": "no-store"},
         )
 
-    async def restore_layout(request):
+    async def restore_code(request):
         page_id = await require_page_bearer(request)
         try:
             body = await request.json()
@@ -587,19 +581,18 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             error = ValidationError("", "JSON object")
             return JSONResponse({"error": error_document(error)}, status_code=400)
         try:
-            # the same store path as the agent's restore_version: appends a copy, never rewrites
-            version, _, _ = await anyio.to_thread.run_sync(
-                store.restore_layout, page_id, body.get("version"), body.get("expected_version")
+            restored = await anyio.to_thread.run_sync(
+                store.restore_code, page_id, body.get("version"), body.get("expected_version")
             )
         except ValidationError as exc:
             status = 409 if exc.code == "conflict" else 400
             return JSONResponse({"error": error_document(exc)}, status_code=status)
         except PermissionError:
             error = ValidationError(
-                "", "create mode on", "forbidden", "turn on create mode to restore a layout."
+                "", "create mode on", "forbidden", "turn on create mode to restore code."
             )
             return JSONResponse({"error": error_document(error)}, status_code=403)
-        return JSONResponse({"version": version, "restored_from": body["version"]})
+        return JSONResponse({"version": restored["revision"], **restored})
 
     async def create_mode(request):
         if not _same_origin(request):
@@ -641,7 +634,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             Route("/api/pages/{id}/tools/{name}/invoke", invoke_tool, methods=["POST"]),
             Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
             Route("/api/pages/{id}/versions", versions),
-            Route("/api/pages/{id}/layout/restore", restore_layout, methods=["POST"]),
+            Route("/api/pages/{id}/code/restore", restore_code, methods=["POST"]),
             Route("/api/pages/{id}/records/{collection}", records, methods=["GET", "POST"]),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
