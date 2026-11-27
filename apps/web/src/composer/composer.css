@@ -105,3 +105,7 @@
   .main-pane [data-part="composer"] [data-part="composer-mode"] { height: 44px; min-height: 44px; }
   .main-pane [data-part="composer"] [data-part="composer-mode"]::after { display: none; }
 }
+/* held (a swap is pending): the field looks off, the reason fills the bar, and send shows as off */
+.main-pane [data-part="composer"][data-held] [data-part="composer-field"] { opacity: .55; }
+.main-pane [data-part="composer"][data-held] [data-part="composer-bar"] [data-part="composer-reason"] { flex: 1 1 auto; padding-inline: 0; }
+.main-pane [data-part="composer"][data-held] [data-part="composer-submit"] { margin-inline-start: auto; border-color: var(--fulcrum-muted); background: transparent; color: var(--fulcrum-muted); opacity: .65; }

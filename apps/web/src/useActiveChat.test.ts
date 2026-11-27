@@ -271,7 +271,7 @@ describe("chat state persistence", () => {
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
     try {
-      const write = writeRowState("session", "idle", undefined, () => Promise.reject(new Error("achilles stopped")));
+      const write = writeRowState("session", "idle", {}, () => Promise.reject(new Error("achilles stopped")));
       await new Promise((resolve) => setImmediate(resolve));
       expect(unhandled).toBe(0);
       expect(await write).toBe(false);

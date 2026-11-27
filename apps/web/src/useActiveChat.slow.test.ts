@@ -1330,7 +1330,7 @@ const TURN_ENDED = "the turn ended before zeta read it.";
 // (this tab keeps 3 chats running) and resident_limit (zeta is full). After the stop, the stopped chat is zeta's
 // attached session, not a parked one; a refused retry while zeta still has it (it still holds work) is "still
 // stopping": the chat the user was on opens again (so the stopped chat parks again and the shown chat is no parked
-// row), and when zeta closes the stopped chat the swap runs once more by itself. It never offers to stop a second chat.
+// row), and the notice offers "try again" (nothing retries by itself). It never offers to stop a second chat.
 type Answer = "ok" | { attached?: boolean; listed?: boolean };
 type StopRow = {
   name: string;
@@ -1340,15 +1340,13 @@ type StopRow = {
   fail?: "resume" | "abort";
   move?: "away" | "double";
   outcome: "switched" | "still_stopping" | "refused_other" | "stop_failed" | "none";
-  // still stopping, then: zeta closes the stopped chat (the swap runs by itself, answered `again`), "try again", or "stay"
-  then?: "closes" | "try_again" | "stay";
+  // still stopping, then: "try again", "stay", or the user's New chat (answered `again`) while zeta closes the stopped chat
+  then?: "try_again" | "stay" | "new_chat";
   again?: Answer;
 };
 const stopRows: StopRow[] = [
   { name: "the retry switches", retry: "ok", outcome: "switched" },
-  { name: "still stopping, then the stopped chat closes: the switch runs by itself", retry: { attached: true }, outcome: "still_stopping", then: "closes", again: "ok" },
-  { name: "still stopping, then the stopped chat closes, refused again: the notice", retry: { attached: true }, outcome: "still_stopping", then: "closes", again: {} },
-  { name: "still stopping (listed), then the stopped chat closes", retry: { listed: true }, outcome: "still_stopping", then: "closes", again: "ok" },
+  { name: "still stopping, then the user's New chat: it opens normally and send works", retry: { attached: true }, outcome: "still_stopping", then: "new_chat", again: "ok" },
   { name: "still stopping, then try again", retry: { attached: true }, outcome: "still_stopping", then: "try_again", again: { attached: true } },
   { name: "still stopping, then stay", retry: { listed: true }, outcome: "still_stopping", then: "stay" },
   { name: "other chats hold the slots", retry: {}, outcome: "refused_other" },
@@ -1382,6 +1380,7 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
   const zeta = { attached: "chat", parked: ["p1", "p2", "p3"], newSessions: 0 };
   const calls: string[] = [];
   const midStop = deferred<void>();
+  const userNewChat = deferred<void>();
   const refusal = (parkedIds: string[]) => row.limit === "parked_limit"
     ? Object.assign(new Error("parked limit"), { code: -32004, data: { reason: "parked_limit", parked: parkedIds } })
     : Object.assign(new Error("resident limit"), { code: -32004, data: { reason: "resident_limit" } });
@@ -1398,8 +1397,11 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
         return { session: { name: null } };
       }
       if (method === "abort") { if (row.fail === "abort") throw new Error("abort failed"); return {}; }
+      if (method === "send") return { accepted: true };
       if (method === "new_session") {
         zeta.newSessions += 1;
+        // the user's New chat waits for zeta while the stopped chat closes
+        if (zeta.newSessions === 3 && row.then === "new_chat") await userNewChat.promise;
         // the first new chat is refused (the tab keeps 3 chats running, or zeta is full); the retry answers per row
         if (zeta.newSessions === 1) throw refusal(zeta.parked);
         const answer = (zeta.newSessions === 2 ? row.retry : row.again) ?? {};
@@ -1484,27 +1486,24 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
   }
   if (row.then) {
     calls.splice(0);
-    if (row.then === "closes") {
-      // zeta closes the stopped chat (its work ended): no click, no timer
+    if (row.then === "new_chat") {
+      // a user swap ends the stop run and its notice at once; zeta closing the stopped chat meanwhile starts nothing
+      let created!: Promise<void>;
+      await act(async () => { created = active.newChat(); });
+      expect(active.stop, "the user's New chat did not end the stop run").toBeNull();
+      expect(active.busy).toBeNull();
       zeta.parked = zeta.parked.filter((id) => id !== "p1");
       await act(async () => { takeParkedEvent(client, JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "parked_session_changed", session_id: "p1", data: { state: "closed" } } })); });
       await settle();
-      expect(sent("new_session"), "the switch did not run by itself when the stopped chat closed").toHaveLength(1);
+      await act(async () => { userNewChat.resolve(); await created; });
+      await settle();
+      expect(active.state, "the user's New chat did not open").toMatchObject({ phase: "ready", sessionId: "fresh" });
+      expect(active.swapping, "send stays off after the New chat landed").toBe(false);
+      expect(sent("new_session"), "one New chat, nothing repeated by itself").toHaveLength(1);
       expect(sent("abort")).toEqual([]);
-      if (row.again === "ok") {
-        expect(active.stop).toBeNull();
-        expect(active.busy).toBeNull();
-        expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
-      } else {
-        // refused again by itself: the normal notice, with this tab's chats as they are now
-        expect(active.stop).toBeNull();
-        expect(active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
-        expect(active.busy?.parked?.map((entry) => entry.sessionId)).toEqual(["p2", "p3", "other"]);
-        // once only: nothing runs again
-        calls.splice(0);
-        await settle();
-        expect(sent("new_session")).toEqual([]);
-      }
+      calls.splice(0);
+      await act(async () => { await active.send("hello", { steer: false }, () => {}); });
+      expect(sent("send"), "send did not reach the new chat").toEqual(["send fresh"]);
     } else if (row.then === "try_again") {
       // "try again" stays a retry of that stop: refused again, it still names p1 and never aborts a second chat
       await act(async () => { active.retryStopped(); });
@@ -1669,8 +1668,8 @@ test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zet
   }
   await settle();
   // the swap settled (here refused, or landed): send works again
-  expect(active.swapping).toBe(false);
   expect(creatingOverKept, "the kept chat was covered by \"creating chat…\" and locked while zeta answered").toBe(false);
+  expect(active.swapping).toBe(false);
   const landed = row.entry === "select" ? "target" : "fresh";
   if (row.zeta !== "parks") {
     expect([...new Set(shown)], "the shown chat was replaced while zeta refused the swap").toEqual(["chat"]);

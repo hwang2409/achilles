@@ -709,6 +709,13 @@ def test_chat_order_and_time_follow_the_last_message_only(monkeypatch) -> None:
     # re-reporting the same waiting state on attach does not move it again
     client.patch("/api/chats/old", json={"last_state": "approval"})
     assert order() == ["new", "old"]
+    # a stopped chat (idle) parked again with work: a re-report, not a turn, so it keeps its place
+    client.patch("/api/chats/old", json={"last_state": "idle"})
+    parked = client.patch("/api/chats/old", json={"last_state": "running", "keep_order": True})
+    assert parked.status_code == 200 and parked.json()["last_state"] == "running"
+    assert order() == ["new", "old"]
+    for body in ({"keep_order": True}, {"last_state": "running", "keep_order": False}):
+        assert client.patch("/api/chats/old", json=body).status_code == 400
 
 
 def test_a_compare_and_set_state_write_never_overwrites_the_holders_newer_state() -> None:

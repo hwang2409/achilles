@@ -108,7 +108,7 @@ function usePageChatSheet() {
 }
 
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
-function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps & { hint?: string }; onActivity: (activity: ComposerActivity) => void }) {
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps & { held?: boolean }; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const commandOpener = useRef<HTMLElement | null>(null);
   const commands = useComposerCommands(client, chat, canWrite);
@@ -406,10 +406,10 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "Ask about this page" : "Message Zeta";
   // canWrite here means only this chat is off: another tab holds it
-  const composerProps: ComposerProps & { hint?: string } = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "read-only" }
+  const composerProps: ComposerProps & { held?: boolean } = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "read-only" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
-    // a swap is pending: typing stays (the draft is kept), send is off, and the running turn can still be stopped
-    : active.swapping && connected && client ? { state: "running", onSubmit: send, onStop: turn === "running" ? () => { if (ready) void client.request("abort", { session_id: ready.sessionId }); } : undefined, placeholder, hint: "opening chat… send waits until it opens" }
+    // a swap is pending: the kept chat's composer is held read-only (its draft stays; nothing typed is lost) until zeta answers
+    : active.swapping ? { state: "read-only", reason: "opening chat…", held: true, onSubmit: send, placeholder }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); }, placeholder);
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
   const hasComposer = observerBanner ? Boolean(activePage) : !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);
@@ -484,6 +484,8 @@ export function AgentSurface({ connection, childControls, childSend, client, con
       reason: !chatCanWrite ? chatReadOnlyReason : serverForcesAsk ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
       busy: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
       error: active.approvalChange?.error }} />;
+  // "stay": focus goes to the shown chat's composer (the clicked button goes away)
+  const stay = () => { void active.stay(); setPageChatFocusRequest((value) => value + 1); };
   const content = <>
     {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
     {ready && agents?.sessionId === ready.sessionId && <ChatAgents key={ready.sessionId} client={client} store={store} sessionId={ready.sessionId} title={title} controls={childControls} send={childSend} readOnly={chatCanWrite ? undefined : chatReadOnlyReason} initialRun={agents.run} opener={agents.opener} onClose={() => setAgents(null)} />}
@@ -491,12 +493,12 @@ export function AgentSurface({ connection, childControls, childSend, client, con
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {ready?.controlledElsewhere && <div className="chat-held-notice" role="status"><p><StableText text={heldText} reserve={Object.values(HELD_TEXT)} /></p><span className="chat-held-actions"><button type="button" className="ui-button" onClick={() => void active.newChat()} disabled={!canWrite}>new chat</button><button type="button" className="ui-button" aria-disabled={retryingHeld || undefined} onClick={() => { if (retryingHeld) return; setRenameRefused(false); setHeldRetry({ sessionId: ready.sessionId, lease: ready.lease }); active.retryAttachment(); }}><StableText text={retryingHeld ? "trying…" : "try again"} reserve={["try again", "trying…"]} /></button></span></div>}
-    {active.busy?.limit ? <LimitNotice kind={active.busy.limit} className="chat-held-notice limit-notice" busy={active.busy} parked={active.busy.parked ?? []} stop={active.stop} chats={nav.catalog.chats} onScreen={Boolean(ready)} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetry={active.busy.limit === "resident" ? active.retryBusy : undefined} onRetryStopped={active.retryStopped} onStay={() => void active.stay()} canWrite={canWrite} />
+    {active.busy?.limit ? <LimitNotice kind={active.busy.limit} className="chat-held-notice limit-notice" busy={active.busy} parked={active.busy.parked ?? []} stop={active.stop} chats={nav.catalog.chats} onScreen={Boolean(ready)} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetry={active.busy.limit === "resident" ? active.retryBusy : undefined} onRetryStopped={active.retryStopped} onStay={stay} canWrite={canWrite} />
       : active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
-      : active.state.phase === "error" && active.state.error === TOO_MANY_CHATS ? <div className="full-state"><LimitNotice kind="resident" className="limit-state" parked={parked.map((row) => ({ sessionId: row.session_id, chat: nav.catalog.chats.find((chat) => chat.session_id === row.session_id) ?? null, finishing: false }))} stop={active.stop} chats={nav.catalog.chats} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetry={active.retryLimit} onRetryStopped={active.retryStopped} onStay={() => void active.stay()} canWrite={canWrite} /></div>
+      : active.state.phase === "error" && active.state.error === TOO_MANY_CHATS ? <div className="full-state"><LimitNotice kind="resident" className="limit-state" parked={parked.map((row) => ({ sessionId: row.session_id, chat: nav.catalog.chats.find((chat) => chat.session_id === row.session_id) ?? null, finishing: false }))} stop={active.stop} chats={nav.catalog.chats} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetry={active.retryLimit} onRetryStopped={active.retryStopped} onStay={stay} canWrite={canWrite} /></div>
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
@@ -584,7 +586,7 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
 function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = false, onOpen, onStop, onRetry, onRetryStopped, onStay, canWrite }: { kind: "parked" | "resident"; className: string; busy?: { retry: "attach" | "new"; target?: Chat | null }; parked: ParkedChat[]; stop: StopState | null; chats: readonly Chat[]; onScreen?: boolean; onOpen: (chat: Chat) => void; onStop: () => void; onRetry?: () => void; onRetryStopped: () => void; onStay: () => void; canWrite: boolean }) {
   const element = useRef<HTMLDivElement>(null);
   // focus moves in when the notice shows, and back in after each change of it (a clicked button can go away) unless
-  // the user is elsewhere (typing in the kept chat while it switches by itself)
+  // the user is elsewhere (typing in the kept chat)
   const focused = useRef(false);
   useEffect(() => {
     const at = document.activeElement;
@@ -599,21 +601,21 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
     if (!chat) return "a chat";
     const title = titleOf(chat);
     const twin = shown.some((other) => other.session_id !== chat.session_id && titleOf(other) === title);
-    return twin ? `"${title}" (${new Date(chat.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()})` : `"${title}"`;
+    return twin ? `"${title}" (${new Date(chat.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase()})` : `"${title}"`;
   };
   const name = (sessionId: string) => nameOf(chatOf(sessionId));
   const oldest = parked.find((entry) => !entry.finishing);
   const stuck = stop?.phase === "still_stopping";
   const running = stop?.phase === "stopping" ? "stopping…" : stop?.phase === "retrying" ? "trying again…" : null;
   const verb = kind === "resident" ? "try again" : busy?.retry === "new" ? "open new chat" : "switch";
-  const target = busy?.retry === "new" ? "start a new chat" : busy?.target ? `open ${nameOf(busy.target)}` : "open that chat";
+  const target = busy?.retry === "new" ? "open a new chat" : busy?.target ? `open ${nameOf(busy.target)}` : "open that chat";
   const failed = stop?.phase === "failed" ? `${stop.error}. ` : "";
   const list = <>{parked.map((entry, at) => <span key={entry.sessionId}>{at > 0 && ", "}{entry.chat ? <button type="button" className="link-button" onClick={() => onOpen(entry.chat!)}>{name(entry.sessionId)}</button> : name(entry.sessionId)}{entry.finishing && " (finishing)"}</span>)}</>;
   // zeta refuses a swap after a stop only while the stopped chat still holds work (else the stop freed the slot)
-  const text = stuck ? <>{name(stop.sessionId)} is still finishing its background work. we will switch when it is done.</>
+  const text = stuck ? <>{name(stop.sessionId)} is still finishing its background work. try again when it is done.</>
     : kind === "parked" ? <>{failed}this tab already keeps {parked.length === 1 ? "1 chat" : `${parked.length} chats`} running: {list}. zeta allows 3 per tab. stop one to {target} here, or stay.</>
     // resident: only this tab's own chats are named; the rest are other tabs' (or recently closed ones), which it cannot see
-    : parked.length > 0 ? <>{failed}zeta has no room for another open chat. this tab holds {onScreen ? "the chat on screen and " : ""}{list}. stop one to {target}, try again in a minute, or stay.</>
+    : parked.length > 0 ? <>{failed}zeta has no room for another open chat. this tab holds {onScreen ? "the chat on screen and " : ""}{list}. stop one to {target}, try again later, or stay.</>
     : <>{failed}{TOO_MANY_CHATS}</>;
   return <div ref={element} className={className} role="alert" tabIndex={-1}>
     <p>{text}</p>

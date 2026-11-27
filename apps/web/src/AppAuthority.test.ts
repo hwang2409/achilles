@@ -1368,3 +1368,27 @@ test("a default attach whose newest chat is held elsewhere opens a fresh chat wi
   });
 });
 });
+
+// ux M-A: while zeta answers a New chat, the kept chat's composer is held read-only with a visible "opening chat…" and
+// send shown off, so nothing typed is hidden or lost; refused, it is editable again with its draft
+test("a pending swap holds the kept chat's composer read-only and says so; a refusal gives it back with its draft", async () => {
+  let answer!: (value: object) => void;
+  const held = new Promise<object>((resolve) => { answer = resolve; });
+  await withApp("controller", { attached: true, extraChat: { ...chat, session_id: "parked", title: "Parked chat" }, rpc: {
+    new_session: () => held as never,
+    status: () => ({ result: { session: { session_id: "session" }, state: "idle", parked_sessions: [{ session_id: "parked", state: "running", pending_approvals: 0 }] } }),
+  } }, async (app) => {
+    await change(select(app, '[data-part="composer"] textarea'), "my draft");
+    await click(select(app, tag("shell.new-chat")));
+    const composer = await waitFor(() => select(app, '[data-part="composer"][data-held]'));
+    expect(composer.querySelector('[data-part="composer-reason"]')?.textContent, "no visible opening label").toBe("opening chat…");
+    expect((composer.querySelector("textarea") as HTMLTextAreaElement).readOnly, "typing is accepted during the swap").toBe(true);
+    expect(disabled(composer.querySelector<HTMLElement>('[data-part="composer-submit"]')!), "send does not show as off").toBe(true);
+    await act(async () => { answer({ error: { code: -32004, message: "parked limit", data: { reason: "parked_limit", parked: ["parked"] } } }); });
+    await waitFor(() => select(app, ".limit-notice"), { timeout: 4000 });
+    const field = select(app, '[data-part="composer"] textarea') as HTMLTextAreaElement;
+    expect(app.container.querySelector('[data-part="composer"][data-held]'), "the composer stays held after the refusal").toBeNull();
+    expect(field.readOnly).toBe(false);
+    expect(field.value, "the draft was lost").toBe("my draft");
+  });
+});

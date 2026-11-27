@@ -41,8 +41,8 @@ export type ComposerAdapterProps = ComposerProps & {
   commandOutput?: ReactNode;
   /** the chat's modes and model, shown in the composer bar even when the composer is read-only */
   controls?: ReactNode;
-  /** replaces the keyboard hint (a swap is pending: "opening chat…") */
-  hint?: string;
+  /** read-only for a moment (a swap is pending): the reason shows and send shows as off */
+  held?: boolean;
 };
 
 /** `deliveryId`: send with this id (a retry of a held row), not a new one */

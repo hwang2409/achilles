@@ -1170,6 +1170,7 @@ class PageStore:
         changes = dict(changes)
         sent = "first_message" in changes
         first_title = changes.pop("first_message", None)
+        keep_order = changes.pop("keep_order", False)
         keep_user_title = "title" in changes and "titled_by_user" not in changes
         assignments = [
             "title=CASE WHEN titled_by_user THEN title ELSE ? END"
@@ -1179,7 +1180,7 @@ class PageStore:
         ]
         # updated_at is the last message time, so the list order and time follow messages only:
         # renames, automatic titles and re-reported states (an attach) never move a chat
-        active = changes.get("last_state") in ("running", "approval", "failed")
+        active = not keep_order and changes.get("last_state") in ("running", "approval", "failed")
         message = "NOT message_sent" if sent else "0"
         if active:
             message += " OR last_state IS NOT ?"

@@ -10,7 +10,7 @@ import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { applyApprovalMode, ChatBusyError, CONTROLLED_RETRIES, creationApprovalMode, loadSession, openHomeSession, pageBinding, ParkedLimitError, runningSession, SessionControlledError, SessionNotFoundError, TOO_MANY_CHATS } from "./zeta/session";
-import { holdAttached, parkedRows, reclaimHeld, refreshParked, stopParked, subscribeParked } from "./zeta/parked";
+import { holdAttached, parkedRows, reclaimHeld, refreshParked, stopParked } from "./zeta/parked";
 import { writeShownState, type RowState } from "./zeta/rowState";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
@@ -31,12 +31,11 @@ type BusyChat = { sessionId: string | null; chat: Chat | null; retry: "attach" |
 /**
  * "stop the oldest parked chat, then the refused swap again" (parked_limit or resident_limit), one at a time:
  * stopping, then retrying until the swap's answer settles it. A switch clears it; a refusal while the stopped chat is
- * still zeta's (attached, or listed: it still holds work) is still_stopping: the chat the user was on opens again, so
- * the stopped chat parks again, and when zeta closes it the swap runs once more by itself (auto; a refusal then shows
- * the notice again). Another refusal clears it (the notice lists the chats again); failed: the stop itself failed.
- * from: the chat the user was on ("stay"). lease: the shown chat's lease when zeta refused (its next one is the reopen).
+ * still zeta's (attached, or listed: it still holds work) is still_stopping: the chat the user was on opens again and
+ * the notice offers "try again" (no automatic retry). Another refusal clears it (the notice lists the chats again);
+ * failed: the stop itself failed. A user's swap ends the run (see beginSwap). from: the chat the user was on ("stay").
  */
-export type StopState = { sessionId: string; from: string | null } & ({ phase: "stopping" } | { phase: "retrying"; auto?: true } | { phase: "still_stopping"; lease: SessionLease | null } | { phase: "failed"; error: string });
+export type StopState = { sessionId: string; from: string | null } & ({ phase: "stopping" } | { phase: "retrying" } | { phase: "still_stopping" } | { phase: "failed"; error: string });
 // the one swap attempt (select a chat, new chat, try again); kept: the chat shown when it began
 type Swap = { retry: "attach" | "new"; target: Chat | null; replace: boolean; kept: string | null };
 type Refusal = { kind: "busy"; sessionId: string | null } | { kind: "parked"; parked: string[] } | { kind: "resident" };
@@ -653,13 +652,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setRouteRefresh((value) => value + 1);
   }, [applyActive]);
 
-  // the answer to a swap repeated after a stop (see StopState): still_stopping while the stopped chat is still zeta's
-  // (attached, or listed); the automatic repeat is never still_stopping again
+  // the answer to a swap repeated after a stop (see StopState): still_stopping while the stopped chat is still zeta's (attached, or listed)
   const settleStop = useCallback((attached: string | null, listed: readonly string[]) => {
     const run = stopRef.current;
     if (run?.phase !== "retrying") return;
-    const still = !run.auto && (attached === run.sessionId || listed.includes(run.sessionId));
-    setStop(still ? { sessionId: run.sessionId, from: run.from, phase: "still_stopping", lease: lastSnapshot.current?.ready.lease ?? null } : null);
+    const still = attached === run.sessionId || listed.includes(run.sessionId);
+    setStop(still ? { sessionId: run.sessionId, from: run.from, phase: "still_stopping" } : null);
   }, [setStop]);
   // a stop's repeated swap that ends in an error: resident_limit asks whether the stopped chat is still zeta's; any other ends the run
   const stopRetryFailed = useCallback((resident: boolean) => {
@@ -676,12 +674,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   // chat the user is opening must not reach the kept one); a refusal or a landing ends it
   const [swapping, setSwapping] = useState(false);
   const setSwap = useCallback((next: Swap | null) => { swap.current = next; setSwapping(Boolean(next?.kept)); }, []);
+  // a user's swap (select a chat, new chat, Back) ends any stop run and clears the notice
+  const leaveNotice = useCallback(() => { setBusy(null); setStop(null); }, [setStop]);
   const beginSwap = useCallback((token: number, attempt: Omit<Swap, "kept">, fallback: State) => {
     setSwap({ ...attempt, kept: state.phase === "ready" ? state.sessionId : null });
-    // a stop's repeated swap keeps its notice ("trying again…") until zeta answers
-    if (stopRef.current?.phase !== "retrying") setBusy(null);
+    // a stop's own repeated swap keeps its run and notice ("trying again…") until zeta answers
+    if (stopRef.current?.phase !== "retrying") leaveNotice();
     applyActive(token, { kind: "state", update: (current) => current.phase === "ready" ? current : fallback });
-  }, [applyActive, setSwap, state]);
+  }, [applyActive, leaveNotice, setSwap, state]);
   const refused = useCallback(async (token: number, retry: BusyChat["retry"], refusal: Refusal) => {
     const attempt = swap.current?.retry === retry ? swap.current : null;
     if (attempt) setSwap(null);
@@ -804,10 +804,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [applyActive, applyPendingCreateMode, canWrite, client, clock, connected, createPath, homeAlias, openFresh, publishReady, refused, routeRefresh, selectedId, stopRetryFailed]);
 
   useEffect(() => {
-    const pop = () => { setSwap(null); owner.current.clear(); applyActive(owner.current.token(), { kind: "state", update: { phase: "loading" } }); setSelectedId(selectedFromUrl()); setRouteRefresh((value) => value + 1); };
+    const pop = () => { setSwap(null); leaveNotice(); owner.current.clear(); applyActive(owner.current.token(), { kind: "state", update: { phase: "loading" } }); setSelectedId(selectedFromUrl()); setRouteRefresh((value) => value + 1); };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
-  }, [applyActive]);
+  }, [applyActive, leaveNotice, setSwap]);
   useEffect(() => () => owner.current.clear(), []);
 
   // replace: the chat takes the current history entry. goTo keeps a stop run (its repeated swap); a choice of the user
@@ -952,30 +952,13 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setStop({ sessionId: oldest, from, phase: "retrying" });
     repeatSwap();
   }, [canWrite, client, repeatSwap, setStop, state]);
-  // "try again" while the stopped chat is still stopping (auto: zeta closed it): the swap again, answered as that stop's retry
-  const retryStopped = useCallback((auto = false) => {
+  // "try again" while the stopped chat is still stopping: the swap again, answered as that stop's retry
+  const retryStopped = useCallback(() => {
     const run = stopRef.current;
     if (run?.phase !== "still_stopping") return;
-    setStop({ sessionId: run.sessionId, from: run.from, phase: "retrying", ...(auto ? { auto: true } as const : {}) });
+    setStop({ sessionId: run.sessionId, from: run.from, phase: "retrying" });
     repeatSwap();
   }, [repeatSwap, setStop]);
-  // still stopping: once the chat the user was on is open again (its next lease), the stopped chat is one of this tab's
-  // parked chats; when it leaves the parked list (zeta closed it), the swap runs once more by itself. no timer: zeta's
-  // parked_session_changed (closed) drives it, and one fresh read covers a close before the subscription
-  const stuck = stop?.phase === "still_stopping" ? stop : null;
-  const shownLease = state.phase === "ready" ? state.lease : null;
-  useEffect(() => {
-    if (!client || !stuck || !shownLease || shownLease === stuck.lease) return;
-    let fresh = false, done = false;
-    const check = () => {
-      if (done || !fresh || stopRef.current !== stuck || parkedRows(client).some((row) => row.session_id === stuck.sessionId)) return;
-      done = true;
-      retryStopped(true);
-    };
-    const unsubscribe = subscribeParked(client, check);
-    void refreshParked(client).catch(() => null).then(() => { fresh = true; check(); });
-    return () => { done = true; unsubscribe(); };
-  }, [client, retryStopped, shownLease, stuck]);
   useEffect(() => {
     if (!canWrite || !createAfterLoad.current) return;
     // "new chat" clicked while a missing page loaded: make the chat on home instead

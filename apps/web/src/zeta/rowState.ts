@@ -47,11 +47,11 @@ export function subscribeRowWrites(listener: () => void) {
 /**
  * Stores a row's state. `expected` (the row as read) makes it a compare-and-set: a tab that does not hold the chat never
  * overwrites a newer state of the tab that does (achilles answers the row as it is, and nothing changes; the list
- * loads again either way).
+ * loads again either way). `keepOrder`: a state re-report, not a new turn, so the row keeps its place in the list.
  */
-export async function writeRowState(sessionId: string, state: RowState | null, expected?: { last_state: RowState | null; updated_at: string }, fetchFn: typeof fetch = fetch): Promise<boolean> {
+export async function writeRowState(sessionId: string, state: RowState | null, { expected, keepOrder }: { expected?: { last_state: RowState | null; updated_at: string }; keepOrder?: true } = {}, fetchFn: typeof fetch = fetch): Promise<boolean> {
   if (state === null) return false;
-  const body = { last_state: state, ...(expected ? { expected_last_state: expected.last_state, expected_updated_at: expected.updated_at } : {}) };
+  const body = { last_state: state, ...(expected ? { expected_last_state: expected.last_state, expected_updated_at: expected.updated_at } : {}), ...(keepOrder ? { keep_order: true } : {}) };
   try {
     const response = await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!response.ok) return false;
@@ -88,7 +88,7 @@ export async function verifyChatStates(client: ZetaClient, chats: readonly Liste
     const status = await readStatus(client, chat.session_id);
     if (status === undefined) return false;
     const stored = chat.last_state ?? null;
-    return writeRowState(chat.session_id, rowState(stored, { from: "zeta", status }).write, chat.updated_at ? { last_state: stored, updated_at: chat.updated_at } : undefined, fetchFn);
+    return writeRowState(chat.session_id, rowState(stored, { from: "zeta", status }).write, { expected: chat.updated_at ? { last_state: stored, updated_at: chat.updated_at } : undefined }, fetchFn);
   }));
   return changed.filter(Boolean).length;
 }
