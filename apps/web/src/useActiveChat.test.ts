@@ -214,7 +214,9 @@ const refused = (code: number) => Object.assign(new Error(`refused ${code}`), { 
 describe("message delivery tracking", () => {
   test.each([
     { name: "send", steer: false, replies: [ok], log: ["track:d1", "send:d1"] },
-    { name: "steer", steer: true, replies: [ok, { status: "delivered" }], log: ["track:d1", "steer:d1", "delivery_status:d1"] },
+    { name: "steer", steer: true, replies: [ok, { status: "delivered" }], log: ["track:d1", "steer:d1", "delivery_status:d1"], accepted: 1 },
+    // the chat moves up in Recent only for a message zeta keeps: not for a steer its turn ended unread whose resend is refused
+    { name: "steer dropped at turn end, its resend refused", steer: true, replies: [ok, { status: "dropped" }, refused(-32004)], drop: "turn_end", log: ["track:d1", "steer:d1", "delivery_status:d1", "track:fresh", "send:fresh"], error: "the turn ended before zeta read it.", accepted: 0 },
     { name: "send refused while a turn runs, retried as steer", steer: false, replies: [refused(-32004), ok, { status: "delivered" }], log: ["track:d1", "send:d1", "steer:d1", "delivery_status:d1"] },
     { name: "steer refused with no turn, retried as send", steer: true, replies: [refused(-32005), ok], log: ["track:d1", "steer:d1", "send:d1"] },
     // no answer from zeta: it may hold the text, so the row says so and nothing goes out again by itself
@@ -235,7 +237,7 @@ describe("message delivery tracking", () => {
     { name: "output overflow broadcast before zeta's answer (-32011)", steer: false, replies: [refused(-32011)], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
     { name: "output overflow broadcast while the steer status is read (-32011)", steer: true, replies: [ok, refused(-32011)], log: ["track:d1", "steer:d1", "delivery_status:d1"], error: MAYBE_SENT },
     { name: "a reply zeta never sends: shown, never a confirm", steer: false, replies: [{ accepted: false, status: "later" }], log: ["track:d1", "send:d1"], error: "zeta did not accept this message" },
-  ])("tracks the id once, before the first request: $name", async ({ steer, replies, log: expected, error }) => {
+  ] as Array<{ name: string; steer: boolean; replies: unknown[]; log: string[]; error?: string; drop?: string; accepted?: number }>)("tracks the id once, before the first request: $name", async ({ steer, replies, log: expected, error, drop, accepted }) => {
     const log: string[] = [];
     const client = { request: async (method: string, params: { delivery_id: string }) => {
       log.push(`${method}:${params.delivery_id === "d1" ? "d1" : "fresh"}`);
@@ -243,10 +245,12 @@ describe("message delivery tracking", () => {
       if (reply instanceof Error) throw reply;
       return reply;
     }};
-    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id === "d1" ? "d1" : "fresh"}`), async () => undefined);
+    let recorded = 0;
+    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id === "d1" ? "d1" : "fresh"}`), async () => drop, () => { recorded += 1; });
     if (error) await expect(delivery).rejects.toThrow(error);
     else await delivery;
     expect(log).toEqual(expected);
+    if (accepted !== undefined) expect(recorded, "times the chat was recorded as messaged").toBe(accepted);
   });
 
   test.each([

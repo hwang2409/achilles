@@ -409,11 +409,13 @@ export async function deliverChatMessage(
   steer: boolean,
   track: (id: string) => void,
   dropReason: (deliveryId: string) => Promise<string | undefined>,
+  // zeta keeps the message: a send accepted, a steer delivered
+  onAccepted: () => void = () => {},
 ): Promise<"send" | "steer"> {
   // the delivery id is the message's intent: a resend with a fresh id takes over its row instead of adding one
   const intent = deliveryId;
   try {
-    return await deliverOnce(client, sessionId, text, deliveryId, steer, track, intent);
+    return await deliverOnce(client, sessionId, text, deliveryId, steer, track, intent, onAccepted);
   } catch (error) {
     if (error instanceof DroppedSteerDeliveryError && UNREAD_DROPS.has(await dropReason(deliveryId) ?? "")) return await sendUnreadSteer(client, sessionId, text, track, intent);
     const outcome = classify(error);
@@ -421,7 +423,7 @@ export async function deliverChatMessage(
     if (outcome !== "resend") throw outcome === "maybe" ? new Error(MAYBE_SENT) : refusal(error);
   }
   try {
-    return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track, intent);
+    return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track, intent, onAccepted);
   } catch (error) {
     // the one resend: zeta's answer is shown and nothing goes out again by itself
     throw classify(error) === "rethrow" || error instanceof DroppedDuplicateError ? refusal(error) : new Error(MAYBE_SENT);
@@ -491,6 +493,7 @@ async function deliverOnce(
   steer: boolean,
   track: (id: string) => void,
   intent: string,
+  onAccepted: () => void,
 ): Promise<"send" | "steer"> {
   const first: "send" | "steer" = steer ? "steer" : "send";
   let used = first;
@@ -508,6 +511,7 @@ async function deliverOnce(
     accepted(await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId }, { intent }));
   }
   if (used === "steer") await confirmSteerDelivery(client, deliveryId);
+  onAccepted();
   return used;
 }
 
@@ -1052,27 +1056,34 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
 
   const sendReady = useCallback(async (client: ZetaClient, target: ReadyState, token: number, text: string, deliveryId: string, steer: boolean, track: (id: string) => void) => {
     requireCurrent(owner.current, token);
+    // not gated on the owner token: a chat switch mid-send must still record the send. each user send (a message or a
+    // steer) moves the chat to the top of Recent once zeta keeps it (a send accepted, a steer delivered); the first one
+    // also marks it sent and keeps its title
+    let recorded = false;
+    const record = () => {
+      if (recorded) return;
+      recorded = true;
+      const firstTitle = target.sent ? null : cutTitle(text);
+      void patchChat(target.sessionId, firstTitle === null ? { message: true } : { message: true, first_message: firstTitle })
+        .then((response) => {
+          if (!response.ok || firstTitle === null) return;
+          updateReady(token, (value) => value.sessionId !== target.sessionId ? value : {
+            ...value, sent: true,
+            autoTitle: value.autoTitle === "new chat" ? firstTitle : value.autoTitle,
+            title: value.title === "new chat" ? firstTitle : value.title,
+          });
+        })
+        .catch((error) => console.error("could not record the message", error));
+    };
     try {
-      await deliverChatMessage(client, target.sessionId, text, deliveryId, steer, track, (id) => steerDropReason(target.lease.store, id));
+      await deliverChatMessage(client, target.sessionId, text, deliveryId, steer, track, (id) => steerDropReason(target.lease.store, id), record);
     } catch (error) {
       if (pendingSelection.current?.sessionId === target.sessionId) pendingSelection.current = null;
       // the bubble says why too: zeta may have named the drop `disconnect` although this connection still answers
       if (error instanceof TurnEndedUnreadError) target.lease.store.dispatch({ type: "delivery_status", delivery_id: deliveryId, method: "steer", status: "dropped", content: "", reason: "turn_end" });
       throw error;
     }
-    // not gated on the owner token: a chat switch mid-send must still record the send. each user send (a message or a
-    // steer) moves the chat to the top of Recent; the first one also marks it sent and keeps its title
-    const firstTitle = target.sent ? null : cutTitle(text);
-    void patchChat(target.sessionId, firstTitle === null ? { message: true } : { message: true, first_message: firstTitle })
-      .then((response) => {
-        if (!response.ok || firstTitle === null) return;
-        updateReady(token, (value) => value.sessionId !== target.sessionId ? value : {
-          ...value, sent: true,
-          autoTitle: value.autoTitle === "new chat" ? firstTitle : value.autoTitle,
-          title: value.title === "new chat" ? firstTitle : value.title,
-        });
-      })
-      .catch((error) => console.error("could not record the message", error));
+    record();
   }, [updateReady]);
 
   const send = useCallback(async (text: string, intent: SendIntent, track: (id: string) => void) => {
