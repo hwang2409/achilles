@@ -147,7 +147,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await gateWait.playwright(page, "waitForFunction", () => document.querySelector(".sidebar")?.getAttribute("aria-hidden") === "true");
   const pageChatBackdrop = page.locator(".page-chat-backdrop");
   if (await pageChatBackdrop.isVisible()) {
-    await pageChatBackdrop.click();
+    await page.getByRole("button", { name: "close page chat" }).click();
     await gateWait.playwright(pageChatBackdrop, "waitFor", { state: "detached" });
   }
   const menuButton = page.getByRole("button", { name: "open menu" });
