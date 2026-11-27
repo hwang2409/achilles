@@ -123,12 +123,12 @@ test("active status projects the picker, not stored catalog rows", async () => {
   expect(f.reads).toEqual([]);
 });
 
-test("the catalog's step, turns, and tool calls are shown as reported; the live row adds only waiting state and the reply", () => {
+test("the catalog's step, turns, and tool calls are shown as reported; the live row adds waiting state (and the wait as the step) and the reply", () => {
   const running: AgentRun = { ...row, status: "running", currentStep: "turn 2: reading", toolCount: 4, turnsUsed: 2 };
   const live = { status: "running", latestActivity: "turn 1: thinking", toolCount: 1 };
   expect(withLiveRow(running, live)).toBe(running);
-  expect(withLiveRow(running, { ...live, status: "waiting_approval" })).toEqual({ ...running, waiting: "needs approval" });
-  expect(withLiveRow(running, { status: "waiting_input" }).waiting).toBe("needs input");
+  expect(withLiveRow(running, { ...live, status: "waiting_approval", latestActivity: "approve bash: rm notes.txt" })).toEqual({ ...running, waiting: "needs approval", currentStep: "approve bash: rm notes.txt" });
+  expect(withLiveRow(running, { status: "waiting_input" })).toEqual({ ...running, waiting: "needs input", currentStep: "needs input" });
   expect(withLiveRow(running, { status: "done", summary: "counted 3 lines" })).toEqual({ ...running, reply: "counted 3 lines" });
   expect(withLiveRow(running, { status: "done" })).toBe(running);
   expect(withLiveRow({ ...running, status: "completed" }, { status: "waiting_input" }).waiting).toBeUndefined();

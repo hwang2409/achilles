@@ -677,7 +677,7 @@ def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
     assert client.get("/api/chats?before=missing").status_code == 400
 
 
-def test_chat_order_and_time_follow_the_last_message_only(monkeypatch) -> None:
+def test_chat_order_and_time_follow_the_last_user_message_only(monkeypatch) -> None:
     clock = iter(f"2025-01-01T00:00:{second:02d}" for second in range(60))
     monkeypatch.setattr("achilles.pages.now", lambda: next(clock))
     client = chat_client()
@@ -685,60 +685,72 @@ def test_chat_order_and_time_follow_the_last_message_only(monkeypatch) -> None:
     def order():
         return [row["session_id"] for row in client.get("/api/chats").json()["chats"]]
 
-    def stamp(session_id):
-        return client.get(f"/api/chats?include={session_id}").json()["chats"]
+    def times():
+        return {
+            row["session_id"]: row["updated_at"] for row in client.get("/api/chats").json()["chats"]
+        }
 
     for session_id in ("old", "new"):
         client.post("/api/pages/home/chats", json={"session_id": session_id})
         client.patch(f"/api/chats/{session_id}", json={"first_message": session_id})
         client.patch(f"/api/chats/{session_id}", json={"last_state": "running"})
-        client.patch(f"/api/chats/{session_id}", json={"last_state": "idle"})
     assert order() == ["new", "old"]
-    before = {row["session_id"]: row["updated_at"] for row in stamp("old")}
-    # opening the older chat: attach, re-register, history repair and re-reported states
+    before = times()
+    # states never move a chat: a stop, then zeta re-parks it while it still works (#325), an
+    # agent-started turn, a failure, a wait for approval
+    for state in ("idle", "running", "idle", "running", "failed", "approval"):
+        client.patch("/api/chats/old", json={"last_state": state})
+    # opening the older chat: attach, re-register, history repair and an automatic name
     assert client.put("/api/pages/home/session", json={"session_id": "old"}).status_code == 200
     client.post("/api/pages/home/chats", json={"session_id": "old"})
     client.patch("/api/chats/old", json={"first_message": "repaired"})
-    client.patch("/api/chats/old", json={"last_state": "idle"})
     client.patch("/api/chats/old", json={"title": "zeta auto name"})
     # renaming and clearing a name
     client.patch("/api/chats/old", json={"title": "renamed", "titled_by_user": True})
     client.patch("/api/chats/old", json={"title": None, "titled_by_user": False})
     assert order() == ["new", "old"]
-    assert {row["session_id"]: row["updated_at"] for row in stamp("old")} == before
-    # a new message starts a turn, so the chat moves up and its time changes
-    client.patch("/api/chats/old", json={"last_state": "running"})
+    assert times() == before
+    # a user send (a message or a steer) moves the chat up and changes its time
+    client.patch("/api/chats/old", json={"message": True})
     assert order() == ["old", "new"]
-    client.patch("/api/chats/old", json={"last_state": "approval"})
-    client.patch("/api/chats/new", json={"last_state": "failed"})
-    assert order() == ["new", "old"]
-    # re-reporting the same waiting state on attach does not move it again
-    client.patch("/api/chats/old", json={"last_state": "approval"})
-    assert order() == ["new", "old"]
+    assert times()["old"] > before["old"]
+    for body in ({"message": False}, {"message": "yes"}):
+        assert client.patch("/api/chats/old", json=body).status_code == 400
 
 
-def test_a_compare_and_set_state_write_never_overwrites_the_holders_newer_state() -> None:
+def test_a_compare_and_set_state_write_never_overwrites_the_holders_newer_state(
+    monkeypatch,
+) -> None:
+    # one clock tick for every write: a time can never tell two writes apart
+    monkeypatch.setattr("achilles.pages.now", lambda: "2025-01-01T00:00:00")
     client = chat_client()
     client.post("/api/pages/home/chats", json={"session_id": "c"})
+    client.patch("/api/chats/c", json={"last_state": "idle"})
     seen = client.patch("/api/chats/c", json={"last_state": "running"}).json()
-    expected = {"expected_last_state": "running", "expected_updated_at": seen["updated_at"]}
-    # the holder ended that turn and started another after the other tab read the row
+    expected = {"expected_last_state": "running", "expected_state_version": seen["state_version"]}
+    # the holder ended that turn and started another after the other tab read the row: the
+    # state reads as it did (running), but the row is not the one that tab read
     client.patch("/api/chats/c", json={"last_state": "idle"})
     client.patch("/api/chats/c", json={"last_state": "running"})
     late = client.patch("/api/chats/c", json={"last_state": "idle", **expected})
     # a lost race answers the current row (no 409: the browser logs every 4xx as a console error)
     assert late.status_code == 200 and late.json()["last_state"] == "running"
     assert client.get("/api/chats?include=c").json()["chats"][0]["last_state"] == "running"
+    assert late.json()["state_version"] == seen["state_version"] + 2
     # unchanged since the read: the stale state is corrected
     seen = client.get("/api/chats?include=c").json()["chats"][0]
-    fresh = {"expected_last_state": "running", "expected_updated_at": seen["updated_at"]}
+    fresh = {"expected_last_state": "running", "expected_state_version": seen["state_version"]}
     corrected = client.patch("/api/chats/c", json={"last_state": "idle", **fresh})
     assert corrected.json()["last_state"] == "idle"
     assert client.patch("/api/chats/gone", json={"last_state": "idle", **fresh}).status_code == 404
     for body in (
         {"last_state": "idle", "expected_last_state": "running"},
         {"title": "x", **fresh},
-        {"last_state": "idle", "expected_last_state": "bad", "expected_updated_at": "x"},
+        {"last_state": "idle", "expected_last_state": "bad", "expected_state_version": 0},
+        {"last_state": "idle", "expected_last_state": "idle", "expected_state_version": True},
+        {"last_state": "idle", "expected_last_state": "idle", "expected_state_version": -1},
+        {"last_state": "idle", "expected_last_state": "idle", "expected_state_version": "1"},
+        {"last_state": "idle", "expected_last_state": "idle", "expected_updated_at": "x"},
     ):
         assert client.patch("/api/chats/c", json=body).status_code == 400
 

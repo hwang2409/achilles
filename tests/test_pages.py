@@ -220,6 +220,10 @@ def test_old_database_migrates_in_place_with_backup_and_non_page_data(tmp_path, 
             db.execute("SELECT title FROM chat WHERE session_id='chat-1'").fetchone()[0]
             == "kept chat"
         )
+        # main's ensure_column runs after the v3 -> v4 drop and leaves old chats at version 0
+        assert db.execute(
+            "SELECT state_version FROM chat WHERE session_id='chat-1'"
+        ).fetchone() == (0,)
         assert (
             db.execute("SELECT source FROM code_revision")
             .fetchone()[0]

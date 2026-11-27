@@ -14,7 +14,7 @@ import type { ChildControls } from "./agents/childControls";
 import type { ChildSendOwner } from "./agents/childSend";
 import type { ZetaClient } from "@fulcrum/zeta";
 import type { RenderShell } from "./surface/SurfaceRouter";
-import { titleOf, useAgentNavAdapter, type Chat } from "./surface/AgentNavAdapter";
+import { chatHref, titleOf, useAgentNavAdapter, type Chat } from "./surface/AgentNavAdapter";
 import { surfaceHref, approvalIntent, chatsRoute, createRoute, pagesRoute, type SurfaceRoute } from "./surface/routes";
 import { CreateLanding } from "./create/CreateLanding";
 import type { CreateModeOwner } from "./create/createMode";
@@ -29,13 +29,13 @@ import { draftStore } from "./draftStore";
 import { HistoryDialog } from "./page/HistoryDialog";
 import { PageFrame } from "./page/PageFrame";
 import { EmptyChat } from "./EmptyChat";
-import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
+import { isEditableTarget, keyboardFocusToComposer, returnFocusToComposer, userTyping, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { TOO_MANY_CHATS } from "./zeta/session";
 import { parkedRows, subscribeParked } from "./zeta/parked";
-import { subscribeRowWrites, verifyChatStates } from "./zeta/rowState";
+import { keepRowWrites, subscribeRowWrites, verifyChatStates } from "./zeta/rowState";
 import { trackQueuedSteer, useActiveChat, type Page, type ParkedChat, type StopState } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -104,6 +104,8 @@ function usePageChatSheet() {
   return { narrow: matches, open, setOpen };
 }
 
+// the composer's text field: the plain textarea or the vim editor
+const FIELD = 'textarea[aria-label="message"], [role="textbox"]';
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps & { held?: boolean }; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
@@ -119,10 +121,13 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
-  useLayoutEffect(() => { if (focus && !document.querySelector('[role="dialog"][aria-modal="true"]') && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
+  // a hold's end, or a swap that replaced the field the user typed in, gives focus back to this composer
+  const editable = props.state !== "read-only";
+  useLayoutEffect(() => { if (editable) returnFocusToComposer(slot.current?.querySelector<HTMLElement>(FIELD)); }, [editable]);
+  useLayoutEffect(() => { if (focus && !document.querySelector('[role="dialog"][aria-modal="true"]') && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>(FIELD)?.focus({ preventScroll: true }); }, [focus]);
   useLayoutEffect(() => {
     if (!focusRequest) return;
-    const field = slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]');
+    const field = slot.current?.querySelector<HTMLElement>(FIELD);
     if (!field || document.activeElement === field) return;
     field.focus({ preventScroll: true });
     // the caret goes after the draft, so typing continues it
@@ -138,7 +143,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     onActivity,
     questionWaiting,
     onCommand: (command: Parameters<typeof commands.run>[0]) => {
-      const field = slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]');
+      const field = slot.current?.querySelector<HTMLElement>(FIELD);
       commandOpener.current = field ?? null;
       return commands.run(command, commandOpener.current);
     },
@@ -424,14 +429,21 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const listedChats = nav.catalog.chats;
   // (a chat a stop left attached has no other writer, so the check covers it too)
   const heldIds = [ready?.sessionId, ...parked.map((row) => row.session_id)].filter((id): id is string => Boolean(id)).join(" ");
+  // this tab's own chats (not one shown read-only): what it last wrote is kept for these only
+  const ownIds = [ready && !ready.controlledElsewhere ? ready.sessionId : null, ...parked.map((row) => row.session_id)].filter(Boolean).join(" ");
+  useEffect(() => keepRowWrites(new Set(ownIds.split(" "))), [ownIds]);
+  // a list another tab's write reloaded is not checked: that tab holds the chat and just stored its state, and zeta's
+  // view of it could lag behind
+  const remoteReload = useRef(false);
   useEffect(() => {
+    if (remoteReload.current) { remoteReload.current = false; return; }
     if (!client || !connected || !canWrite || !listedChats.length) return;
     void verifyChatStates(client, listedChats, new Set(heldIds.split(" ")));
   }, [client, connected, canWrite, listedChats]);
-  // every stored row state (this tab's chats, or a corrected stale row) loads the list again
+  // every chat write (here, or in another tab of this browser) loads the list again
   const reloadChats = useRef(nav.catalog.reload);
   reloadChats.current = nav.catalog.reload;
-  useEffect(() => subscribeRowWrites(() => reloadChats.current()), []);
+  useEffect(() => subscribeRowWrites((remote) => { remoteReload.current = remote; reloadChats.current(); }), []);
   const building = nav.catalog.chats.some((chat) => chat.session_id === ready?.sessionId && chat.purpose === "page_build");
   const stateLabel = runStateLabel(state, composerActivity.queued, building);
   useEffect(() => {
@@ -571,6 +583,10 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
   </>;
 }
 
+// user-perceived characters: an emoji sequence (a family, a flag) is one, so a cut never splits it
+const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+const graphemes = (text: string) => segmenter ? Array.from(segmenter.segment(text), (part) => part.segment) : Array.from(text);
+
 // zeta refused a swap: this tab keeps 3 chats running (parked_limit), or zeta is full (resident_limit). name the chats
 // that hold the slots, and offer to stop the oldest (zeta's status order) and try the swap again, or to stay. the notice
 // is a choice, not an error; focus moves into it, so the keyboard reaches its buttons next. it stays while a stop and its
@@ -583,8 +599,7 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   useEffect(() => {
     const at = document.activeElement;
     // never out of a text field: the user is typing (the notice can mount again during a stop, so the ref alone misses it)
-    const typing = at instanceof HTMLElement && (at.isContentEditable || at.matches("textarea, input"));
-    if (typing || (focused.current && at && at !== document.body && !element.current?.contains(at))) return;
+    if (userTyping() || (focused.current && at && at !== document.body && !element.current?.contains(at))) return;
     focused.current = true;
     element.current?.focus({ preventScroll: true });
   }, [kind, stop?.phase]);
@@ -593,29 +608,36 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   // the time is the same too, so each name means one chat
   const shown = [...parked.map((entry) => entry.chat), busy?.target ?? null, stop ? chatOf(stop.sessionId) : null, shownChat].filter((chat): chat is Chat => chat !== null);
   const timeOf = (chat: Chat) => new Date(chat.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase();
-  // [the quoted title, the suffix that tells twins apart ("" without twins)]
-  const partsOf = (chat: Chat | null): [string, string] => {
+  // [the quoted title, the suffix that tells twins apart ("" without twins)]; `clip` shortens the title inside the quotes
+  const partsOf = (chat: Chat | null, clip = (title: string) => title): [string, string] => {
     if (!chat) return ["a chat", ""];
     const title = titleOf(chat);
     const twins = shown.filter((other) => other.session_id !== chat.session_id && titleOf(other) === title);
-    if (twins.length === 0) return [`"${title}"`, ""];
+    if (twins.length === 0) return [`"${clip(title)}"`, ""];
     const time = timeOf(chat);
-    return [`"${title}"`, ` (${time}${twins.some((other) => timeOf(other) === time) ? ` · ${chat.session_id.slice(0, 4)}` : ""})`];
+    return [`"${clip(title)}"`, ` (${time}${twins.some((other) => timeOf(other) === time) ? ` · ${chat.session_id.slice(0, 4)}` : ""})`];
   };
   const nameOf = (chat: Chat | null) => partsOf(chat).join("");
   const name = (sessionId: string) => nameOf(chatOf(sessionId));
-  // the chat's name, as a link that opens it when achilles lists it
-  const link = (sessionId: string) => { const chat = chatOf(sessionId); return chat ? <button type="button" className="link-button" onClick={() => onOpen(chat)}>{nameOf(chat)}</button> : nameOf(chat); };
+  // the chat's name, as a link that opens it when achilles lists it; an anchor, so a long name wraps like the text around it
+  const anchor = (chat: Chat, text: string) => <a className="link-button" href={chatHref(chat)} onClick={(event) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onOpen(chat);
+  }}>{text}</a>;
+  const link = (sessionId: string) => { const chat = chatOf(sessionId); return chat ? anchor(chat, nameOf(chat)) : nameOf(chat); };
   const oldest = parked.find((entry) => !entry.finishing);
-  // only the title shortens: the suffix that tells twins apart stays whole
-  const oldestName = partsOf(oldest ? chatOf(oldest.sessionId) : null);
+  // only the title shortens, as text (a clipped box keeps blank space after its ellipsis): the suffix that tells twins
+  // apart stays whole, and the verb stays visible
+  const clipped = (title: string) => { const chars = graphemes(title); return chars.length > 40 ? `${chars.slice(0, 39).join("").trimEnd()}…` : title; };
+  const oldestName = partsOf(oldest ? chatOf(oldest.sessionId) : null, clipped);
   const stuck = stop?.phase === "still_stopping";
   // one line for the whole run, the stop and the repeated swap, until zeta answers
   const running = stop?.phase === "stopping" || stop?.phase === "retrying";
   const verb = kind === "resident" ? "try again" : busy?.retry === "new" ? "open new chat" : "switch";
   const target = busy?.retry === "new" ? "open a new chat" : busy?.target ? `open ${nameOf(busy.target)}` : "open that chat";
   const failed = stop?.phase === "failed" ? `${stop.error}. ` : "";
-  const list = <>{parked.map((entry, at) => <span key={entry.sessionId}>{at > 0 && ", "}{entry.chat ? <button type="button" className="link-button" onClick={() => onOpen(entry.chat!)}>{name(entry.sessionId)}</button> : name(entry.sessionId)}{entry.finishing && " (finishing)"}</span>)}</>;
+  const list = <>{parked.map((entry, at) => <span key={entry.sessionId}>{at > 0 && ", "}{entry.chat ? anchor(entry.chat, name(entry.sessionId)) : name(entry.sessionId)}{entry.finishing && " (finishing)"}</span>)}</>;
   // a refused swap after a stop: the stopped chat still holds work (it is parked), or zeta has not closed it yet
   const text = running ? <>stopping {link(stop.sessionId)}…</>
     : stuck ? stop.working ? <>{link(stop.sessionId)} is still finishing its background work. try again when it is done.</> : <>zeta has not freed {link(stop.sessionId)} yet. try again in a moment, or stay.</>
@@ -629,7 +651,7 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
       {running ? <button type="button" className="ui-button" disabled>stopping…</button>
         : stuck ? <button type="button" className="ui-button" onClick={() => onRetryStopped()}>try again</button>
         : <>{onRetry && <button type="button" className="ui-button" onClick={onRetry}>try again</button>}
-          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop <span className="limit-title">{oldestName[0]}</span>{oldestName[1]} and {verb}</button>}</>}
+          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop {oldestName.join("")} and {verb}</button>}</>}
       <button type="button" className="ui-button" onClick={onStay}>stay</button>
     </span>
   </div>;
