@@ -2052,9 +2052,9 @@ with _database() as db:
   });
   if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
     throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
-  await page.setViewportSize({ width: 390, height: 760 });
   await page.goto(`${origin}/allow`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
+  await page.setViewportSize({ width: 390, height: 760 });
   const shellChat = page.locator(".page-chat");
   const shellComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
   const shellGeometry = await page.evaluate(() => {
