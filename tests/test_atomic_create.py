@@ -322,6 +322,7 @@ def test_page_chat_edits_its_own_page_without_create_mode(creation_client):
         "edit_page",
         "inspect_page",
         "read_page_file",
+        "render_page",
         "restore_version",
         "write_page",
     ]
@@ -901,6 +902,7 @@ def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creatio
         "write_page",
         "read_page_file",
         "edit_page",
+        "render_page",
         "inspect_page",
         "restore_version",
         "add_book",

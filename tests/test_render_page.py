@@ -1,0 +1,193 @@
+import base64
+import hashlib
+import json
+import os
+import shutil
+import socket
+import subprocess
+import threading
+from pathlib import Path
+
+import httpx
+import pytest
+from test_web import running_http_app
+
+import achilles.web as web
+from achilles.pages import PageStore
+from achilles.render_page import render_page
+
+_CHROMIUM = Path.home() / (
+    "Library/Caches/ms-playwright" if Path("/Library").is_dir() else ".cache/ms-playwright"
+)
+_RUNNER_READY = (
+    shutil.which("bun") is not None
+    and (Path(web.__file__).parents[2] / "apps/web/node_modules/playwright").is_dir()
+    and any(_CHROMIUM.glob("chromium_headless_shell-*"))
+)
+# real chromium: runs where the web deps and playwright chromium are installed (CI evals job, local)
+# the CI step that has chromium sets ACHILLES_RENDER_TESTS=required, so a broken setup fails there
+pytestmark = pytest.mark.skipif(
+    not _RUNNER_READY and os.environ.get("ACHILLES_RENDER_TESTS") != "required",
+    reason="needs bun, apps/web deps, chromium",
+)
+
+DELAYED = """
+const root = document.getElementById("root");
+root.innerHTML = "<h1>loading</h1>";
+const items = await window.achilles.records.list("items");
+root.innerHTML = "<h1>ready</h1>" + items.map((item) => "<p>" + item.title + "</p>").join("");
+"""
+FAULTS = """
+document.getElementById("root").innerHTML = "<h1>faults</h1>";
+console.error("boom-console");
+Promise.reject(new Error("boom-rejection"));
+fetch("http://127.0.0.1:%d/missing").catch(() => {});
+window.achilles.records.insert("items", { title: "should not save" }).catch(() => {});
+"""
+HUNG = "document.getElementById('root').textContent = 'spin'; for (;;) {}"
+
+
+def _home_with_code(root: Path, source: str) -> PageStore:
+    store = PageStore(root)
+    store.set_create_mode("home", True)
+    digest = hashlib.sha256(source.encode()).hexdigest()
+    (root / "bundles" / f"{digest}.js").write_text(source)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+            "artifact_size,diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("home", 1, "source", "{}", digest, len(source), None, None, "2025-01-01"),
+        )
+        db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+    return store
+
+
+def _closed_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _record_count(store: PageStore) -> int:
+    with store.transaction() as db:
+        return db.execute("SELECT count(*) FROM page_record").fetchone()[0]
+
+
+def _mcp_render(port: int, token: str) -> dict:
+    headers = {
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+    with httpx.Client(base_url=f"http://127.0.0.1:{port}", headers=headers, timeout=60) as client:
+        initialized = client.post(
+            "/mcp/",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+        )
+        client.headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        listed = client.post(
+            "/mcp/", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        ).json()["result"]["tools"]
+        assert "render_page" in [tool["name"] for tool in listed]
+        return client.post(
+            "/mcp/",
+            json={
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "render_page", "arguments": {}},
+            },
+        ).json()["result"]
+
+
+@pytest.fixture
+def served(monkeypatch, tmp_path):
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    return running_http_app
+
+
+def test_render_returns_an_image_and_waits_for_bridge_content(served, tmp_path) -> None:
+    store = _home_with_code(tmp_path / "achilles", DELAYED)
+    store.insert_record("home", "items", {"title": "from the real records"})
+    token = store.ensure_credential("home")
+    with served(web.create_app()) as port:
+        result = _mcp_render(port, token)
+    assert not result.get("isError"), result
+    image, text = result["content"]
+    assert image["type"] == "image" and image["mimeType"] == "image/jpeg"
+    assert base64.b64decode(image["data"])[:2] == b"\xff\xd8"
+    report = json.loads(text["text"])
+    assert report["ready"] is True
+    # the list reply arrives after load; ready waits for it
+    assert "from the real records" in report["text"] and "loading" not in report["text"]
+    assert report["bridge_calls"] == ["list items"]
+
+
+def test_render_reports_errors_with_context_and_blocks_writes(served, tmp_path) -> None:
+    store = _home_with_code(tmp_path / "achilles", FAULTS % _closed_port())
+    token = store.ensure_credential("home")
+    with served(web.create_app()) as port:
+        result = _mcp_render(port, token)
+    report = json.loads(result["content"][-1]["text"])
+    assert any(
+        "boom-console" in line and "/artifact/" in line for line in report["console_errors"]
+    ), report
+    assert any("boom-rejection" in line for line in report["page_errors"]), report
+    assert any("/missing" in line for line in report["failed_requests"]), report
+    assert report["bridge_rejections"] == [
+        "insert items: writes are blocked during render_page; nothing was saved"
+    ]
+    assert _record_count(store) == 0
+
+
+def _processes() -> dict[int, tuple[int, str]]:
+    listing = subprocess.run(
+        ["ps", "-axww", "-o", "pid=,ppid=,command="], capture_output=True, text=True, check=True
+    ).stdout
+    rows = (line.split(None, 2) for line in listing.splitlines())
+    return {int(row[0]): (int(row[1]), row[2] if len(row) > 2 else "") for row in rows}
+
+
+def test_hung_page_times_out_and_leaves_no_chromium(served, monkeypatch, tmp_path) -> None:
+    store = _home_with_code(tmp_path / "achilles", HUNG)
+    token = store.ensure_credential("home")
+    # playwright puts chromium's profile under TMPDIR, so this path names only our browser
+    marker = str(tmp_path / "render-tmp")
+    Path(marker).mkdir()
+    monkeypatch.setenv("TMPDIR", marker)
+    ours: set[int] = set()
+    stop = threading.Event()
+
+    def watch() -> None:
+        # the browser plus its helper processes, once a helper (the hung renderer) exists
+        while not stop.is_set() and not ours:
+            table = _processes()
+            browsers = {pid for pid, (_, command) in table.items() if marker in command}
+            helpers = {pid for pid, (parent, _) in table.items() if parent in browsers}
+            if browsers and helpers:
+                ours.update(browsers | helpers)
+
+    watcher = threading.Thread(target=watch)
+    with served(web.create_app()) as port:
+        watcher.start()
+        try:
+            result = render_page(f"http://127.0.0.1:{port}", "home", token, timeout=3)
+        finally:
+            stop.set()
+            watcher.join(10)
+    assert ours, "chromium was never observed, so the leak check below would prove nothing"
+    assert result["ready"] is False and result["timed_out"] is True
+    assert "within 3 s" in result["error"]
+    table = _processes()
+    assert [pid for pid in ours if pid in table] == []
+    assert [pid for pid, (_, command) in table.items() if marker in command] == []

@@ -78,6 +78,10 @@ jobs:
           rm -rf apps/web/node_modules/@fulcrum
           EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 EVAL_SKIP_BROWSER_INSTALL=1 BASE=none REPORT_DIR=.cache/eval-ci-make-setup make eval TASK=harness-smoke
       - run: bun test ./scripts/eval*.test.ts
+      - name: render_page with real chromium
+        run: uv sync --group test && uv run pytest tests/test_render_page.py
+        env:
+          ACHILLES_RENDER_TESTS: required
       - run: |
           set +e
           EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 BASE=none REPORT_DIR=.cache/eval-ci-setup bun scripts/eval.ts

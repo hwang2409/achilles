@@ -1509,3 +1509,47 @@ def test_non_utf8_body_is_a_400_not_a_500(tmp_path: Path) -> None:
     ):
         response = client.post(path, headers=headers, content=b'{"version": "\xff"}')
         assert response.status_code == 400, path
+
+
+def test_render_page_follows_the_edit_gate_and_own_page_rule(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    token = store.ensure_credential("home")
+    headers = {
+        "host": "127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+
+    def rpc(client, request_id, method, params):
+        body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        return client.post("/mcp/", headers=headers, json=body).json()["result"]
+
+    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+        initialized = client.post(
+            "/mcp/",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+        )
+        headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        listed = rpc(client, 2, "tools/list", {})["tools"]
+        off = rpc(client, 3, "tools/call", {"name": "render_page", "arguments": {}})
+        store.set_create_mode("home", True)
+        # a page this chat did not create stays off limits even in create mode
+        other = rpc(
+            client, 4, "tools/call", {"name": "render_page", "arguments": {"page_id": "nope"}}
+        )
+        codeless = rpc(client, 5, "tools/call", {"name": "render_page", "arguments": {}})
+    assert "render_page" not in [tool["name"] for tool in listed]
+    assert off["isError"] and off["content"][0]["text"] == "forbidden: create mode is off"
+    assert other["isError"] and "forbidden" in other["content"][0]["text"]
+    assert codeless["isError"] and "no_code" in codeless["content"][0]["text"]
