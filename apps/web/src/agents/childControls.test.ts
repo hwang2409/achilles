@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { controlFeature, createChildControls, readControlParent } from "./childControls";
+import { controlFeature, createChildControls, readControlParent, withLiveRow } from "./childControls";
 import type { AgentRun } from "./reads";
 
 const row: AgentRun = { sessionId: "root", runId: "fixture-run", parentRunId: null, agentType: "fixture", description: "fixture task", status: "idle" };
@@ -50,7 +50,7 @@ async function deadline<T>(name: string, promise: Promise<T>) {
 test.each([
   ["spawn success", spawn, { reply: accepted("new-fixture-run") }, "committed", "spawned fixture", 1, 1, 1],
   ["cancel focuses one child", cancel, {}, "committed", "cancellation requested", 1, 1, 1],
-  ["already terminal", cancel, { reply: accepted(row.runId, "completed") }, "committed", "already completed", 1, 1, 1],
+  ["already terminal", cancel, { reply: accepted(row.runId, "completed") }, "committed", "already done", 1, 1, 1],
   ["wrong cancel receipt id", cancel, { reply: accepted("other", "cancelling") }, "unknown", "", 1, 1, 0],
   ["observer refused", cancel, { refused: true }, "failed", "fixture observer refusal", 1, 0, 0],
   ["parent mid-turn", spawn, { state: "running" }, "failed", "zeta is busy", 1, 0, 0],
@@ -121,4 +121,16 @@ test("active status projects the picker, not stored catalog rows", async () => {
   const f = fixture();
   expect(await deadline("active status", readControlParent(f.connection.client!, AbortSignal.timeout(500)))).toEqual(parent);
   expect(f.reads).toEqual([]);
+});
+
+test("the catalog's step, turns, and tool calls are shown as reported; the live row adds only waiting state and the reply", () => {
+  const running: AgentRun = { ...row, status: "running", currentStep: "turn 2: reading", toolCount: 4, turnsUsed: 2 };
+  const live = { status: "running", latestActivity: "turn 1: thinking", toolCount: 1 };
+  expect(withLiveRow(running, live)).toBe(running);
+  expect(withLiveRow(running, { ...live, status: "waiting_approval" })).toEqual({ ...running, waiting: "needs approval" });
+  expect(withLiveRow(running, { status: "waiting_input" }).waiting).toBe("needs input");
+  expect(withLiveRow(running, { status: "done", summary: "counted 3 lines" })).toEqual({ ...running, reply: "counted 3 lines" });
+  expect(withLiveRow(running, { status: "done" })).toBe(running);
+  expect(withLiveRow({ ...running, status: "completed" }, { status: "waiting_input" }).waiting).toBeUndefined();
+  expect(withLiveRow(running, undefined)).toBe(running);
 });

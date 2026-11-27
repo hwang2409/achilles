@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./session";
+import { applyApprovalMode, ChatBusyError, controlledRetry, creationApprovalMode, loadSession, openHomeSession, ParkedLimitError, parkedLimit, SessionControlledError, SessionNotFoundError, TOO_MANY_CHATS, TooManyChatsError } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -77,6 +77,72 @@ describe("openHomeSession", () => {
     // the stored session cwd wins over the requested one: a resumed session keeps its own directory
     expect(result).toMatchObject({ id: "existing", name: "existing", cwd: "/stored/dir", rebind: false });
     expect(methods).toEqual(["status", "resume", "status", "resume", "session_settings"]);
+  });
+
+  // -32004 has two meanings in multi-controller mode: this tab's own turn runs, or zeta holds all the chats it allows
+  test.each([
+    ["resident_limit -> too many chats, not busy", { reason: "resident_limit" }, TooManyChatsError, TOO_MANY_CHATS, ["resume"]],
+    ["parked_limit -> this tab keeps too many chats running, not busy", { reason: "parked_limit", parked: ["a", "b", "c"] }, ParkedLimitError, "this tab already keeps the most chats running that zeta allows", ["resume"]],
+    ["no reason, this tab's turn runs -> busy", undefined, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
+    ["another reason -> busy", { reason: "future_reason" }, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
+  ] as const)("a -32004 resume refusal: %s", async (_name, data, kind, message, sent) => {
+    const methods: string[] = [];
+    const client = { features: ["resume_attach"], request: async (method: string) => {
+      methods.push(method);
+      if (method === "resume") throw Object.assign(new Error("refused"), { code: -32004, ...(data ? { data } : {}) });
+      if (method === "status") return { session: { session_id: "running" }, state: "running" };
+      throw new Error(`unexpected ${method}`);
+    } };
+    const caught = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow").catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(kind);
+    expect((caught as Error).message).toBe(message);
+    expect(methods).toEqual([...sent]);
+  });
+
+  // data.parked is outside input: keep only string ids, and a missing or malformed list is empty, not a crash
+  test.each([
+    ["the listed ids", ["a", "b", "c"], ["a", "b", "c"]],
+    ["non-string entries dropped", ["a", 7, null, { id: "b" }, "c"], ["a", "c"]],
+    ["not a list", "a,b,c", []],
+    ["missing", undefined, []],
+  ] as const)("a parked_limit refusal's chats: %s", async (_name, parked, expected) => {
+    const client = { features: ["resume_attach"], request: async (method: string) => {
+      if (method === "resume") throw Object.assign(new Error("refused"), { code: -32004, data: { reason: "parked_limit", ...(parked === undefined ? {} : { parked }) } });
+      throw new Error(`unexpected ${method}`);
+    } };
+    const caught = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow").catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(ParkedLimitError);
+    expect((caught as ParkedLimitError).parked).toEqual([...expected]);
+  });
+
+  test("parkedLimit ignores other refusals", () => {
+    expect(parkedLimit({ code: -32004, data: { reason: "resident_limit" } })).toBeNull();
+    expect(parkedLimit({ code: -32014, data: { reason: "parked_limit" } })).toBeNull();
+    expect(parkedLimit(null)).toBeNull();
+  });
+
+  test.each([
+    ["held for good -> controlled elsewhere after 3 retries", 99, "existing", 3, SessionControlledError, 4],
+    ["freed during the retries (reload race) -> resumes", 2, "existing", 3, null, 3],
+    ["a refusal that does not name this chat -> controlled elsewhere, no retry", 99, "other", 3, SessionControlledError, 1],
+    ["no retries asked (a default attach) -> controlled elsewhere at once", 99, "existing", 0, SessionControlledError, 1],
+  ] as const)("a -32014 session_controlled resume refusal: %s", async (_name, refusals, refusedId, retries, kind, resumes) => {
+    const methods: string[] = []; const waits: number[] = [];
+    const realWait = controlledRetry.wait;
+    controlledRetry.wait = async (ms) => { waits.push(ms); };
+    const client = { features: ["resume_attach"], request: async (method: string) => {
+      methods.push(method);
+      if (method === "resume" && methods.filter((sent) => sent === "resume").length <= refusals) throw Object.assign(new Error("session is controlled by another client"), { code: -32014, data: { code: "session_controlled", session_id: refusedId } });
+      if (method === "resume") return { session: { name: "existing" } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      throw new Error(`unexpected ${method}`);
+    } };
+    const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow", () => true, retries).catch((error: unknown) => error).finally(() => { controlledRetry.wait = realWait; });
+    if (kind === null) expect(result).toMatchObject({ id: "existing", name: "existing" });
+    else expect(result).toBeInstanceOf(kind);
+    if (kind) expect((result as SessionControlledError).sessionId).toBe("existing");
+    expect(methods.filter((sent) => sent === "resume")).toHaveLength(resumes);
+    expect(waits.reduce((total, ms) => total + ms, 0)).toBe(refusedId === "other" ? 0 : (resumes - 1) * 500);
   });
 });
 

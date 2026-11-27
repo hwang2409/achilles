@@ -5,7 +5,7 @@ import { AGENT_REFRESH_MS, readAttachedRoot } from "./reads";
 export const childHistorySupported = (client: ZetaClient) =>
   supportsFeature(client, "child_runs") && supportsFeature(client, "child_run_history") && supportsRequest(client, "child_run_history");
 export const newerHistory = "child details need a newer zeta.";
-const notAttached = "zeta can only read child history from the attached session. this run’s session is not attached.";
+const notAttached = "child history is readable only from the chat that started it.";
 const historyError = (error: unknown) => {
   if (error instanceof ChildRunHistoryError) {
     if (error.kind === "owner_not_active") return notAttached;

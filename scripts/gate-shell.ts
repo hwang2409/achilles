@@ -227,11 +227,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor", { state: "attached" });
   const newChat = tab.locator(".surface-actions").getByRole("button", { name: "new chat", exact: true });
   const assertNewChat = async () => {
-    // A navigation from the controller can reconnect as observer before its old socket closes.
     const enabled = newChat.and(tab.locator(":enabled:not([aria-disabled=true])"));
-    const takeover = tab.getByRole("button", { name: "take control", exact: true });
-    await gateWait.playwright(enabled.or(takeover).first(), "waitFor");
-    if (await takeover.isVisible()) await takeover.click();
     await gateWait.playwright(enabled, "waitFor");
     if (!await newChat.evaluate((button) => button.nextElementSibling?.querySelector('a[href^="/create"]') != null)) throw new Error("enabled new chat must be directly before the create link");
   };
@@ -361,10 +357,8 @@ export async function gateAccountsPlace(tab: Page, origin: string) {
   });
   await tab.goto(`${origin}/accounts`);
   await tab.getByRole("heading", { name: "no model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
-  await tab.getByText("no chat is active.", { exact: true }).waitFor({ timeout: 10_000 });
-  if (await tab.getByRole("button", { name: "switch chat", exact: true }).isEnabled()) throw new Error("the idle catalog enabled a chat switch with no active chat");
-  const controller = sockets[1];
-  if (!controller || roles.join() !== "observer,controller,observer" || JSON.stringify(reads) !== '[{"role":"controller","params":{}}]')
-    throw new Error("accounts did not borrow control for exactly one sessionless read");
-  if (!controller.isClosed()) await controller.waitForEvent("close", { timeout: 10_000 });
+  // /accounts switches no chat: a chat switches its own account from its own tab.
+  if (await tab.getByRole("button", { name: "switch chat", exact: true }).count()) throw new Error("/accounts still offers a chat switch");
+  if (roles.join() !== "controller" || JSON.stringify(reads) !== '[{"role":"controller","params":{}}]' || sockets.length !== 1)
+    throw new Error(`accounts did not read once on its own controller socket: ${roles.join()} ${JSON.stringify(reads)}`);
 }

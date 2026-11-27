@@ -75,9 +75,10 @@ function catalog(wire: unknown, idle: boolean): AccountCatalog {
 }
 
 type AccountClient = Pick<ZetaClient, "request" | "features"> & { authority?: "controller" | "observer" };
-const observerRefusal = () => new AccountReadError("another tab controls zeta. try again after it releases control.");
+const observerRefusal = () => new AccountReadError("this tab cannot read accounts while zeta is full.");
 
-export async function readAccounts(client: AccountClient, sessionId?: string, options?: Parameters<ZetaClient["request"]>[2]): Promise<AccountCatalog> {
+// the default deadline turns an unanswered account_list into an error instead of an endless "loading"
+export async function readAccounts(client: AccountClient, sessionId?: string, options: Parameters<ZetaClient["request"]>[2] = { timeoutMs: 12_000 }): Promise<AccountCatalog> {
   if (client.authority === "observer") throw observerRefusal();
   const idle = client.features.includes(ACCOUNT_LIST_IDLE_FEATURE);
   if (!idle && !sessionId) throw new AccountReadError("start a chat before reading accounts on this zeta.");

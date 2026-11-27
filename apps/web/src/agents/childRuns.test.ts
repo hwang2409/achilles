@@ -24,7 +24,7 @@ test("foreign owner refuses without opening a history lease", async () => {
   const owner = createChildRunsController(client, key, { attached: async () => "other", open: async () => { opened++; return result(); } });
   try {
     await owner.refresh();
-    expect(owner.snapshot()).toMatchObject({ limited: true, warning: expect.stringContaining("not attached") });
+    expect(owner.snapshot()).toMatchObject({ limited: true, warning: expect.stringContaining("the chat that started it") });
     expect(opened).toBe(0);
   } finally { owner.close(); }
 });
@@ -80,7 +80,7 @@ test("selected report changes mark history stale and automatically reread at mos
 const id = rowKey(key.sessionId, key.runId);
 const otherId = rowKey("other", key.runId);
 const accepted = { kind: "accepted", runId: key.runId } as const;
-const refused = "another tab had control.";
+const refused = "zeta had no free control slot.";
 const unknown = "delivery is unknown; check the child transcript before sending again.";
 
 test.each([

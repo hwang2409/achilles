@@ -3,6 +3,7 @@ import { ReadingMarkdown, ReadingPanel } from "../surface/ReadingPanel";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
+import { OBSERVER_READ_REASON, observerRefused } from "../zeta";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
 import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
 import { LibraryEdit, LibraryEditor, uneditable, whereText, type CreateDraft, type EditDraft } from "./LibraryEditor";
@@ -19,13 +20,13 @@ type DataView = { state: "data"; rows: CatalogRow[]; nextOffset: number | null; 
 // `skipped` on empty: a page whose every file was skipped or shadowed still lists them.
 type View = { state: "empty"; skipped?: Skipped } | { state: "no-session" } | { state: "invalid" } | DataView | { state: "failed"; problem: Problem };
 // `gone`: zeta's resource_not_found reason, so "refresh list" never depends on the message copy.
-type Problem = { message: string; retry: boolean; gone?: boolean };
+type Problem = { message: string; retry: boolean; gone?: boolean; observer?: boolean };
 type More = "idle" | "loading" | Problem;
 type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "failed"; problem: Problem };
 /** Which library_read_v1 methods this zeta advertised; both false means the older status snapshot. */
 export type LibraryReads = { catalog: boolean; read: boolean };
 /** Present only when this zeta grants library_write_v1. `allowed: false`: this tab controls zeta, but zeta did not list
- * this kind's write method. `feedback`: the last take-control refusal, held by the router so it survives a remount. */
+ * this kind's write method. `feedback`: the last take-control refusal; the observer banner shows it, and the buttons point to it. */
 export type LibraryWrite = {
   controller: boolean; allowed: boolean; takeControl: () => Promise<string | null>; feedback: string | null;
   /** In-memory drafts held by the router, keyed `<kind>/new`, so a remount after a socket drop restores the form. */
@@ -34,13 +35,12 @@ export type LibraryWrite = {
   edits: Map<LibraryKind, EditDraft>;
   /** The one library writer, held by the router so a save survives a remount. */
   writer: LibraryWriter;
-  /** Gives back the controller slot taken for an editor, once that editor closes. */
-  releaseControl: () => void;
 };
 
 const rowKey = (row: CatalogRow) => `${row.scope}/${row.name}`;
 const unreadable: Problem = { message: "zeta sent data this view cannot read", retry: true };
-function problemOf(error: unknown): Problem {
+function problemOf(error: unknown, client: ZetaClient): Problem {
+  if (observerRefused(client, error)) return { message: OBSERVER_READ_REASON, retry: false, observer: true };
   const rpc = error as { code?: unknown; data?: { reason?: unknown } } | null;
   if (rpc?.code === -32005) return { message: "not available without an open project", retry: false };
   if (rpc?.code === -32602 && rpc.data?.reason === "resource_not_found") return { message: "no longer exists", retry: false, gone: true };
@@ -95,7 +95,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
           view = snapshot.state === "data" ? { ...snapshot, nextOffset: null, skipped: null } : snapshot;
         }
       } catch (error) {
-        view = reads.catalog ? { state: "failed", problem: problemOf(error) } : { state: "invalid" };
+        view = reads.catalog ? { state: "failed", problem: problemOf(error, client) } : { state: "invalid" };
       }
       if (!abort.signal.aborted) {
         setCatalog(view);
@@ -157,7 +157,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
         setCatalog((view) => view?.state === "data" ? { state: "data", rows: appendPage(view.rows, page.rows), nextOffset: page.nextOffset, skipped: page.skipped } : view);
       }
     } catch (error) {
-      next = problemOf(error);
+      next = problemOf(error, client);
     }
     if (started === attemptRef.current) setMore(next);
   }
@@ -173,7 +173,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     if (saved && saved.name !== row.name) setSaved(null);
   }
 
-  // Library tabs stay observers; pressing new or edit takes the controller slot only if it is free.
+  // a tab that fell back to observer (zeta was full) takes control on new or edit, if a slot is free.
   function withControl(then: () => void) {
     if (!write || taking || !write.allowed) return;
     setSaved(null);
@@ -196,7 +196,6 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     if (draft) write?.writer.close(draft.form);
     write?.drafts.delete(draftKey);
     setCreating(false);
-    write?.releaseControl();
   }
 
   function startEdit(row: CatalogRow, opened: EditDraft["base"]) {
@@ -216,7 +215,6 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     if (draft) write?.writer.close(draft.form);
     write?.edits.delete(kind);
     setEditing(null);
-    write?.releaseControl();
   }
 
   function showCreated(name: string) {
@@ -234,6 +232,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   const createDraft = write?.drafts.get(draftKey);
   let content: ReactNode;
   if (!catalog) content = <ModuleState kind="loading" title={reads.catalog ? "reading catalog…" : "reading session snapshot…"} />;
+  else if (catalog.state === "failed" && catalog.problem.observer) content = <ModuleState kind="observer" title={catalog.problem.message} />;
   else if (catalog.state === "failed") content = <ModuleState kind="failed" title={`could not read ${title}: ${catalog.problem.message}`}
     action={catalog.problem.retry ? { label: "retry", run: refresh } : undefined} />;
   else if (catalog.state === "invalid") content = <ModuleState kind="failed" title="could not read the catalog" detail="refresh to try the active session snapshot again." />;
@@ -270,7 +269,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
           </ul></Field> : null}
         </dl>
         {reads.catalog && reads.read ? <LibraryText key={rowKey(selected)} client={client} method={methods.read} row={selected} noun={noun}
-          edit={write && { allowed: write.allowed, taking, feedback: controlFeedback, start: (opened) => startEdit(selected, opened) }}
+          edit={write && { allowed: write.allowed, controller: write.controller, taking, feedback: controlFeedback, start: (opened) => startEdit(selected, opened) }}
           onGone={() => {
             focusNew.current = new Set();
             setSelection(null);
@@ -293,11 +292,11 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
         <div className="library-snapshot">
           <span data-live={reads.catalog || undefined}>{reads.catalog ? "Effective scope" : "Session snapshot may be stale"}</span>
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
-          {write && !creating && !editing && <button type="button" className="library-new ui-button" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
+          {write && !creating && !editing && <button type="button" className="library-new ui-button" data-write-surface="library.create" aria-disabled={taking || !write.allowed || !write.controller}
             ref={newButton}
-            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
+            aria-describedby={controlDescription(write.allowed, controlFeedback)} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
-        {!creating && !editing && (controlFeedback || (write && !write.allowed)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
+        {!creating && !editing && write && !write.allowed && <p id="library-control-feedback" role="status" className="library-control">{REFUSED_NOTICE}</p>}
       </div>
       {saved && <div role="status" className="library-saved">
         <p>{savedNotice(saved.name, saved.where)}</p>
@@ -408,7 +407,7 @@ function SkippedFiles({ skipped }: { skipped: Skipped }) {
  * The selected row's untrusted text. Rendered with `key={rowKey(row)}`, so a new selection is a new instance:
  * a late read for the old row lands on an unmounted instance and never shows. Unmounting also aborts the request.
  */
-type EditControl = { allowed: boolean; taking: boolean; feedback: string | null; start: (opened: { revision: string; document: string }) => void };
+type EditControl = { allowed: boolean; controller: boolean; taking: boolean; feedback: string | null; start: (opened: { revision: string; document: string }) => void };
 function LibraryText({ client, method, row, noun, edit, onGone }: { client: ZetaClient; method: string; row: CatalogRow; noun: string; edit: EditControl | null; onGone: () => void }) {
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -432,7 +431,7 @@ function LibraryText({ client, method, row, noun, edit, onGone }: { client: Zeta
       const body = projectBody(await client.request(method, { name: row.name, scope: row.scope }, { signal: abort.signal }), row.name);
       next = body ? { state: "data", body } : { state: "failed", problem: unreadable };
     } catch (error) {
-      next = { state: "failed", problem: problemOf(error) };
+      next = { state: "failed", problem: problemOf(error, client) };
     }
     if (abort.signal.aborted) return;
     setReveal(next);
@@ -474,8 +473,8 @@ function EditEntry({ edit, row, body }: { edit: EditControl; row: CatalogRow; bo
   if (why || !body.editable) return <p className="library-edit-why">{why}</p>;
   const opened = body.editable;
   return <div className="library-text-actions">
-    <button type="button" data-write-surface="library.edit" aria-disabled={edit.taking || !edit.allowed}
-      aria-describedby={edit.feedback || !edit.allowed ? "library-control-feedback" : undefined} onClick={() => edit.start(opened)}>{edit.taking ? "taking control…" : "edit"}</button>
+    <button type="button" data-write-surface="library.edit" aria-disabled={edit.taking || !edit.allowed || !edit.controller}
+      aria-describedby={controlDescription(edit.allowed, edit.feedback)} onClick={() => edit.start(opened)}>{edit.taking ? "taking control…" : "edit"}</button>
   </div>;
 }
 
@@ -501,3 +500,7 @@ function Metadata({ row }: { row: CatalogRow }) {
     <Field label="max turns">{row.maxTurns ?? "not specified"}</Field>
   </>;
 }
+
+// a write the build does not allow says so under the bar; a refused take control says so in the observer banner.
+const controlDescription = (allowed: boolean, feedback: string | null) =>
+  !allowed ? "library-control-feedback" : feedback ? "take-control-feedback" : undefined;

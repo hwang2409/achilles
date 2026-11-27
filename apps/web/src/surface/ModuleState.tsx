@@ -14,7 +14,7 @@ export function ModuleFrame({ title, subtitle, actions, children }: { title: str
 }
 
 type StateProps = {
-  kind: "empty" | "loading" | "failed" | "unsupported" | "offline";
+  kind: "empty" | "loading" | "failed" | "unsupported" | "offline" | "observer";
   title: string;
   detail?: string;
   action?: { label: string; run: () => void };

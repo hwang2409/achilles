@@ -41,9 +41,10 @@ function launch(popup: Popup, url: unknown) {
   } catch { return false; }
 }
 
-export function createMcpAuth({ withControl, supports, failure, liveObserver, open = () => window.open("about:blank", "_blank"), timers = clock }: {
+export function createMcpAuth({ withControl, supports, failure, live, open = () => window.open("about:blank", "_blank"), timers = clock }: {
   withControl: (signal: AbortSignal, send: (client: ZetaClient) => Promise<AuthOutcome>, attempt: AuthAttempt) => Promise<AuthOutcome>;
-  liveObserver: () => ZetaClient | null;
+  /** the tab's live socket: zeta reports an attempt's status only to the connection that started it. */
+  live: () => ZetaClient | null;
   supports: (client: ZetaClient, method: string) => boolean;
   failure: (error: unknown) => McpOutcome | null;
   open?: () => Popup | null;
@@ -97,12 +98,12 @@ export function createMcpAuth({ withControl, supports, failure, liveObserver, op
       const wire = await client.request(authMethods.status, { name: target.name }, { timeoutMs: 5_000 });
       state = stateOf((wire as { data?: { state?: unknown } } | null)?.data);
     } catch { /* A read cannot establish whether the provider saved a credential. */ }
-    if (started !== epoch || client !== liveObserver()) return null;
+    if (started !== epoch || client !== live()) return null;
     projectRead(target, state);
     return state;
   }
   function checkNow(): Promise<State | null> {
-    const client = liveObserver();
+    const client = live();
     if (!client || !report || writing || !tracking || !supports(client, authMethods.status)) return Promise.resolve(null);
     if (reading) return reading;
     stopTimer();

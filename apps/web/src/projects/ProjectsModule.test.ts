@@ -48,7 +48,7 @@ function fakeZeta(responses = answers) {
   return { held, busy, asked: (method: string) => asked.filter((name) => name === method).length, connect, release: () => shows.splice(0).forEach((answer) => answer()) };
 }
 
-/** The page as SurfaceRouter wires it: a borrow swaps in a controller client, closes the observer, reads, and swaps back. */
+/** The page as SurfaceRouter wires it on an observer tab: taking control swaps in a controller client, closes the observer, and keeps it. */
 function mount(zeta: ReturnType<typeof fakeZeta>, path: string) {
   history.replaceState(null, "", path);
   let client = zeta.connect();
@@ -57,14 +57,14 @@ function mount(zeta: ReturnType<typeof fakeZeta>, path: string) {
   const view = render(element());
   const swap = (next: typeof client, role: boolean) => { const old = client; client = next; observer = role; act(() => view.rerender(element())); old.close(); };
   async function withControl<T>(read: (reader: ZetaClient) => Promise<T>) {
-    swap(zeta.connect(), false);
-    try { return { value: await read(client as unknown as ZetaClient) }; } finally { swap(zeta.connect(), true); }
+    if (observer) swap(zeta.connect(), false);
+    return { value: await read(client as unknown as ZetaClient) };
   }
   return { view };
 }
 
 test.each([
-  ["lookup interrupted by a borrow -> the name resolves after the borrow", async (zeta: ReturnType<typeof fakeZeta>) => {
+  ["lookup interrupted by take control -> the name resolves on the controller", async (zeta: ReturnType<typeof fakeZeta>) => {
     zeta.held.add("state_projects");
     const { view } = mount(zeta, "/projects/p_target/memory");
     const reveal = await view.findByRole("button", { name: "take control and show decision text" });
@@ -83,7 +83,7 @@ test.each([
     await act(async () => { fireEvent.click(reveal); });
     await waitFor(() => expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Projects / target"));
   }],
-  ["load more interrupted by a borrow -> the next page loads after the borrow", async (zeta: ReturnType<typeof fakeZeta>) => {
+  ["load more interrupted by take control -> the next page loads on the controller", async (zeta: ReturnType<typeof fakeZeta>) => {
     const { view } = mount(zeta, "/projects/p_target/memory");
     zeta.held.add("state_memory");
     fireEvent.click(await view.findByRole("button", { name: "load more" }));
@@ -92,20 +92,20 @@ test.each([
     await waitFor(() => expect(view.getByText("synthetic m_more")).toBeTruthy());
     expect(view.queryByText(/could not load more/)).toBeNull();
   }],
-  ["overlapping reveals -> one borrow at a time, observer labels kept", async (zeta: ReturnType<typeof fakeZeta>) => {
+  ["overlapping reveals -> one take at a time, then plain labels as controller", async (zeta: ReturnType<typeof fakeZeta>) => {
     zeta.held.add("project_show");
     const { view } = mount(zeta, "/projects/p_target/memory");
     const first = await view.findByRole("button", { name: "take control and show brief text" });
     const other = view.getByRole("button", { name: "take control and show decision text" });
     await act(async () => { fireEvent.click(first); });
     await act(async () => { fireEvent.click(other); });
-    // the hazard: a second read while the first borrow holds the controller socket.
+    // the hazard: a second read while the first take control is still in flight.
     expect(zeta.asked("project_show")).toBe(1);
     expect(other.textContent).toBe("reading…");
     expect(other.getAttribute("aria-disabled")).toBe("true");
-    expect(view.getByText(/Zeta lets only the tab in control read full text/)).toBeTruthy();
+    expect(view.getByText(/Zeta lets only a controlling tab read full text/)).toBeTruthy();
     await act(async () => zeta.release());
-    expect(await view.findByRole("button", { name: "take control and show decision text" })).toBeTruthy();
+    expect(await view.findByRole("button", { name: "show decision text" })).toBeTruthy();
     expect(view.getByRole("region", { name: "brief text" }).textContent).toContain("brief text body");
   }],
 ] as const)("%s", async (_name, run) => { await run(fakeZeta()); });

@@ -14,7 +14,7 @@ const failureCopy: Record<Failure, string> = {
   changed: "not changed. the state changed elsewhere; keep the current state and refresh before trying again.",
   denied: "not changed. check your access before trying again.",
   "not-applied": "not changed. the request did not apply; you can try again.",
-  refused: "not changed. another tab has control; a chat tab keeps it while it is open. try again after it finishes or closes.",
+  refused: "not changed. too many tabs control zeta, or another app does. close one, then try again.",
 };
 
 // `message` replaces the fixed copy; build it with a display-safe projection in the adapter.

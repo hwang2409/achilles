@@ -716,6 +716,32 @@ def test_chat_order_and_time_follow_the_last_message_only(monkeypatch) -> None:
     assert order() == ["new", "old"]
 
 
+def test_a_compare_and_set_state_write_never_overwrites_the_holders_newer_state() -> None:
+    client = chat_client()
+    client.post("/api/pages/home/chats", json={"session_id": "c"})
+    seen = client.patch("/api/chats/c", json={"last_state": "running"}).json()
+    expected = {"expected_last_state": "running", "expected_updated_at": seen["updated_at"]}
+    # the holder ended that turn and started another after the other tab read the row
+    client.patch("/api/chats/c", json={"last_state": "idle"})
+    client.patch("/api/chats/c", json={"last_state": "running"})
+    late = client.patch("/api/chats/c", json={"last_state": "idle", **expected})
+    # a lost race answers the current row (no 409: the browser logs every 4xx as a console error)
+    assert late.status_code == 200 and late.json()["last_state"] == "running"
+    assert client.get("/api/chats?include=c").json()["chats"][0]["last_state"] == "running"
+    # unchanged since the read: the stale state is corrected
+    seen = client.get("/api/chats?include=c").json()["chats"][0]
+    fresh = {"expected_last_state": "running", "expected_updated_at": seen["updated_at"]}
+    corrected = client.patch("/api/chats/c", json={"last_state": "idle", **fresh})
+    assert corrected.json()["last_state"] == "idle"
+    assert client.patch("/api/chats/gone", json={"last_state": "idle", **fresh}).status_code == 404
+    for body in (
+        {"last_state": "idle", "expected_last_state": "running"},
+        {"title": "x", **fresh},
+        {"last_state": "idle", "expected_last_state": "bad", "expected_updated_at": "x"},
+    ):
+        assert client.patch("/api/chats/c", json=body).status_code == 400
+
+
 def test_chat_search_escapes_like_wildcards(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     with store.transaction() as db:

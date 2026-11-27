@@ -1,11 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { ZetaError } from "@fulcrum/zeta";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
 import * as queues from "./composer/chatQueues";
 import { draftStore } from "./draftStore";
 import { MAYBE_SENT } from "./composer/composer-machine";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistChatState, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
+import { writeRowState } from "./zeta/rowState";
+
+// each test is a fresh tab: App tests in the same process leave held chats for attachPage's reclaim
+beforeEach(() => { sessionStorage.clear(); });
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -239,7 +243,7 @@ describe("message delivery tracking", () => {
       if (reply instanceof Error) throw reply;
       return reply;
     }};
-    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id === "d1" ? "d1" : "fresh"}`));
+    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id === "d1" ? "d1" : "fresh"}`), async () => undefined);
     if (error) await expect(delivery).rejects.toThrow(error);
     else await delivery;
     expect(log).toEqual(expected);
@@ -270,7 +274,7 @@ describe("chat state persistence", () => {
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
     try {
-      const write = persistChatState("session", "idle", () => Promise.reject(new Error("achilles stopped")));
+      const write = writeRowState("session", "idle", {}, () => Promise.reject(new Error("achilles stopped")));
       await new Promise((resolve) => setImmediate(resolve));
       expect(unhandled).toBe(0);
       expect(await write).toBe(false);
@@ -724,7 +728,7 @@ describe("chat creation lifecycle", () => {
           onDraftChange() {}, onDraftSubmit() {},
           onSubmit: async (text, intent, track) => {
             const target = box === "owned-session" ? { sessionId: box } : await pageOwner.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }) })!;
-            await deliverChatMessage(client as never, target.sessionId, text, `delivery-${reloadAt}`, pageDeliverySteer("empty", intent), track);
+            await deliverChatMessage(client as never, target.sessionId, text, `delivery-${reloadAt}`, pageDeliverySteer("empty", intent), track, async () => undefined);
           },
         });
         const detach = delivery.attach();
@@ -770,7 +774,7 @@ describe("chat creation lifecycle", () => {
         onDraftSubmit() {},
         onSubmit: async (text, intent, track) => {
           const attached = await run();
-          await deliverChatMessage(client, attached.sessionId, text, "one-delivery-id", pageDeliverySteer("empty", intent), track);
+          await deliverChatMessage(client, attached.sessionId, text, "one-delivery-id", pageDeliverySteer("empty", intent), track, async () => undefined);
         },
       });
       await Promise.all([delivery.submit(), delivery.submit()]);
