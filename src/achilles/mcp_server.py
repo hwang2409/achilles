@@ -65,6 +65,7 @@ PAGE_RECORDS_API = (
     "update(collection, record_id, fields) merges fields into the record and returns it; "
     "delete(collection, record_id) removes it. A failed call rejects with {detail}. "
 )
+RENDER_WAIT_SECONDS = 5
 RENDER_AFTER_BUILD = "After a visual change, call render_page to see the result. "
 
 INSPECT_PAGE_SCHEMA = {
@@ -171,6 +172,8 @@ def _validate_create(name: str, args: Any) -> None:
 
 def build_mcp(store: PageStore):
     sessions: dict[str, set] = {}
+    # each render holds a worker thread for up to ~35 s; two at once leaves threads for store calls
+    renders = anyio.Semaphore(2)
 
     async def principal(context):
         token = _token(context)
@@ -413,11 +416,19 @@ def build_mcp(store: PageStore):
         host, port = context.request.scope["server"]
         host = f"[{host}]" if ":" in host else host
         try:
+            with anyio.fail_after(RENDER_WAIT_SECONDS):
+                await renders.acquire()
+        except TimeoutError:
+            busy = "render_page is busy with other renders; try again"
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=busy)])
+        try:
             result = await anyio.to_thread.run_sync(
                 render_page, f"http://{host}:{port}", target["id"], credential
             )
         except RenderError as exc:
             return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
+        finally:
+            renders.release()
         screenshot = result.pop("screenshot", None)
         content: list[TextContent | ImageContent] = [
             TextContent(type="text", text=json.dumps(result, sort_keys=True))

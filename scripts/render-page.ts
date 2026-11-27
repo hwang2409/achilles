@@ -70,14 +70,21 @@ try {
     }
     result.ready = true;
     result.text = clip(await frame.evaluate(() => document.body?.innerText ?? ""), MAX_TEXT);
+    await screenshot();
+  };
+  const screenshot = async (timeout?: number) => {
     for (const quality of [70, 35]) {
-      const image = await page.screenshot({ type: "jpeg", quality });
-      if (image.length <= MAX_IMAGE) { result.screenshot = image.toString("base64"); break; }
+      const image = await page.screenshot({ type: "jpeg", quality, timeout });
+      if (image.length <= MAX_IMAGE) { result.screenshot = image.toString("base64"); return; }
     }
-    if (!result.screenshot) result.screenshot_note = `screenshot larger than ${MAX_IMAGE} bytes; omitted`;
+    result.screenshot_note = `screenshot larger than ${MAX_IMAGE} bytes; omitted`;
   };
   await Promise.race([render().catch((caught) => { if (!timedOut) result.error = clip(String(caught?.message ?? caught)); }), deadline]);
-  if (timedOut) result.error = `the page did not finish rendering within ${input.timeoutMs / 1000} s`;
+  if (timedOut) {
+    result.error = `the page did not finish rendering within ${input.timeoutMs / 1000} s`;
+    // a polling page never goes network-idle; if the renderer still answers, show what it has
+    await screenshot(2000).then(() => { result.note = "page never went network-idle; screenshot taken at the deadline"; }, () => {});
+  }
   const state = await Promise.race([page.evaluate(() => (window as any).__render).catch(() => null), new Promise((resolve) => setTimeout(resolve, 1000, null))]) as { calls: string[]; rejections: string[] } | null;
   const calls = bounded(), rejections = bounded();
   for (const call of state?.calls ?? []) calls.add(call);

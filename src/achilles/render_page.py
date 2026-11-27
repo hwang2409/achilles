@@ -46,11 +46,19 @@ def render_page(
             json.dumps({**payload, "timeoutMs": int(timeout * 1000)}).encode(), timeout=timeout + 15
         )
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.communicate()
         raise RenderError(f"render_page runner did not stop within {timeout + 15:.0f} s") from None
+    finally:
+        # whatever the runner left behind (chromium, helpers) dies with its process group
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):  # macOS: EPERM when only zombies remain
+            pass
+        process.communicate()
     if process.returncode != 0 or len(stdout) > _MAX_OUTPUT_BYTES:
         raise RenderError(
             "render_page runner failed: " + stderr.decode(errors="replace").strip()[-2000:]
         )
-    return json.loads(stdout)
+    try:
+        return json.loads(stdout)
+    except ValueError:
+        raise RenderError("render_page runner returned output that is not JSON") from None

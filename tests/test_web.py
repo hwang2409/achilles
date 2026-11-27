@@ -1,9 +1,11 @@
 import json
 import os
 import re
+import signal
 import socket
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,6 +14,8 @@ import pytest
 import uvicorn
 from starlette.testclient import TestClient
 
+import achilles.mcp_server as mcp_server
+import achilles.render_page as render_page_module
 import achilles.web as web
 from achilles.mcp_server import _remove_connection
 from achilles.pages import PageStore
@@ -1511,45 +1515,119 @@ def test_non_utf8_body_is_a_400_not_a_500(tmp_path: Path) -> None:
         assert response.status_code == 400, path
 
 
-def test_render_page_follows_the_edit_gate_and_own_page_rule(tmp_path: Path) -> None:
-    store = PageStore(tmp_path / "achilles")
-    token = store.ensure_credential("home")
+def _mcp(client, token: str):
+    """Opens one MCP session for the page that owns `token`; returns an rpc(method, params)."""
     headers = {
         "host": "127.0.0.1:5190",
         "authorization": f"Bearer {token}",
         "accept": "application/json, text/event-stream",
         "content-type": "application/json",
     }
+    params = {
+        "protocolVersion": "2025-03-26",
+        "capabilities": {},
+        "clientInfo": {"name": "test", "version": "1"},
+    }
+    body = {"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": params}
+    headers["mcp-session-id"] = client.post("/mcp/", headers=headers, json=body).headers[
+        "mcp-session-id"
+    ]
 
-    def rpc(client, request_id, method, params):
-        body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+    def rpc(method, params):
+        body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         return client.post("/mcp/", headers=headers, json=body).json()["result"]
 
+    return rpc
+
+
+def test_render_page_follows_the_edit_gate_and_own_page_rule(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        for page_id, creator in (("parent", None), ("child", "parent"), ("theirs", "parent")):
+            db.execute(
+                "INSERT INTO page(id,route,title,created_at,updated_at,created_by_page_id) "
+                "VALUES(?,?,?,?,?,?)",
+                (page_id, f"/{page_id}", page_id, "2025-01-01", "2025-01-01", creator),
+            )
+
+    def render(rpc, arguments):
+        return rpc("tools/call", {"name": "render_page", "arguments": arguments})
+
     with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
-        initialized = client.post(
-            "/mcp/",
-            headers=headers,
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-03-26",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test", "version": "1"},
-                },
-            },
-        )
-        headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
-        listed = rpc(client, 2, "tools/list", {})["tools"]
-        off = rpc(client, 3, "tools/call", {"name": "render_page", "arguments": {}})
+        home = _mcp(client, store.ensure_credential("home"))
+        parent = _mcp(client, store.ensure_credential("parent"))
+        listed = home("tools/list", {})["tools"]
+        off = render(home, {})
+        # a page's own chat may render its own page without create mode, but not a page it created
+        child_without_create = render(parent, {"page_id": "child"})
         store.set_create_mode("home", True)
-        # a page this chat did not create stays off limits even in create mode
-        other = rpc(
-            client, 4, "tools/call", {"name": "render_page", "arguments": {"page_id": "nope"}}
-        )
-        codeless = rpc(client, 5, "tools/call", {"name": "render_page", "arguments": {}})
+        # in create mode, a page another page created stays off limits
+        theirs = render(home, {"page_id": "theirs"})
+        codeless = render(home, {})
     assert "render_page" not in [tool["name"] for tool in listed]
     assert off["isError"] and off["content"][0]["text"] == "forbidden: create mode is off"
-    assert other["isError"] and "forbidden" in other["content"][0]["text"]
+    for refused in (child_without_create, theirs):
+        assert refused["isError"] and "forbidden" in refused["content"][0]["text"], refused
     assert codeless["isError"] and "no_code" in codeless["content"][0]["text"]
+
+
+def test_render_page_runs_two_at_once_and_a_third_is_busy(monkeypatch, tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    token = store.ensure_credential("home")
+    started, release = threading.Semaphore(0), threading.Event()
+
+    def blocked_render(origin, page_id, credential):
+        started.release()
+        release.wait(10)
+        return {"ready": True}
+
+    monkeypatch.setattr(PageStore, "page_code", lambda self, page_id: {"version": 1})
+    monkeypatch.setattr(mcp_server, "render_page", blocked_render)
+    monkeypatch.setattr(mcp_server, "RENDER_WAIT_SECONDS", 0.2, raising=False)
+    call = {"name": "render_page", "arguments": {}}
+    with (
+        TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client,
+        ThreadPoolExecutor(2) as pool,
+    ):
+        # one session runs its calls in order, so each render gets its own session
+        first, second, third = (_mcp(client, token) for _ in range(3))
+        try:
+            running = [pool.submit(rpc, "tools/call", call) for rpc in (first, second)]
+            assert started.acquire(timeout=10) and started.acquire(timeout=10)
+            busy = third("tools/call", call)
+        finally:
+            release.set()
+        done = [future.result(10) for future in running]
+    assert busy["isError"] and "busy" in busy["content"][0]["text"], busy
+    assert [result.get("isError") for result in done] == [False, False]
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "output", "error"),
+    [(1, "", "runner failed"), (0, "not json", "not JSON")],
+)
+def test_render_runner_failure_is_a_plain_error_and_kills_its_group(
+    monkeypatch, tmp_path: Path, exit_code: int, output: str, error: str
+) -> None:
+    pid_file = tmp_path / "runner.pid"
+    runner = tmp_path / "runner.sh"
+    # the runner leaves a detached child behind, like a chromium the runner never closed
+    runner.write_text(
+        f"echo $$ > {pid_file}; sleep 60 </dev/null >/dev/null 2>&1 & printf '{output}'; "
+        f"exit {exit_code}"
+    )
+    monkeypatch.setattr(render_page_module, "_RUNNER", runner)
+    monkeypatch.setattr(render_page_module.shutil, "which", lambda name: "/bin/sh")
+    with pytest.raises(render_page_module.RenderError, match=error):
+        render_page_module.render_page("http://127.0.0.1:1", "home", "token", timeout=5)
+    group = int(pid_file.read_text())
+    for _ in range(100):  # SIGKILL is delivered asynchronously
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.killpg(group, signal.SIGKILL)
+        pytest.fail(f"process group {group} still had a live process")
