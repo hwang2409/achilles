@@ -1169,6 +1169,9 @@ class PageStore:
             {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
         )
         with self.transaction() as db:
+            page = db.execute("SELECT create_mode FROM page WHERE id=?", (page_id,)).fetchone()
+            if page is None or not page[0]:
+                raise PermissionError("forbidden: create mode is off")
             row = db.execute(
                 """SELECT pt.tool_id, pt.active_version, v.digest, v.bundle,
                 (SELECT MAX(version) FROM tool_version WHERE tool_id=pt.tool_id)

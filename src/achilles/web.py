@@ -487,7 +487,8 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             raise HTTPException(400, str(exc)) from exc
         return JSONResponse(result)
 
-    async def records(request):
+    async def page_bearer(request) -> str:
+        """The request carries this page's own credential; returns the page id."""
         page_id = request.path_params["id"]
         token = request.headers.get("authorization", "")
         if not token.startswith("Bearer "):
@@ -495,28 +496,31 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
-        collection = request.path_params["collection"]
-        record_id = request.path_params.get("record_id")
-        if request.method == "DELETE":
-            if not await anyio.to_thread.run_sync(
-                store.delete_record, page_id, collection, record_id
-            ):
-                raise HTTPException(404, "record not found")
-            return JSONResponse({"record_id": record_id, "deleted": True})
-        if request.method in {"POST", "PATCH"}:
+        return page_id
+
+    async def require_page_bearer(request) -> str:
+        """Same-origin request carrying this page's own credential; returns the page id."""
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        return await page_bearer(request)
+
+    async def json_object(request) -> dict:
+        try:
             body = await request.json()
-            if not isinstance(body, dict):
-                raise HTTPException(400, "record must be an object")
-            if request.method == "POST":
-                return JSONResponse(
-                    await anyio.to_thread.run_sync(store.insert_record, page_id, collection, body)
-                )
-            updated = await anyio.to_thread.run_sync(
-                store.update_record, page_id, collection, record_id, body
+        except json.JSONDecodeError:
+            body = None
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body must be a JSON object")
+        return body
+
+    async def records(request):
+        page_id = await page_bearer(request)
+        collection = request.path_params["collection"]
+        if request.method == "POST":
+            body = await json_object(request)
+            return JSONResponse(
+                await anyio.to_thread.run_sync(store.insert_record, page_id, collection, body)
             )
-            if updated is None:
-                raise HTTPException(404, "record not found")
-            return JSONResponse(updated)
         field = request.query_params.get("field")
         raw_equals = request.query_params.get("equals")
         raw_limit = request.query_params.get("limit", "100")
@@ -540,18 +544,23 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         records, total = await anyio.to_thread.run_sync(store.records, page_id, collection, limit)
         return JSONResponse(records, headers={"x-achilles-total": str(total)})
 
-    async def require_page_bearer(request) -> str:
-        """Same-origin request carrying this page's own credential; returns the page id."""
-        if not _same_origin(request):
-            raise HTTPException(403, "same-origin request required")
-        page_id = request.path_params["id"]
-        token = request.headers.get("authorization", "")
-        if not token.startswith("Bearer "):
-            raise HTTPException(401, "missing bearer")
-        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
-        if principal is None or principal["id"] != page_id:
-            raise HTTPException(403, "forbidden")
-        return page_id
+    async def record(request):
+        page_id = await page_bearer(request)
+        collection = request.path_params["collection"]
+        record_id = request.path_params["record_id"]
+        if request.method == "DELETE":
+            if not await anyio.to_thread.run_sync(
+                store.delete_record, page_id, collection, record_id
+            ):
+                raise HTTPException(404, "record not found")
+            return JSONResponse({"record_id": record_id, "deleted": True})
+        body = await json_object(request)
+        updated = await anyio.to_thread.run_sync(
+            store.update_record, page_id, collection, record_id, body
+        )
+        if updated is None:
+            raise HTTPException(404, "record not found")
+        return JSONResponse(updated)
 
     async def rollback_tool(request):
         page_id = await require_page_bearer(request)
@@ -574,6 +583,11 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         except ValidationError as exc:
             status = 409 if exc.code == "conflict" else 400
             return JSONResponse({"error": error_document(exc)}, status_code=status)
+        except PermissionError:
+            error = ValidationError(
+                "", "create mode on", "forbidden", "turn on create mode to restore tools."
+            )
+            return JSONResponse({"error": error_document(error)}, status_code=403)
         await notify_tools_changed(page_id)
         return JSONResponse({"ok": True, **restored})
 
@@ -613,7 +627,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
-        body = await request.json()
+        body = await json_object(request)
         enabled = body.get("enabled")
         if not isinstance(enabled, bool):
             raise HTTPException(400, "enabled must be boolean")
@@ -651,7 +665,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             Route("/api/pages/{id}/records/{collection}", records, methods=["GET", "POST"]),
             Route(
                 "/api/pages/{id}/records/{collection}/{record_id}",
-                records,
+                record,
                 methods=["PATCH", "DELETE"],
             ),
             Route("/api/pages/{route:path}", page),
