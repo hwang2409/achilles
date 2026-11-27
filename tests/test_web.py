@@ -1393,3 +1393,36 @@ def test_fresh_home_is_plain_chat_and_a_codeless_page_keeps_the_notice(tmp_path:
     assert home["code"] is None
     assert home["unsupported_format"] is None
     assert old["unsupported_format"] == web.EMPTY_PAGE
+
+
+def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("other", "/other", "other", "2025-01-01", "2025-01-01"),
+        )
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    other = {"authorization": f"Bearer {store.ensure_credential('other')}"}
+    client = TestClient(web.create_app())
+    book = client.post("/api/pages/home/records/books", headers=own, json={"title": "dune"})
+    theirs = client.post("/api/pages/other/records/books", headers=other, json={"title": "emma"})
+    path = f"/api/pages/home/records/books/{book.json()['record_id']}"
+
+    updated = client.patch(path, headers=own, json={"read": True})
+    assert updated.status_code == 200, updated.text
+    assert updated.json() == {**book.json(), "read": True, "revision": 2}
+    assert client.get("/api/pages/home/records/books", headers=own).json() == [updated.json()]
+
+    # another page's credential, or this page's credential on another page's record, is refused
+    assert client.patch(path, headers=other, json={"read": False}).status_code == 403
+    assert client.delete(path, headers=other).status_code == 403
+    their_id = theirs.json()["record_id"]
+    assert (
+        client.delete(f"/api/pages/home/records/books/{their_id}", headers=own).status_code == 404
+    )
+    assert client.get("/api/pages/other/records/books", headers=other).json() == [theirs.json()]
+
+    assert client.delete(path, headers=own).status_code == 200
+    assert client.get("/api/pages/home/records/books", headers=own).json() == []
+    assert client.delete(path, headers=own).status_code == 404

@@ -128,6 +128,12 @@ def validate_page_route(route: str) -> None:
     validate_schema(route, CREATE_PAGE_SCHEMA["properties"]["route"], "/route")
 
 
+def edits_own_page(page: sqlite3.Row) -> bool:
+    """A page's own chat may rewrite and restore that page's code; the home chat needs create
+    mode for that, and creating pages or tools always needs it."""
+    return page["id"] != "home" or bool(page["create_mode"])
+
+
 def now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -635,6 +641,46 @@ class PageStore:
                 (page_id, "insert_record", stamp, "page", record_id),
             )
         return {**document, "record_id": record_id, "revision": 1}
+
+    def update_record(
+        self, page_id: str, collection: str, record_id: str, fields: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Merge fields into one of this page's records; None when it has no such record."""
+        fields = {k: v for k, v in fields.items() if k not in {"record_id", "revision"}}
+        with self.transaction() as db:
+            found = db.execute(
+                "SELECT document, revision FROM page_record "
+                "WHERE page_id=? AND collection=? AND record_id=?",
+                (page_id, collection, record_id),
+            ).fetchone()
+            if found is None:
+                return None
+            document = {**json.loads(found[0]), **fields}
+            stamp = now()
+            db.execute(
+                "UPDATE page_record SET revision=revision+1, document=?, updated_at=? "
+                "WHERE page_id=? AND collection=? AND record_id=?",
+                (json.dumps(document, sort_keys=True), stamp, page_id, collection, record_id),
+            )
+            db.execute(
+                "INSERT INTO audit(page_id,action,created_at,actor,record_id) VALUES(?,?,?,?,?)",
+                (page_id, "update_record", stamp, "page", record_id),
+            )
+        return {**document, "record_id": record_id, "revision": found[1] + 1}
+
+    def delete_record(self, page_id: str, collection: str, record_id: str) -> bool:
+        with self.transaction() as db:
+            deleted = db.execute(
+                "DELETE FROM page_record WHERE page_id=? AND collection=? AND record_id=?",
+                (page_id, collection, record_id),
+            ).rowcount
+            if deleted:
+                db.execute(
+                    "INSERT INTO audit(page_id,action,created_at,actor,record_id) "
+                    "VALUES(?,?,?,?,?)",
+                    (page_id, "delete_record", now(), "page", record_id),
+                )
+        return bool(deleted)
 
     def records(
         self, page_id: str, collection: str, limit: int = 100
@@ -1255,9 +1301,9 @@ class PageStore:
         )
         with self.transaction() as db:
             page = db.execute(
-                "SELECT create_mode,active_code_revision FROM page WHERE id=?", (page_id,)
+                "SELECT id,create_mode,active_code_revision FROM page WHERE id=?", (page_id,)
             ).fetchone()
-            if page is None or not page["create_mode"]:
+            if page is None or not edits_own_page(page):
                 raise PermissionError("forbidden: create mode is off")
             if page["active_code_revision"] != expected_version:
                 raise ValidationError("/expected_version", "current code revision", "conflict")

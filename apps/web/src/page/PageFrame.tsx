@@ -5,8 +5,12 @@ type Props = { pageId: string; credential: string; revision: number };
 export function acceptsBridgeMessage(event: MessageEvent, source: Window | null, pageId: string, revision: number) {
   const message = event.data;
   if (event.source !== source || event.origin !== "null" || !message || message.pageId !== pageId || message.revision !== revision) return false;
-  return !!message.runtimeError || (typeof message.requestId === "string" && typeof message.collection === "string" && ["list", "insert"].includes(message.method));
+  if (message.runtimeError) return true;
+  if (typeof message.requestId !== "string" || typeof message.collection !== "string") return false;
+  return ["list", "insert"].includes(message.method) || (["update", "delete"].includes(message.method) && typeof message.id === "string");
 }
+
+const BRIDGE_HTTP: Record<string, string> = { list: "GET", insert: "POST", update: "PATCH", delete: "DELETE" };
 
 // a new page or revision remounts the frame: the open document runs the old code and only sends old-revision messages,
 // and an error line or in-flight reply must not carry over to another page
@@ -25,8 +29,10 @@ function Frame({ pageId, credential, revision }: Props) {
         return;
       }
       try {
-        const path = `/api/pages/${encodeURIComponent(pageId)}/records/${encodeURIComponent(message.collection)}`;
-        const response = await fetch(path, { method: message.method === "insert" ? "POST" : "GET", headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" }, body: message.method === "insert" ? JSON.stringify(message.document) : undefined });
+        const record = message.method === "update" || message.method === "delete" ? `/${encodeURIComponent(message.id)}` : "";
+        const path = `/api/pages/${encodeURIComponent(pageId)}/records/${encodeURIComponent(message.collection)}${record}`;
+        const method = BRIDGE_HTTP[message.method];
+        const response = await fetch(path, { method, headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" }, body: method === "POST" || method === "PATCH" ? JSON.stringify(message.document) : undefined });
         const result = await response.json();
         frame.current?.contentWindow?.postMessage({ requestId: message.requestId, ok: response.ok, result }, "*");
       } catch (caught) { setError(String(caught)); }

@@ -276,26 +276,21 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
 
 
 def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_client):
+    # the home chat is not a page chat: with create mode off it can only inspect
     root, store, client, headers = creation_client
-    created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
-    page_id = json.loads(created["content"][0]["text"])["page_id"]
-    page_headers = initialize(client, store.ensure_credential(page_id), 3)
-    assert not store.page(page_id)["create_mode"]
+    mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    store.set_create_mode("home", False)
 
-    catalog = mcp(client, page_headers, 4, "tools/list", {})
-    assert sorted(tool["name"] for tool in catalog["tools"]) == ["add_book", "inspect_page"]
+    catalog = mcp(client, headers, 4, "tools/list", {})
+    assert sorted(tool["name"] for tool in catalog["tools"]) == ["inspect_page"]
     inspect = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
     assert "create mode is currently OFF" in inspect["description"]
     assert inspect["annotations"]["readOnlyHint"] is True
 
     before = state(root)
-    inspected = mcp(
-        client, page_headers, 5, "tools/call", {"name": "inspect_page", "arguments": {}}
-    )
+    inspected = mcp(client, headers, 5, "tools/call", {"name": "inspect_page", "arguments": {}})
     assert inspected.get("isError") is not True, inspected
-    summary = json.loads(inspected["content"][0]["text"])
-    assert summary["route"] == "/reading" and summary["title"] == "reading list"
-    assert summary["code"]["source"] == request()["package"]["source"]
+    assert json.loads(inspected["content"][0]["text"])["route"] == "/"
     assert state(root) == before
 
     for request_id, name, arguments in (
@@ -305,13 +300,77 @@ def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_
         (9, "restore_version", {"kind": "code", "version": 1, "expected_version": 1}),
     ):
         refused = mcp(
+            client, headers, request_id, "tools/call", {"name": name, "arguments": arguments}
+        )
+        assert refused["isError"] is True, name
+        assert refused["content"][0]["text"] == "forbidden: create mode is off", name
+    assert state(root) == before
+
+
+def test_page_chat_edits_its_own_page_without_create_mode(creation_client):
+    root, store, client, headers = creation_client
+    created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    token = store.ensure_credential(page_id)
+    page_headers = initialize(client, token, 3)
+    assert not store.page(page_id)["create_mode"]
+
+    catalog = mcp(client, page_headers, 4, "tools/list", {})
+    names = sorted(tool["name"] for tool in catalog["tools"])
+    assert names == ["add_book", "inspect_page", "restore_version", "write_page"]
+    inspect = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
+    assert "read-only" not in inspect["description"]
+
+    source = "export default 2"
+    written = mcp(
+        client,
+        page_headers,
+        5,
+        "tools/call",
+        {"name": "write_page", "arguments": {"source": source, "dependencies": {}}},
+    )
+    assert written.get("isError") is not True, written
+    assert store.page(page_id)["active_code_revision"] == 2
+    restored = mcp(
+        client,
+        page_headers,
+        6,
+        "tools/call",
+        {
+            "name": "restore_version",
+            "arguments": {"kind": "code", "version": 1, "expected_version": 2},
+        },
+    )
+    assert restored.get("isError") is not True, restored
+    assert store.page(page_id)["active_code_revision"] == 3
+    # the page's history dialog restores through http with the same rule
+    restore = client.post(
+        f"/api/pages/{page_id}/code/restore",
+        headers={
+            "authorization": f"Bearer {token}",
+            "origin": "http://127.0.0.1:5190",
+            "host": "127.0.0.1:5190",
+        },
+        json={"version": 2, "expected_version": 3},
+    )
+    assert restore.status_code == 200, restore.text
+
+    before = state(root)
+    for request_id, name, arguments in (
+        (7, "create_page", {**request(), "route": "/other"}),
+        (8, "create_tool", {"bundle": bundle(name="sneaky")}),
+        (
+            9,
+            "restore_version",
+            {"kind": "tool", "name": "add_book", "version": 1, "expected_version": 1},
+        ),
+    ):
+        refused = mcp(
             client, page_headers, request_id, "tools/call", {"name": name, "arguments": arguments}
         )
         assert refused["isError"] is True, name
         assert refused["content"][0]["text"] == "forbidden: create mode is off", name
     assert state(root) == before
-    home = {"name": "inspect_page", "arguments": {"route": "/"}}
-    assert mcp(client, page_headers, 10, "tools/call", home)["isError"] is True
 
 
 def test_inspect_page_bounds_large_code_over_public_mcp(creation_client):
@@ -831,7 +890,12 @@ def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creatio
         assert [row[0] for row in actions] == ["create_page", "create_tool"]
     page_headers = initialize(client, store.ensure_credential(page_id), 3)
     catalog = mcp(client, page_headers, 4, "tools/list", {})
-    assert [tool["name"] for tool in catalog["tools"]] == ["inspect_page", "add_book"]
+    assert [tool["name"] for tool in catalog["tools"]] == [
+        "write_page",
+        "inspect_page",
+        "restore_version",
+        "add_book",
+    ]
     inserted = mcp(
         client,
         page_headers,
