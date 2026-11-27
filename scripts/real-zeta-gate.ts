@@ -1625,7 +1625,7 @@ with _database() as db:
         target: targetBox && { top: targetBox.top, right: targetBox.right, bottom: targetBox.bottom, left: targetBox.left, width: targetBox.width, height: targetBox.height },
         targetHit: Boolean(hit && target && (hit === target || target.contains(hit))),
         overlayCoversTarget: Boolean(targetBox && overlays.some(({ rect }) => intersects(targetBox, rect))),
-        scroll: { window: scrollY, content: document.querySelector<HTMLElement>(".page-content")?.scrollTop ?? -1 },
+        scroll: { window: scrollY, content: target?.scrollTop ?? -1 },
         overlays,
       };
     });
