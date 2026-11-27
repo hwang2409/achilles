@@ -33,11 +33,18 @@ const list = async (collection) => (await window.achilles.records.list(collectio
 const button = document.createElement("button");
 button.textContent = "add frame note";
 button.onclick = () => window.achilles.records.insert("frame_notes", { text: "from the frame" });
+const first = async () => (await window.achilles.records.list("frame_notes"))[0];
+const edit = document.createElement("button");
+edit.textContent = "edit frame note";
+edit.onclick = async () => window.achilles.records.update("frame_notes", (await first()).record_id, { text: "edited in the frame" });
+const remove = document.createElement("button");
+remove.textContent = "delete frame note";
+remove.onclick = async () => window.achilles.records.delete("frame_notes", (await first()).record_id);
 const annotations = document.createElement("p");
 const notes = document.createElement("p");
 const heading = document.createElement("h1");
 heading.textContent = "gate home";
-root.append(heading, annotations, notes, button);
+root.append(heading, annotations, notes, button, edit, remove);
 const render = async () => {
   annotations.textContent = "trace annotations: " + await list("trace_annotations");
   notes.textContent = "frame notes: " + await list("frame_notes");
@@ -1961,7 +1968,13 @@ with _database() as db:
   await gateWait.playwright(homeFrame.getByText("frame notes: from the frame", { exact: true }), "waitFor", { timeout: 20000 });
   const frameNotes = await (await fetch(`${origin}/api/pages/home/records/frame_notes`, { headers: { Authorization: `Bearer ${credential}` } })).json();
   if (!Array.isArray(frameNotes) || frameNotes.length !== 1 || frameNotes[0].text !== "from the frame") throw new Error(`frame insert did not store one record: ${JSON.stringify(frameNotes)}`);
-  console.log("compiled home page listed a tool-written record and stored a frame-written record");
+  await homeFrame.getByRole("button", { name: "edit frame note", exact: true }).click();
+  await gateWait.playwright(homeFrame.getByText("frame notes: edited in the frame", { exact: true }), "waitFor", { timeout: 20000 });
+  await homeFrame.getByRole("button", { name: "delete frame note", exact: true }).click();
+  await gateWait.playwright(homeFrame.getByText("frame notes: none", { exact: true }), "waitFor", { timeout: 20000 });
+  const notesAfterDelete = await (await fetch(`${origin}/api/pages/home/records/frame_notes`, { headers: { Authorization: `Bearer ${credential}` } })).json();
+  if (!Array.isArray(notesAfterDelete) || notesAfterDelete.length !== 0) throw new Error(`frame delete left records: ${JSON.stringify(notesAfterDelete)}`);
+  console.log("compiled home page listed a tool-written record and inserted, updated and deleted a frame-written record");
   const homeRecords = await (
     await fetch(`${origin}/api/pages/home/records/trace_annotations`, {
       headers: { Authorization: `Bearer ${credential}` },

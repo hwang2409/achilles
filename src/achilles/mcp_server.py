@@ -14,6 +14,7 @@ from .pages import (
     RESTORE_VERSION_SCHEMA,
     PageStore,
     bounded_inspect,
+    edits_own_page,
 )
 from .records import call_record, list_input_schema
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
@@ -45,6 +46,14 @@ _FIELD_GUIDANCE = (
     "Use the user's exact field words: if they say verdict, name it verdict, not label. "
     "If status, done, verdict, rating, or another field will change later, also create an "
     "update tool. "
+)
+
+PAGE_RECORDS_API = (
+    "The page stores its data with window.achilles.records (each call returns a Promise; "
+    "collections belong to this page): list(collection) returns records newest first, each "
+    "with record_id; insert(collection, document) returns the new record; "
+    "update(collection, record_id, fields) merges fields into the record and returns it; "
+    "delete(collection, record_id) removes it. "
 )
 
 INSPECT_PAGE_SCHEMA = {
@@ -168,10 +177,12 @@ def build_mcp(store: PageStore):
             connection.state[cleanup_key] = True
             connection.exit_stack.push_async_callback(remove_connection, page["id"], connection)
         create_status = "ON" if page["create_mode"] else "OFF"
+        can_edit = edits_own_page(page)
         tools: list[Tool] = [
             Tool(
                 name="write_page",
-                description="write and compile React/TypeScript that mounts into #root; writes are immediate and audited.",  # noqa: E501
+                description="rewrite this page: write and compile React/TypeScript that mounts into #root; writes are immediate and audited. "  # noqa: E501
+                + PAGE_RECORDS_API,
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -190,16 +201,33 @@ def build_mcp(store: PageStore):
                 name="inspect_page",
                 description=(
                     f"this chat is on the page at route {page['route']!r} (title {page['title']!r}); "  # noqa: E501
-                    f"create mode is currently {create_status}. read-only: inspect the active React package, "  # noqa: E501
-                    "code revision history, record counts, tools, and pages created by this page."
+                    f"create mode is currently {create_status}"
+                    + (
+                        "; this chat can rewrite this page with write_page and restore its code. "
+                        if can_edit
+                        else ". "
+                    )
+                    + "Inspect the active React package, code revision history, record counts, "
+                    "tools, and pages created by this page."
                 ),
                 inputSchema=INSPECT_PAGE_SCHEMA,
                 outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
                 annotations=ToolAnnotations(readOnlyHint=True),
             ),
         ]
-        if not page["create_mode"]:
+        restore_tool = Tool(
+            name="restore_version",
+            description=(
+                "restore an earlier code or tool revision by appending a copy, so history is kept. "  # noqa: E501
+                "First call inspect_page. Pass the active revision as expected_version."
+                + ("" if page["create_mode"] else " Tool revisions need create mode.")
+            ),
+            inputSchema=RESTORE_VERSION_SCHEMA,
+        )
+        if not can_edit:
             tools.pop(0)
+        elif not page["create_mode"]:
+            tools.append(restore_tool)
         else:
             tools.extend(
                 [
@@ -208,6 +236,7 @@ def build_mcp(store: PageStore):
                         description=(
                             "create and compile a React page; available only in create mode. "
                             "Provide source that mounts into #root and its dependencies, or omit package for a minimal React shell. "  # noqa: E501
+                            + PAGE_RECORDS_API
                             + _FIELD_GUIDANCE
                         ),
                         inputSchema=CREATE_PAGE_SCHEMA,
@@ -223,14 +252,7 @@ def build_mcp(store: PageStore):
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
                     ),
-                    Tool(
-                        name="restore_version",
-                        description=(
-                            "restore an earlier code or tool revision by appending a copy, so history is kept. "  # noqa: E501
-                            "First call inspect_page. Pass the active revision as expected_version."
-                        ),
-                        inputSchema=RESTORE_VERSION_SCHEMA,
-                    ),
+                    restore_tool,
                 ]
             )
         bundles = await anyio.to_thread.run_sync(store.page_tools, page["id"])
@@ -328,7 +350,7 @@ def build_mcp(store: PageStore):
             )
         args = params.arguments or {}
         if params.name == "write_page":
-            if not page["create_mode"]:
+            if not edits_own_page(page):
                 return CallToolResult(
                     isError=True,
                     content=[TextContent(type="text", text="forbidden: create mode is off")],
@@ -337,7 +359,10 @@ def build_mcp(store: PageStore):
         if params.name == "inspect_page":
             return await inspect_page(page, args)
         if params.name in BUILTIN_TOOL_NAMES:
-            if not page["create_mode"]:
+            own_code_restore = (
+                params.name == "restore_version" and args.get("kind") == "code"
+            ) and edits_own_page(page)
+            if not page["create_mode"] and not own_code_restore:
                 return CallToolResult(
                     isError=True,
                     content=[TextContent(type="text", text="forbidden: create mode is off")],

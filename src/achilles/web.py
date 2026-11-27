@@ -251,11 +251,12 @@ def create_app() -> Starlette:
         identity = json.dumps({"pageId": row["id"], "revision": code["version"]})
         script = f"""const identity={identity};
 const pending=new Map();let request=0;
-function call(method,collection,document){{return new Promise((resolve,reject)=>{{
+function call(method,collection,document,id){{return new Promise((resolve,reject)=>{{
  const requestId=String(++request);pending.set(requestId,{{resolve,reject}});
- parent.postMessage({{...identity,requestId,method,collection,document}},'*');
+ parent.postMessage({{...identity,requestId,method,collection,document,id}},'*');
 }})}}
-window.achilles={{records:{{list:(collection)=>call('list',collection),insert:(collection,document)=>call('insert',collection,document)}}}};
+window.achilles={{records:{{list:(collection)=>call('list',collection),insert:(collection,document)=>call('insert',collection,document),
+ update:(collection,id,document)=>call('update',collection,document,String(id)),delete:(collection,id)=>call('delete',collection,undefined,String(id))}}}};
 addEventListener('message',event=>{{if(event.source!==parent||event.origin===\"null\")return;
  const item=pending.get(event.data?.requestId);if(!item)return;pending.delete(event.data.requestId);
  event.data.ok?item.resolve(event.data.result):item.reject(event.data.result);
@@ -494,16 +495,28 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
-        if request.method == "POST":
+        collection = request.path_params["collection"]
+        record_id = request.path_params.get("record_id")
+        if request.method == "DELETE":
+            if not await anyio.to_thread.run_sync(
+                store.delete_record, page_id, collection, record_id
+            ):
+                raise HTTPException(404, "record not found")
+            return JSONResponse({"record_id": record_id, "deleted": True})
+        if request.method in {"POST", "PATCH"}:
             body = await request.json()
             if not isinstance(body, dict):
                 raise HTTPException(400, "record must be an object")
-            return JSONResponse(
-                await anyio.to_thread.run_sync(
-                    store.insert_record, page_id, request.path_params["collection"], body
+            if request.method == "POST":
+                return JSONResponse(
+                    await anyio.to_thread.run_sync(store.insert_record, page_id, collection, body)
                 )
+            updated = await anyio.to_thread.run_sync(
+                store.update_record, page_id, collection, record_id, body
             )
-        collection = request.path_params["collection"]
+            if updated is None:
+                raise HTTPException(404, "record not found")
+            return JSONResponse(updated)
         field = request.query_params.get("field")
         raw_equals = request.query_params.get("equals")
         raw_limit = request.query_params.get("limit", "100")
@@ -636,6 +649,11 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             Route("/api/pages/{id}/versions", versions),
             Route("/api/pages/{id}/code/restore", restore_code, methods=["POST"]),
             Route("/api/pages/{id}/records/{collection}", records, methods=["GET", "POST"]),
+            Route(
+                "/api/pages/{id}/records/{collection}/{record_id}",
+                records,
+                methods=["PATCH", "DELETE"],
+            ),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),

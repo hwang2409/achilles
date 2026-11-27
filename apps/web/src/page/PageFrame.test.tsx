@@ -18,7 +18,10 @@ test("accepts only this opaque frame and declared record methods", () => {
   expect(acceptsBridgeMessage(event(valid, "null", {} as Window), source, "home", 3)).toBeFalse();
   expect(acceptsBridgeMessage(event({ ...valid, pageId: "other" }), source, "home", 3)).toBeFalse();
   expect(acceptsBridgeMessage(event({ ...valid, revision: 2 }), source, "home", 3)).toBeFalse();
+  expect(acceptsBridgeMessage(event({ ...valid, method: "update", id: "r1" }), source, "home", 3)).toBeTrue();
+  expect(acceptsBridgeMessage(event({ ...valid, method: "delete", id: "r1" }), source, "home", 3)).toBeTrue();
   expect(acceptsBridgeMessage(event({ ...valid, method: "delete" }), source, "home", 3)).toBeFalse();
+  expect(acceptsBridgeMessage(event({ ...valid, method: "drop", id: "r1" }), source, "home", 3)).toBeFalse();
 });
 
 test("a page that moves to a new revision while open reloads its frame, so records calls still answer", async () => {
