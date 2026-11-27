@@ -76,9 +76,14 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await review.getByRole("checkbox", { name: "i reviewed the scope" }).check();
     await review.getByRole("button", { name: "spawn agent" }).click();
     await main.getByText(/spawned run:/).waitFor();
-    await again.getByRole("button", { name: new RegExp(task) }).click();
-    await capture(main, "chat-agents-1440");
+    // child_started puts a live sub-agent row in the transcript; the row reopens the agents dialog on that run
+    await again.getByRole("button", { name: "close", exact: true }).click();
+    await again.waitFor({ state: "hidden" });
+    await main.locator(`.transcript button[data-part="sub-agent"][aria-label*="${task}"]`).click();
     const detail = main.locator("dialog.chat-agents");
+    await detail.locator(".agents-row[aria-current=true]", { hasText: task }).waitFor();
+    await detail.locator(".agents-run-head", { hasText: task }).waitFor();
+    await capture(main, "chat-agents-1440");
     const cancel = detail.locator(cancelButton);
     const name = async (tab: Page) => (await tab.locator("dialog.confirmation-dialog .confirmation-proof strong").innerText()).trim();
     await cancel.click();

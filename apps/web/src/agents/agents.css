@@ -37,6 +37,8 @@
 .agents-state::before { content: ""; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: .55ch; display: inline-block; background: currentColor; }
 .agents-state[data-status="running"], .agents-state[data-status="finishing"] { color: var(--fulcrum-accent); }
 .agents-state[data-status="failed"] { color: var(--fulcrum-danger); }
+/* waiting on the user: the transcript row's warn mark */
+.agents-state[data-waiting]::before, .agents-state[data-status="waiting"]::before { background: var(--fulcrum-warn); }
 .agents-more { margin: 8px 16px; }
 .agents-detail { overflow-wrap: anywhere; }
 .agents-back { display: inline-flex; margin-inline: var(--g1-space-10); align-items: center; min-height: var(--g1-control-height); color: var(--fulcrum-accent); font-size: inherit; }

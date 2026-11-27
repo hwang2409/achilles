@@ -16,6 +16,17 @@ const terminal = ["completed", "failed", "canceled"] as const;
 // the chat transcript's sub-agent row says "done"; use the same word in agent views
 export const stateWord = (status: string) => status === "completed" ? "done" : status;
 export const isTerminal = (state: unknown): state is typeof terminal[number] => terminal.some((value) => value === state);
+// the chat transcript's live sub-agent row for a run (fulcrum's sub_agent item). zeta's run report can lag it, so a
+// running report takes the running row's step, tool count, and waiting state; the report's turns are hidden then, as
+// they are older than the step beside them. a finished row adds the child's reply; a finished report keeps the rest
+const waiting: Record<string, AgentRun["waiting"]> = { waiting_approval: "needs approval", waiting_input: "needs input" };
+export function withLiveRow(row: AgentRun, live: { status: string; latestActivity?: string; summary?: string; toolCount?: number } | undefined): AgentRun {
+  if (!live) return row;
+  if (["done", "error", "canceled"].includes(live.status)) return live.summary ? { ...row, reply: live.summary } : row;
+  if (isTerminal(row.status)) return row;
+  return { ...row, currentStep: live.latestActivity ?? row.currentStep, turnsUsed: undefined, waiting: waiting[live.status],
+    toolCount: live.toolCount === undefined ? row.toolCount : Math.max(row.toolCount ?? 0, live.toolCount) };
+}
 
 type Profile = { name: string; description: string; tools: string[] | null };
 export type ControlParent = { id: string; cwd: string; profiles: Profile[]; idle: boolean };

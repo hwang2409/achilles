@@ -33,6 +33,9 @@ export type AgentRun = {
   elapsedSeconds?: number;
   background?: boolean;
   acceptsFollowUps?: boolean;
+  /** from the chat's live transcript row, not zeta's report (withLiveRow) */
+  waiting?: "needs approval" | "needs input";
+  reply?: string;
 };
 export type AgentFilters = { root?: string; status?: AgentStatus };
 type Cursor = string | number;
