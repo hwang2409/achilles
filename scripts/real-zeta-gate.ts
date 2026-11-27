@@ -571,8 +571,14 @@ with _database() as db:
   });
   await waitFor(async () => await Bun.file(agentsDiscovery).exists(), "agent controls zeta discovery");
   const agentDiscovery = await readDiscovery(agentsDiscovery);
+  const chatIds = async () => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: { session_id: string }[] }).chats.map((chat) => chat.session_id);
+  const chatsBefore = new Set(await chatIds());
   const agentWriteSurfaceIds = await gateAgentControls(browser, origin, { ...agentDiscovery, url: `ws://127.0.0.1:${agentDiscovery.port}` }, waitFor, screenshotDir);
   await stop(agentsServer);
+  // the agent gate's chat lives on another zeta and would become home's newest chat; later steps expect home's stale session
+  const agentChats = (await chatIds()).filter((id) => !chatsBefore.has(id));
+  const dropAgentChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...agentChats], env);
+  if (!(await waitForExit(dropAgentChats, 10_000)) || dropAgentChats.exitCode !== 0) throw new Error(`agent chat cleanup exited ${dropAgentChats.exitCode}`);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
