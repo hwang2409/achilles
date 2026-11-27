@@ -44,6 +44,10 @@ Promise.reject(new Error("boom-rejection"));
 fetch("http://127.0.0.1:%d/missing").catch(() => {});
 window.achilles.records.insert("items", { title: "should not save" }).catch(() => {});
 """
+POLLING = """
+document.getElementById("root").innerHTML = "<h1>polling</h1>";
+setInterval(() => fetch(location.href).catch(() => {}), 100);
+"""
 HUNG = "document.getElementById('root').textContent = 'spin'; for (;;) {}"
 
 
@@ -148,6 +152,16 @@ def test_render_reports_errors_with_context_and_blocks_writes(served, tmp_path) 
         "insert items: writes are blocked during render_page; nothing was saved"
     ]
     assert _record_count(store) == 0
+
+
+def test_polling_page_times_out_with_a_fallback_screenshot(served, tmp_path) -> None:
+    store = _home_with_code(tmp_path / "achilles", POLLING)
+    token = store.ensure_credential("home")
+    with served(web.create_app()) as port:
+        result = render_page(f"http://127.0.0.1:{port}", "home", token, timeout=3)
+    assert result["ready"] is False and result["timed_out"] is True
+    assert "network-idle" in result["note"]
+    assert base64.b64decode(result["screenshot"])[:2] == b"\xff\xd8"
 
 
 def _processes() -> dict[int, tuple[int, str]]:
