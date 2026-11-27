@@ -50,10 +50,10 @@ _FIELD_GUIDANCE = (
 
 PAGE_RECORDS_API = (
     "The page stores its data with window.achilles.records (each call returns a Promise; "
-    "collections belong to this page): list(collection) returns records newest first, each "
-    "with record_id; insert(collection, document) returns the new record; "
+    "collections belong to this page): list(collection) returns at most 100 records newest "
+    "first, each with record_id; insert(collection, document) returns the new record; "
     "update(collection, record_id, fields) merges fields into the record and returns it; "
-    "delete(collection, record_id) removes it. "
+    "delete(collection, record_id) removes it. A failed call rejects with {detail}. "
 )
 
 INSPECT_PAGE_SCHEMA = {

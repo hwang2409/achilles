@@ -893,6 +893,67 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
     assert store.page_tools("home")[0]["version"] == 2
 
 
+def test_records_reject_a_missing_or_invalid_json_body(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = TestClient(web.create_app())
+    book = client.post("/api/pages/home/records/books", headers=own, json={"title": "dune"})
+    path = f"/api/pages/home/records/books/{book.json()['record_id']}"
+    for method, url in (("POST", "/api/pages/home/records/books"), ("PATCH", path)):
+        for content in (b"", b"{", b"[1]"):
+            response = client.request(method, url, headers=own, content=content)
+            assert response.status_code == 400, (method, content, response.text)
+            assert response.text == "body must be a JSON object"
+    assert client.get("/api/pages/home/records/books", headers=own).json() == [book.json()]
+
+
+def test_http_restores_follow_create_mode(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("other", "/other", "other", "2025-01-01", "2025-01-01"),
+        )
+        for page_id in ("home", "other"):
+            for version in (1, 2):
+                db.execute(
+                    "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+                    "created_at) VALUES(?,?,?,?,?,?)",
+                    (page_id, version, f"v{version}", "{}", f"d{version}", "2025-01-01"),
+                )
+            db.execute("UPDATE page SET active_code_revision=2 WHERE id=?", (page_id,))
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "annotate_trace",
+        "description": "annotate",
+        "input_schema": {"type": "object"},
+        "implementation": {
+            "operation": "insert",
+            "collection": "annotations",
+            "data_schema": {"type": "object"},
+        },
+    }
+    store.set_create_mode("home", True)
+    store.create_tool("home", bundle)
+    store.create_tool("home", bundle | {"description": "annotate v2"})
+    store.set_create_mode("home", False)
+    client = chat_client()
+
+    def post(page_id: str, path: str) -> int:
+        headers = {"authorization": f"Bearer {store.ensure_credential(page_id)}"}
+        body = {"version": 1, "expected_version": 2}
+        return client.post(f"/api/pages/{page_id}/{path}", headers=headers, json=body).status_code
+
+    # with create mode off, home may not restore code or tools; another page restores its code
+    assert post("home", "code/restore") == 403
+    assert post("home", "tools/annotate_trace/rollback") == 403
+    assert store.page("home")["active_code_revision"] == 2
+    assert store.page_tools("home")[0]["version"] == 2
+    assert post("other", "code/restore") == 200
+    assert store.page("other")["active_code_revision"] == 3
+
+
 def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     token = store.ensure_credential("home")
@@ -1418,6 +1479,9 @@ def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) ->
     assert client.patch(path, headers=other, json={"read": False}).status_code == 403
     assert client.delete(path, headers=other).status_code == 403
     their_id = theirs.json()["record_id"]
+    leaked = client.patch(f"/api/pages/home/records/books/{their_id}", headers=own, json={"x": 1})
+    assert leaked.status_code == 404
+    assert "emma" not in leaked.text
     assert (
         client.delete(f"/api/pages/home/records/books/{their_id}", headers=own).status_code == 404
     )
