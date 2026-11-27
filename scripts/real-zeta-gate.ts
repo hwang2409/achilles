@@ -17,7 +17,8 @@ import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
 import { gateMcpOAuth, mcpOAuthArtifacts, oauthFixture, mcpOAuthBesideRunningChat } from "./gate-mcp-oauth";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
-import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
+import { FEATURES, TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
+import { createClient, webSocketTransport } from "../apps/web/node_modules/@fulcrum/zeta/dist/index.js";
 import { surfaceRoutes } from "../apps/web/src/surface/routes";
 import { focusable } from "../apps/web/src/focusable";
 import { expectBrowserErrors } from "./browser-errors";
@@ -3331,18 +3332,38 @@ with _database() as db:
   console.log("s2 page chat header switch/create/modes/rename verified at 1440 and 390");
   const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
-  // gate step 4: zeta admits four multi controllers. fill the free slots with catalog tabs (each its own controller, no
-  // chat), so the observer page is the fifth controller tab: it must fall back to a live, read-only observer.
-  const capFillers: Page[] = [];
-  for (let opened = 0; opened < 4; opened++) {
-    const filler = await browser.newPage();
-    await filler.goto(`${origin}/skills`);
-    await gateWait.playwright(filler.locator('.surface-connection[data-connected="true"]'), "waitFor", { state: "attached" });
-    if (await filler.locator(".observer-banner").count()) { await filler.close(); break; }
-    capFillers.push(filler);
+  // gate step 4: zeta admits sixteen session-holding multi controllers; a tab without a chat does not count. so five catalog
+  // tabs next to the chat tab (more than the old cap of four) must all control zeta. then raw controllers that each hold a
+  // fresh session fill the free slots, so the observer page is refused and must fall back to a live, read-only observer.
+  const catalogTabs: Page[] = [];
+  for (let opened = 0; opened < 5; opened++) {
+    const tab = await browser.newPage();
+    catalogTabs.push(tab);
+    await tab.goto(`${origin}/skills`);
+    await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor", { state: "attached" });
+    if (await tab.locator(".observer-banner").count()) throw new Error(`catalog tab ${opened + 1} without a chat became an observer`);
   }
-  if (!capFillers.length) throw new Error("no catalog tab connected as a controller before the cap step");
-  console.log(`cap step: ${capFillers.length} catalog controller tabs opened next to the chat tab`);
+  await Promise.all(catalogTabs.map((tab) => tab.close()));
+  console.log("cap step: five catalog tabs next to the chat tab all control zeta");
+  const capFillers: Array<{ client: ReturnType<typeof createClient>; sessionId: string }> = [];
+  for (let opened = 0; ; opened++) {
+    if (opened > 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
+    // the same handoff the browser reads, so the raw controllers reach the zeta serve the tabs use.
+    const discovery = await fetch(discoveryUrl).then((response) => response.json()) as { url: string; controller_token: string };
+    const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
+    const filler = createClient(await webSocketTransport(url.toString(), ["zeta.v1", `zeta.bearer.${discovery.controller_token}`]));
+    try { await filler.hello(FEATURES, "controller"); }
+    catch (error) {
+      filler.close();
+      if ((error as { code?: unknown }).code === -32001) break;
+      throw error;
+    }
+    const created = await filler.request("new_session", {}) as { session?: { session_id?: string } };
+    if (!created.session?.session_id) { filler.close(); throw new Error("a cap filler new_session returned no session id"); }
+    capFillers.push({ client: filler, sessionId: created.session.session_id });
+  }
+  if (!capFillers.length) throw new Error("no session-holding controller connected before the cap step");
+  console.log(`cap step: ${capFillers.length} session-holding controllers filled zeta next to the chat tab`);
   const observerPage = await browser.newPage();
   const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId, mcpTestSurfaceId, ...mcpOAuthSurfaceIds, ...agentWriteSurfaceIds]);
   const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
@@ -3389,8 +3410,8 @@ with _database() as db:
   await recordRenderedWriteSurfaces(observerPage);
   const observerBannerText = await observerBanner.innerText();
   if (!observerBannerText.includes("zeta is full") || !observerBannerText.includes("shows updates")) throw new Error(`observer banner did not explain the cap: ${observerBannerText}`);
-  const fifthHello = observerSockets.find((row) => row.direction === "received" && row.method === "hello");
-  if (fifthHello?.helloAccepted !== false) throw new Error("the fifth controller hello was not refused by zeta");
+  const refusedHello = observerSockets.find((row) => row.direction === "received" && row.method === "hello");
+  if (refusedHello?.helloAccepted !== false) throw new Error("the seventeenth controller hello was not refused by zeta");
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   await gateWait.playwright(dockHead(observerPage).locator('[data-write-surface="page-chat.new"]:disabled'), "waitFor");
   for (const name of ["auto-approve", "create mode"] as const) {
@@ -3573,8 +3594,15 @@ with _database() as db:
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-takeover-no-reload-1440x900.png") });
   await waitFor(async () => observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed"), "promoted controller released its observer socket");
   if (helloRoles() !== "controller,observer,controller,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles()}`);
-  await Promise.all(capFillers.map((filler) => filler.close()));
-  console.log("cap step: the fifth controller tab showed the observer banner, stayed live, and took control once a tab closed");
+  // a closed controller keeps its session resident for the ~90 s reconnect grace, and 15 of those would fill zeta's 20
+  // resident records for later steps. so the first filler reclaims each closed filler's session in turn: each resume
+  // swaps away from its idle session, which closes it. only the last session stays in grace.
+  const [keeper, ...released] = capFillers;
+  released.forEach(({ client }) => client.close());
+  for (const { sessionId } of released)
+    await waitFor(() => keeper.client.request("resume", { session_id: sessionId }).then(() => true, (error) => { if ((error as { code?: unknown }).code === -32014) return false; throw error; }), "first cap filler reclaims a closed filler's session");
+  keeper.client.close();
+  console.log("cap step: the seventeenth session-holding controller tab showed the observer banner, stayed live, and took control once a tab closed");
   await observerPage.reload({ waitUntil: "domcontentloaded" });
   await gateWait.playwright(observerPage.locator(`[data-session-id="${controllerChat}"]`), "waitFor", { state: "attached" });
   const restoredMutation = "restored controller mutation";
