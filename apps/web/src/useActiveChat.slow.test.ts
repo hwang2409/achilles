@@ -1327,35 +1327,46 @@ test.each([
 const TURN_ENDED = "the turn ended before zeta read it.";
 
 // "stop the oldest parked chat and try again": one owner (stopAndRetry) for both refusals of a new chat, parked_limit
-// (this tab keeps 3 chats running) and resident_limit (zeta is full). After the stop, the stopped chat is zeta's
-// attached session, not a parked one; a refused retry while zeta still has it (it still holds work) is "still
-// stopping": the chat the user was on opens again (so the stopped chat parks again and the shown chat is no parked
-// row), and the notice offers "try again" (nothing retries by itself). It never offers to stop a second chat.
-type Answer = "ok" | { attached?: boolean; listed?: boolean };
+// (this tab keeps 3 chats running) and resident_limit (zeta is full). The stop resumes p1, aborts it, and resumes the
+// chat the user was on, so p1 leaves zeta's attached slot: zeta closes it, or parks it again while it still holds work.
+// Then it waits (up to 30 s) until p1 is no parked chat of this tab, and repeats the swap once. zeta's rules here, as in
+// zeta 352442dc: a swap registers its new chat before the outgoing one leaves, so resident_limit counts the outgoing
+// chat, every parked chat, and a closing one (`counted`: zeta has not finished closing p1); parked_limit counts this
+// tab's parked chats when the outgoing one parks. A refused retry is "still stopping": the chat the user was on opens
+// again, and the notice offers "try again" (nothing retries by itself). It never offers to stop a second chat.
 type StopRow = {
   name: string;
-  // the answer to the repeated new_session: "ok", or a refusal; `attached`: zeta keeps the stopped chat attached;
-  // `listed`: the refusal (parked_limit) or status (resident_limit) lists it
-  retry?: Answer;
+  // what p1 does when it leaves zeta's attached slot after the abort: it closes, or it parks again (it holds work)
+  p1?: "closes" | "parks";
+  // zeta closes the parked p1 during the wait (its work ended): parked_session_changed `closed`
+  closes?: true;
+  // zeta still counts the closing p1 (resident_limit only)
+  counted?: true;
+  // another chat of this tab took the freed slot
+  other?: true;
   fail?: "resume" | "abort";
-  move?: "away" | "double";
-  outcome: "switched" | "still_stopping" | "refused_other" | "stop_failed" | "none";
-  // still stopping, then: "try again", "stay", or the user's New chat (answered `again`) while zeta closes the stopped chat
+  move?: "away" | "double" | "new_during_wait";
+  limits?: readonly ("parked_limit" | "resident_limit")[];
+  outcome: "switched" | "still_working" | "not_freed" | "refused_other" | "stop_failed" | "none" | "new_chat";
+  // still stopping, then: "try again", "stay", or the user's New chat while zeta closes the stopped chat
   then?: "try_again" | "stay" | "new_chat";
-  again?: Answer;
 };
 const stopRows: StopRow[] = [
-  { name: "the retry switches", retry: "ok", outcome: "switched" },
-  { name: "still stopping, then the user's New chat: it opens normally and send works", retry: { attached: true }, outcome: "still_stopping", then: "new_chat", again: "ok" },
-  { name: "still stopping, then try again", retry: { attached: true }, outcome: "still_stopping", then: "try_again", again: { attached: true } },
-  { name: "still stopping, then stay", retry: { listed: true }, outcome: "still_stopping", then: "stay" },
-  { name: "other chats hold the slots", retry: {}, outcome: "refused_other" },
+  { name: "p1 closes at once: the retry switches", p1: "closes", outcome: "switched" },
+  { name: "p1 parks again, then zeta closes it: the switch continues by itself", p1: "parks", closes: true, outcome: "switched" },
+  { name: "p1 parks again and zeta never closes it: after 30 s, the background-work text", p1: "parks", outcome: "still_working" },
+  { name: "zeta has not finished closing p1: the not-freed text", p1: "closes", counted: true, limits: ["resident_limit"], outcome: "not_freed" },
+  { name: "still stopping, then the user's New chat: it opens normally and send works", p1: "parks", outcome: "still_working", then: "new_chat" },
+  { name: "still stopping, then try again", p1: "parks", outcome: "still_working", then: "try_again" },
+  { name: "still stopping, then stay", p1: "parks", outcome: "still_working", then: "stay" },
+  { name: "the user's New chat during the wait ends the run", p1: "parks", move: "new_during_wait", outcome: "new_chat" },
+  { name: "other chats hold the slots", p1: "closes", other: true, limits: ["parked_limit"], outcome: "refused_other" },
   { name: "the stop fails at resume", fail: "resume", outcome: "stop_failed" },
   { name: "the stop fails at abort", fail: "abort", outcome: "stop_failed" },
   { name: "the user opens another chat mid-stop", move: "away", outcome: "none" },
-  { name: "a double click", retry: { attached: true }, move: "double", outcome: "still_stopping", then: "stay" },
+  { name: "a double click", p1: "parks", move: "double", outcome: "still_working", then: "stay" },
 ];
-const stopCases = (["parked_limit", "resident_limit"] as const).flatMap((limit) => stopRows.map((row) => ({ ...row, limit })));
+const stopCases = (["parked_limit", "resident_limit"] as const).flatMap((limit) => stopRows.filter((row) => !row.limits || row.limits.includes(limit)).map((row) => ({ ...row, limit })));
 
 test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name", async (row) => {
   const location = { pathname: "/", search: "?chat=chat", hash: "", href: "http://achilles.test/?chat=chat", origin: "http://achilles.test", assign() {} };
@@ -1376,14 +1387,19 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
       throw new Error(`unexpected fetch ${url}`);
     },
   });
-  // zeta: "chat" attached, p1..p3 parked (oldest first). a resume takes a chat and parks the attached one
-  const zeta = { attached: "chat", parked: ["p1", "p2", "p3"], newSessions: 0 };
+  // zeta: "chat" attached, p1..p3 parked (oldest first); every chat but an aborted p1 that closes holds work
+  const zeta = { attached: "chat", parked: ["p1", "p2", "p3"], closing: [] as string[], aborted: false, newSessions: 0 };
+  const parks = (id: string) => !(id === "p1" && zeta.aborted && row.p1 !== "parks");
+  const leave = (id: string) => { if (parks(id)) zeta.parked = [...zeta.parked, id]; else if (row.counted) zeta.closing.push(id); };
   const calls: string[] = [];
   const midStop = deferred<void>();
   const userNewChat = deferred<void>();
   const refusal = (parkedIds: string[]) => row.limit === "parked_limit"
     ? Object.assign(new Error("parked limit"), { code: -32004, data: { reason: "parked_limit", parked: parkedIds } })
     : Object.assign(new Error("resident limit"), { code: -32004, data: { reason: "resident_limit" } });
+  const full = () => row.limit === "parked_limit"
+    ? parks(zeta.attached) && zeta.parked.length >= 3
+    : zeta.attached === "p1" || zeta.parked.includes("p1") || zeta.closing.includes("p1");
   const client = {
     features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "session_park"],
     request: async (method: string, params?: { session_id?: string }) => {
@@ -1393,27 +1409,23 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
         const id = params!.session_id!;
         if (id === "p1" && row.move === "away") await midStop.promise;
         if (id === "p1" && row.fail === "resume") throw new Error("zeta is restarting");
-        if (id !== zeta.attached) { zeta.parked = [...zeta.parked.filter((other) => other !== id), zeta.attached]; zeta.attached = id; }
+        // one's own parked chat is never refused; the outgoing chat parks or closes
+        if (id !== zeta.attached) { zeta.parked = zeta.parked.filter((other) => other !== id); leave(zeta.attached); zeta.attached = id; }
         return { session: { name: null } };
       }
-      if (method === "abort") { if (row.fail === "abort") throw new Error("abort failed"); return {}; }
+      if (method === "abort") { if (row.fail === "abort") throw new Error("abort failed"); zeta.aborted = true; return {}; }
       if (method === "send") return { accepted: true };
       if (method === "new_session") {
         zeta.newSessions += 1;
         // the user's New chat waits for zeta while the stopped chat closes
-        if (zeta.newSessions === 3 && row.then === "new_chat") await userNewChat.promise;
-        // the first new chat is refused (the tab keeps 3 chats running, or zeta is full); the retry answers per row
+        if ((zeta.newSessions === 3 && row.then === "new_chat") || (zeta.newSessions === 2 && row.move === "new_during_wait")) await userNewChat.promise;
+        // the first new chat is refused (the tab keeps 3 chats running, or zeta is full)
         if (zeta.newSessions === 1) throw refusal(zeta.parked);
-        const answer = (zeta.newSessions === 2 ? row.retry : row.again) ?? {};
-        if (answer === "ok") { zeta.parked = zeta.parked.filter((id) => id !== zeta.attached); zeta.attached = "fresh"; return { session: { session_id: "fresh" } }; }
-        // after the stop zeta has p1 attached and p2, p3, chat parked. attached: p1 still holds work, so zeta keeps it
-        // attached; listed: it parked again; neither: p1 closed, and "other" (another tab's chat... here a new
-        // parked one) holds the slot
-        if (answer.listed) { zeta.parked = ["p1", "p2", "p3"]; zeta.attached = "chat"; }
-        else if (!answer.attached) { zeta.parked = ["p2", "p3", "other"]; zeta.attached = "chat"; }
-        // still attached (refused): zeta changed nothing; still parked (a later retry): it stays listed
-        else if (zeta.attached !== "p1" && !zeta.parked.includes("p1")) throw new Error("p1 is gone");
-        throw refusal(zeta.parked);
+        if (row.other) { zeta.parked = ["p2", "p3", "other"]; throw refusal(zeta.parked); }
+        if (full()) throw refusal(zeta.parked);
+        leave(zeta.attached);
+        zeta.attached = "fresh";
+        return { session: { session_id: "fresh" } };
       }
       if (method === "state_session") return { session: { status: "idle" } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
@@ -1423,6 +1435,11 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
     replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
     replayRevision: () => 1,
     finishReplay: () => true,
+  };
+  // zeta closes the parked p1: its work ended
+  const closeP1 = async () => {
+    zeta.parked = zeta.parked.filter((id) => id !== "p1");
+    await act(async () => { takeParkedEvent(client, JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "parked_session_changed", session_id: "p1", data: { state: "closed" } } })); });
   };
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
@@ -1444,10 +1461,34 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
     midStop.resolve();
   }
   await settle();
-  clock.advance(5_000);
-  await settle();
-
   const sent = (method: string) => calls.filter((call) => call.startsWith(method));
+  if (row.p1 === "parks" && !row.fail) {
+    // p1 still holds work: the stop waits for zeta to close it, and nothing is repeated yet
+    expect(active.stop, "the stop does not wait for zeta to close p1").toMatchObject({ sessionId: "p1", phase: "stopping" });
+    expect(sent("new_session"), "the swap was repeated before zeta closed p1").toEqual([]);
+    if (row.move === "new_during_wait") {
+      let created!: Promise<void>;
+      await act(async () => { created = active.newChat(); });
+      expect(active.stop, "the user's New chat did not end the wait").toBeNull();
+      await closeP1();
+      await settle();
+      await act(async () => { userNewChat.resolve(); await created; });
+      await settle();
+      expect(active.state, "the user's New chat did not open").toMatchObject({ phase: "ready", sessionId: "fresh" });
+      expect(sent("new_session"), "the stop repeated its swap after the user's New chat").toHaveLength(1);
+      expect(active.stop).toBeNull();
+      return;
+    }
+    if (row.closes) await closeP1();
+    else await act(async () => { clock.advance(29_000); });
+    await settle();
+    if (!row.closes) {
+      expect(sent("new_session"), "the wait ended before 30 s").toEqual([]);
+      await act(async () => { clock.advance(1_000); });
+      await settle();
+    }
+  }
+
   expect(sent("resume p1"), "the oldest parked chat (zeta's order) is resumed once").toHaveLength(1);
   expect(sent("abort"), "one chat is aborted at most").toEqual(row.fail === "resume" || row.move === "away" ? [] : ["abort p1"]);
   expect(sent("new_session"), "the refused new chat is repeated once, after the stop").toHaveLength(row.fail || row.move === "away" ? 0 : 1);
@@ -1456,8 +1497,9 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
       expect(active.stop).toBeNull();
       expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
       break;
-    case "still_stopping":
-      expect(active.stop, "the stopped chat is named as still stopping").toMatchObject({ sessionId: "p1", from: "chat", phase: "still_stopping" });
+    case "still_working":
+    case "not_freed":
+      expect(active.stop, "the stopped chat is named as still stopping").toMatchObject({ sessionId: "p1", from: "chat", phase: "still_stopping", working: row.outcome === "still_working" });
       expect(active.busy, "the notice stays").toMatchObject({ limit: row.limit === "parked_limit" ? "parked" : "resident" });
       stillStopping();
       break;
@@ -1475,14 +1517,14 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
       expect(active.stop).toBeNull();
       break;
   }
-  // still stopping: zeta has the chat the user was on attached again, the stopped chat is one of this tab's parked chats
-  // (its row says so), and the shown chat is no parked row
+  // still stopping: zeta has the chat the user was on attached again; p1 is one of this tab's parked chats only while it
+  // holds work; the shown chat is no parked row
   function stillStopping() {
     expect(active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
     expect(zeta.attached, "zeta kept the stopped chat attached while the screen shows the user's chat").toBe("chat");
     const rows = parkedRows(client).map((entry) => entry.session_id);
     expect(rows, "the shown chat still has a parked row").not.toContain("chat");
-    expect(rows, "the stopped chat is not one of this tab's parked chats").toContain("p1");
+    expect(rows.includes("p1"), "p1 is a parked chat of this tab only while it holds work").toBe(row.p1 === "parks");
   }
   if (row.then) {
     calls.splice(0);
@@ -1492,8 +1534,7 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
       await act(async () => { created = active.newChat(); });
       expect(active.stop, "the user's New chat did not end the stop run").toBeNull();
       expect(active.busy).toBeNull();
-      zeta.parked = zeta.parked.filter((id) => id !== "p1");
-      await act(async () => { takeParkedEvent(client, JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "parked_session_changed", session_id: "p1", data: { state: "closed" } } })); });
+      await closeP1();
       await settle();
       await act(async () => { userNewChat.resolve(); await created; });
       await settle();
@@ -1510,7 +1551,7 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
       await settle();
       expect(sent("abort")).toEqual([]);
       expect(sent("new_session")).toHaveLength(1);
-      expect(active.stop).toMatchObject({ sessionId: "p1", from: "chat", phase: "still_stopping" });
+      expect(active.stop).toMatchObject({ sessionId: "p1", from: "chat", phase: "still_stopping", working: true });
       stillStopping();
     } else {
       // "stay" keeps the chat the user was on, which zeta has again; never the stopped chat, and no second resume

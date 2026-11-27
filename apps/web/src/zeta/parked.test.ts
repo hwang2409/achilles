@@ -77,10 +77,10 @@ describe("stopParked", () => {
     } } };
   };
 
-  test("resumes the chat before it aborts it, then reads the parked list again", async () => {
+  test("resumes the chat, aborts it, resumes the chat the user was on, then reads the parked list again", async () => {
     const { sent, client } = zeta();
-    expect(await stopParked(client as never, "a", async () => binding, () => true)).toBe(true);
-    expect(sent).toEqual(["resume a", "abort a", "status"]);
+    expect(await stopParked(client as never, "a", async () => binding, () => true, "b")).toBe(true);
+    expect(sent).toEqual(["resume a", "abort a", "resume b", "status"]);
     // its row reads idle before it leaves the parked list (no "running" flash); if it still holds work, it parks again
     expect(patches).toEqual(['/api/chats/a {"last_state":"idle"}']);
   });
@@ -91,25 +91,25 @@ describe("stopParked", () => {
     ["not this tab's", { code: -32003 }],
   ])("a chat that already left (%s) is not aborted", async (_name, error) => {
     const { sent, client } = zeta({ resume: Object.assign(new Error("refused"), error) });
-    expect(await stopParked(client as never, "a", async () => binding, () => true)).toBe(false);
+    expect(await stopParked(client as never, "a", async () => binding, () => true, null)).toBe(false);
     expect(sent).toEqual(["resume a"]);
   });
 
   test("an unlisted chat sends nothing", async () => {
     const { sent, client } = zeta();
-    expect(await stopParked(client as never, "a", async () => null, () => true)).toBe(false);
+    expect(await stopParked(client as never, "a", async () => null, () => true, null)).toBe(false);
     expect(sent).toEqual([]);
   });
 
   test("another resume error stops the chain with it", async () => {
     const { sent, client } = zeta({ resume: new Error("zeta is restarting") });
-    await expect(stopParked(client as never, "a", async () => binding, () => true)).rejects.toThrow("zeta is restarting");
+    await expect(stopParked(client as never, "a", async () => binding, () => true, null)).rejects.toThrow("zeta is restarting");
     expect(sent).toEqual(["resume a"]);
   });
 
   test("an abort error stops the chain with its message", async () => {
     const { sent, client } = zeta({ abort: new Error("abort failed") });
-    const caught = await stopParked(client as never, "a", async () => binding, () => true).catch((error: unknown) => error);
+    const caught = await stopParked(client as never, "a", async () => binding, () => true, null).catch((error: unknown) => error);
     expect(caught).toBeInstanceOf(StopError);
     expect((caught as Error).message).toBe("abort failed");
     // zeta now has the chat attached and the shown one parked: the list is read again
@@ -119,7 +119,7 @@ describe("stopParked", () => {
 
   test("a stale attachment stops before zeta changes", async () => {
     const { sent, client } = zeta();
-    await expect(stopParked(client as never, "a", async () => binding, () => false)).rejects.toThrow("request aborted");
+    await expect(stopParked(client as never, "a", async () => binding, () => false, null)).rejects.toThrow("request aborted");
     expect(sent).toEqual([]);
   });
 });

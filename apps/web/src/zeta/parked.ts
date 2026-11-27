@@ -102,13 +102,14 @@ export class StopError extends Error {}
 
 /**
  * Stops one of this tab's parked chats. zeta has no stop for a parked chat, so: `resume` it (one's own parked chat never
- * meets parked_limit; the shown chat parks in its place), then `abort` it (its turn, approvals and background children;
- * not background tasks). The stopped chat is then zeta's attached session; the caller repeats its swap, which closes it.
- * Its row reads idle once the abort lands (a chat that still holds work parks again, and its parked row says so).
+ * meets parked_limit; the shown chat parks in its place), `abort` it (its turn, approvals and background children; not
+ * background tasks), then `resume` `back`, the chat the user was on, so the stopped chat leaves zeta's attached slot:
+ * zeta closes it, or parks it again while it still holds work (its parked row says so). A swap made from the stopped
+ * chat itself could not use its slot: zeta registers the swap's new chat before it closes the outgoing one.
  * `bindingOf` gives the chat's page binding, or null when achilles no longer lists the chat. Returns false when the
  * chat had already left (nothing to abort); throws StopError when abort fails (the parked list is read again first).
  */
-export async function stopParked(client: ZetaClient, sessionId: string, bindingOf: (sessionId: string) => Promise<Binding | null>, current: () => boolean): Promise<boolean> {
+export async function stopParked(client: ZetaClient, sessionId: string, bindingOf: (sessionId: string) => Promise<Binding | null>, current: () => boolean, back: string | null): Promise<boolean> {
   const binding = await bindingOf(sessionId);
   if (!current()) throw aborted();
   if (!binding) return false;
@@ -122,8 +123,22 @@ export async function stopParked(client: ZetaClient, sessionId: string, bindingO
   }
   // stored before it leaves the parked list, so its row never falls back to the "running" stored while it was parked
   await writeRowState(sessionId, rowState(undefined, { from: "closed" }).write);
+  const backBinding = back && back !== sessionId && current() ? await bindingOf(back) : null;
+  // a failed resume back leaves the stopped chat attached: the caller's swap then meets the limit and says so
+  if (back && backBinding) await rebindPage(client, back, backBinding).catch(() => null);
   await refreshParked(client).catch(() => null);
   return true;
+}
+
+/** Resolves once `sessionId` is not one of this tab's parked chats (zeta closed it, or never parked it), or after `ms`. */
+export function parkedLeft(client: object, sessionId: string, ms: number, clock: Pick<typeof globalThis, "setTimeout" | "clearTimeout"> = globalThis): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => { if (!parkedRows(client).some((row) => row.session_id === sessionId)) done(); };
+    const timer = clock.setTimeout(() => done(), ms);
+    const unsubscribe = subscribeParked(client, check);
+    function done() { clock.clearTimeout(timer); unsubscribe(); resolve(); }
+    check();
+  });
 }
 
 type Reclaim = { run: Promise<void>; skipped: string | null };

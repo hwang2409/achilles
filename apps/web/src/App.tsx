@@ -611,8 +611,9 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   const target = busy?.retry === "new" ? "open a new chat" : busy?.target ? `open ${nameOf(busy.target)}` : "open that chat";
   const failed = stop?.phase === "failed" ? `${stop.error}. ` : "";
   const list = <>{parked.map((entry, at) => <span key={entry.sessionId}>{at > 0 && ", "}{entry.chat ? <button type="button" className="link-button" onClick={() => onOpen(entry.chat!)}>{name(entry.sessionId)}</button> : name(entry.sessionId)}{entry.finishing && " (finishing)"}</span>)}</>;
-  // zeta refuses a swap after a stop only while the stopped chat still holds work (else the stop freed the slot)
-  const text = stuck ? <>{name(stop.sessionId)} is still finishing its background work. try again when it is done.</>
+  // a refused swap after a stop: the stopped chat still holds work (it is parked), or zeta has not closed it yet
+  const text = stop?.phase === "stopping" ? <>stopping {name(stop.sessionId)}…</>
+    : stuck ? stop.working ? <>{name(stop.sessionId)} is still finishing its background work. try again when it is done.</> : <>zeta has not freed {name(stop.sessionId)} yet. try again in a moment, or stay.</>
     : kind === "parked" ? <>{failed}this tab already keeps {parked.length === 1 ? "1 chat" : `${parked.length} chats`} running: {list}. zeta allows 3 per tab. stop one to {target} here, or stay.</>
     // resident: only this tab's own chats are named; the rest are other tabs' (or recently closed ones), which it cannot see
     : parked.length > 0 ? <>{failed}zeta has no room for another open chat. this tab holds {onScreen ? "the chat on screen and " : ""}{list}. stop one to {target}, try again later, or stay.</>
