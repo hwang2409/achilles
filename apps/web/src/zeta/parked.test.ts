@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Transport } from "@fulcrum/zeta";
-import { holdAttached, parkedRows, readHeld, refreshParked, stopParked, StopError, subscribeParked, takeParkedEvent } from "./parked";
+import { holdAttached, parkedRows, readHeld, reclaimHeld, refreshParked, stopParked, StopError, subscribeParked, takeParkedEvent } from "./parked";
+import { controlledRetry } from "./session";
 import { teeRunEnds } from "./turnEnd";
 
 const event = (sessionId: string, data: object) => JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "parked_session_changed", session_id: sessionId, data } });
@@ -116,5 +117,71 @@ describe("stopParked", () => {
     const { sent, client } = zeta();
     await expect(stopParked(client as never, "a", async () => binding, () => false)).rejects.toThrow("request aborted");
     expect(sent).toEqual([]);
+  });
+});
+
+describe("reclaimHeld", () => {
+  const binding = { cwd: "/w", mcp_bindings: [{ server: "achilles", headers: { Authorization: "Bearer x" } }] };
+  const hold = (attached: string, parked: string[]) => sessionStorage.setItem("achilles:held", JSON.stringify({ attached, parked }));
+  const refusal = (data: object, code = -32014) => Object.assign(new Error("refused"), { code, data });
+  // answers each resume from `answers[id]` in turn (an error to throw, or "ok"), and records every request
+  const zeta = (answers: Record<string, Array<Error | "ok">> = {}) => {
+    const sent: string[] = [];
+    return { sent, client: { request: async (method: string, params: { session_id?: string; mcp_bindings?: unknown }) => {
+      if (method === "status") { sent.push("status"); return { parked_sessions: [] }; }
+      sent.push(`${method} ${params.session_id}${params.mcp_bindings ? "" : " (no binding)"}`);
+      const answer = answers[params.session_id!]?.shift() ?? "ok";
+      if (answer !== "ok") throw answer;
+      return {};
+    } } };
+  };
+  const realWait = controlledRetry.wait;
+  let waits = 0;
+  beforeEach(() => { waits = 0; controlledRetry.wait = async () => { waits += 1; }; });
+  afterEach(() => { controlledRetry.wait = realWait; });
+
+  test("parked chats oldest first, the shown chat last, the target left out; then the parked list is read", async () => {
+    hold("shown", ["p1", "p2", "target"]);
+    const { sent, client } = zeta();
+    await reclaimHeld(client as never, "target", async () => binding);
+    expect(sent).toEqual(["resume p1", "resume p2", "resume shown", "status"]);
+  });
+
+  test("once per connection: every attach on it waits for the same reclaim", async () => {
+    hold("shown", ["p1"]);
+    const { sent, client } = zeta();
+    await Promise.all([reclaimHeld(client as never, null, async () => binding), reclaimHeld(client as never, null, async () => binding)]);
+    await reclaimHeld(client as never, null, async () => binding);
+    expect(sent).toEqual(["resume p1", "resume shown", "status"]);
+  });
+
+  test("nothing held sends nothing", async () => {
+    const { sent, client } = zeta();
+    await reclaimHeld(client as never, null, async () => binding);
+    expect(sent).toEqual([]);
+  });
+
+  test("a chat held elsewhere is retried from one budget shared by all chats, then dropped", async () => {
+    hold("shown", ["p1", "p2"]);
+    const controlled = () => refusal({ code: "session_controlled" });
+    // p1 is free after 2 retries (the old socket closed); p2 stays held and spends the last retry; shown is not retried
+    const { sent, client } = zeta({ p1: [controlled(), controlled()], p2: [controlled(), controlled(), controlled()], shown: [controlled()] });
+    await reclaimHeld(client as never, null, async () => binding);
+    expect(sent).toEqual(["resume p1", "resume p1", "resume p1", "resume p2", "resume p2", "resume shown", "status"]);
+    expect(waits).toBe(3);
+  });
+
+  test("a missing chat, one that is not ours, or one achilles no longer lists is dropped", async () => {
+    hold("shown", ["gone", "theirs", "unlisted"]);
+    const { sent, client } = zeta({ gone: [refusal({ code: "session_not_found" })], theirs: [refusal({}, -32003)] });
+    await reclaimHeld(client as never, null, async (id) => id === "unlisted" ? null : binding);
+    expect(sent).toEqual(["resume gone", "resume theirs", "resume shown", "status"]);
+  });
+
+  test("resident_limit stops the reclaim", async () => {
+    hold("shown", ["p1", "p2"]);
+    const { sent, client } = zeta({ p1: [refusal({ reason: "resident_limit" }, -32004)] });
+    await reclaimHeld(client as never, null, async () => binding);
+    expect(sent).toEqual(["resume p1", "status"]);
   });
 });

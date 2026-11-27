@@ -78,7 +78,7 @@ export class SessionControlledError extends Error {
 // a reload can reach zeta before zeta has seen the old page's socket close; the chat is free a moment later, so retry
 // a refusal that names this chat
 export const CONTROLLED_RETRIES = 3;
-const CONTROLLED_RETRY_MS = 500;
+export const CONTROLLED_RETRY_MS = 500;
 // the retry pause; tests replace `wait` so a held chat does not sleep for real
 export const controlledRetry = { wait: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)) };
 

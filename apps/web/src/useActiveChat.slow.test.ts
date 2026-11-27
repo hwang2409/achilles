@@ -1,5 +1,5 @@
 import "./test-dom";
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { act, createElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
 import { createRunStore } from "@fulcrum/core";
@@ -28,6 +28,8 @@ function setGlobals(values: Record<string, unknown>) {
   for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
 }
 
+// each test is a fresh tab: no chats held from an earlier test for the reload reclaim to take back
+beforeEach(() => { sessionStorage.clear(); });
 afterEach(async () => {
   if (mounted) await act(async () => { mounted?.unmount(); });
   mounted = null;

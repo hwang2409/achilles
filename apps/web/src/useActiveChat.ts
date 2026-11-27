@@ -10,7 +10,7 @@ import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { applyApprovalMode, ChatBusyError, CONTROLLED_RETRIES, creationApprovalMode, loadSession, openHomeSession, pageBinding, ParkedLimitError, runningSession, SessionControlledError, SessionNotFoundError } from "./zeta/session";
-import { holdAttached, parkedRows, persistChatState, refreshParked, stopParked, StopError } from "./zeta/parked";
+import { holdAttached, parkedRows, persistChatState, reclaimHeld, refreshParked, stopParked, StopError } from "./zeta/parked";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
@@ -146,6 +146,8 @@ export async function attachPage(
 ): Promise<EmptyState | ReadyState | BusyState> {
   let ownsLease = false;
   try {
+    // a new connection first takes back the chats this tab kept running before a reload (each attach waits for it)
+    if (canWrite) { await reclaimHeld(client, selectedId, chatBinding); requireCurrent(owner, token); }
     const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" }); requireCurrent(owner, token);
     if (!loaded.ok) throw new Error("page not found");
     const page = await loaded.json() as Page; requireCurrent(owner, token);

@@ -10,6 +10,8 @@ import { READ_ONLY_REASON, WRITE_SURFACES, type WriteSurfaceId } from "./writeSu
 import { controlledRetry } from "./zeta/session";
 
 const { fireEvent, render, waitFor } = await import("@testing-library/react");
+// each test is a fresh tab: no chats held from an earlier test for the reload reclaim to take back
+beforeEach(() => { sessionStorage.clear(); });
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };

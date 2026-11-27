@@ -1,5 +1,5 @@
 import type { ZetaClient } from "@fulcrum/zeta";
-import { rebindPage, type pageBinding } from "./session";
+import { CONTROLLED_RETRIES, CONTROLLED_RETRY_MS, controlledRetry, isResidentLimit, rebindPage, type pageBinding } from "./session";
 
 /**
  * The chats this tab keeps running in zeta while it shows another one (`session_park`): one owner per connection, fed by
@@ -123,4 +123,40 @@ export async function stopParked(client: ZetaClient, sessionId: string, bindingO
   void persistChatState(sessionId, "idle");
   await refreshParked(client).catch(() => {});
   return true;
+}
+
+const reclaims = new WeakMap<object, Promise<void>>();
+/**
+ * After a reload, a cross-page load or a reconnect, takes this tab's held chats back from zeta's grace (90 s), once per
+ * connection: zeta knows no tab, so the tab remembers the ids. Each `resume` (exact id, with the page binding) takes one
+ * back and parks the one before it (or closes it when it finished). Parked chats go first, oldest first, and the chat
+ * that was shown goes last, so the order is as before; `target`, the chat about to open, is left to the caller.
+ * A chat another client holds (the old socket may not have closed yet) is retried within one shared budget, then
+ * dropped; a missing chat or one that is not ours is dropped; resident_limit stops the reclaim.
+ */
+export function reclaimHeld(client: ZetaClient, target: string | null, bindingOf: (sessionId: string) => Promise<Binding | null>): Promise<void> {
+  let run = reclaims.get(client);
+  if (!run) reclaims.set(client, run = reclaim(client, target, bindingOf));
+  return run;
+}
+
+async function reclaim(client: ZetaClient, target: string | null, bindingOf: (sessionId: string) => Promise<Binding | null>) {
+  const held = readHeld();
+  const order = [...new Set([...held.parked, held.attached])].filter((id): id is string => id !== null && id !== target);
+  if (!order.length) return;
+  let retries = CONTROLLED_RETRIES;
+  for (const sessionId of order) {
+    const binding = await bindingOf(sessionId).catch(() => null);
+    if (!binding) continue;
+    for (;;) {
+      try { await rebindPage(client, sessionId, binding); break; }
+      catch (caught) {
+        if (isResidentLimit(caught)) { await refreshParked(client).catch(() => {}); return; }
+        const controlled = (caught as { data?: { code?: unknown } | null }).data?.code === "session_controlled";
+        if (!controlled || retries-- <= 0) break;
+        await controlledRetry.wait(CONTROLLED_RETRY_MS);
+      }
+    }
+  }
+  await refreshParked(client).catch(() => {});
 }
