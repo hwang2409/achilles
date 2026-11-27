@@ -310,7 +310,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await pendingApproval.count()) await pendingApproval.last().getByRole("button", { name: "deny", exact: true }).click();
   await waitFor(async () =>
     await page.locator('[data-part="composer"][data-state="idle"]').count() === 1 &&
-    await page.locator(".run-state").innerText() === "idle", "reconnected turn idle after denial");
+    await page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }).count() === 1, "reconnected turn idle after denial");
   await setVim(true);
   await gateWait.playwright(page.locator('.vim-composer[data-state="idle"]'), "waitFor", { state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "kept draft") throw new Error("switching to vim changed the reconnected draft");
