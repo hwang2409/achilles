@@ -46,6 +46,7 @@ def _run_container(
     stderr = bytearray()
     overflow = threading.Event()
     process: subprocess.Popen[bytes] | None = None
+    readers: list[threading.Thread] = []
 
     def read_stdout() -> None:
         assert process is not None and process.stdout is not None
@@ -95,9 +96,9 @@ def _run_container(
             stderr=subprocess.PIPE,
         )
         readers = [threading.Thread(target=read_stdout), threading.Thread(target=read_stderr)]
-        for reader in readers:
-            reader.start()
         try:
+            for reader in readers:
+                reader.start()
             returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             process.kill()
@@ -105,6 +106,19 @@ def _run_container(
                 f"{step} exceeded the {timeout:g} second limit", "build_unavailable"
             ) from exc
         finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            try:
+                subprocess.run(
+                    [docker, "rm", "-f", container],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
             for reader in readers:
                 reader.join()
         if overflow.is_set():
@@ -112,26 +126,10 @@ def _run_container(
         return subprocess.CompletedProcess(
             [], returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
         )
-    except PageBuildError:
-        raise
     except OSError as exc:
         raise PageBuildError(
             f"page build isolation is unavailable during {step}: {exc}", "build_unavailable"
         ) from exc
-    finally:
-        if process is not None and process.poll() is None:
-            process.kill()
-            process.wait()
-        try:
-            subprocess.run(
-                [docker, "rm", "-f", container],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=10,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            pass
 
 
 def _check_step(result, source: str) -> None:
@@ -185,7 +183,6 @@ const value=JSON.stringify({
  lockfile:readFileSync('bun.lock','utf8'),
  resolved_dependencies:resolved
 });
-if(Buffer.byteLength(value)>16777216)throw new Error('page build result exceeds 16 MiB');
 console.log(value);
 """
     result = _run_container(
@@ -197,8 +194,6 @@ console.log(value);
         step="page result collector",
     )
     _check_step(result, "page build result")
-    if len(result.stdout.encode()) > _MAX_RESULT_BYTES:
-        raise PageBuildError("page build result exceeds 16 MiB")
     try:
         value = json.loads(result.stdout)
         artifact = base64.b64decode(value["artifact"], validate=True)

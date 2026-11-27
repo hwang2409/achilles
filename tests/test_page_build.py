@@ -139,6 +139,55 @@ def test_oversized_output_is_bounded_and_removes_container(monkeypatch, tmp_path
     assert len(removed) == 1 and removed[0].startswith("page-build-")
 
 
+def test_cleanup_runs_before_waiting_for_open_pipes(monkeypatch, tmp_path: Path) -> None:
+    released = threading.Event()
+    removed = threading.Event()
+
+    class _OpenPipe:
+        def read(self, _size: int) -> bytes:
+            released.wait()
+            return b""
+
+    class _ProcessWithOpenPipes:
+        stdout = _OpenPipe()
+        stderr = _OpenPipe()
+
+        def __init__(self) -> None:
+            self.returncode = None
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.returncode = 0
+            return 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+    process = _ProcessWithOpenPipes()
+    monkeypatch.setattr(page_build.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    def remove_container(*_args, **_kwargs):
+        removed.set()
+        released.set()
+
+    monkeypatch.setattr(page_build.subprocess, "run", remove_container)
+    finished = threading.Event()
+
+    def run_container() -> None:
+        page_build._run_container(
+            "docker", tmp_path, None, ["bundle"], network="none", step="bundle"
+        )
+        finished.set()
+
+    worker = threading.Thread(target=run_container, daemon=True)
+    worker.start()
+    assert finished.wait(1), "container cleanup must not wait for open pipes"
+    assert removed.is_set()
+    worker.join(1)
+
+
 def test_timed_out_step_removes_container(monkeypatch, tmp_path: Path) -> None:
     removed: list[str] = []
     process = _Process(times_out=True)
