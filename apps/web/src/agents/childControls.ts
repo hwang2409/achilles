@@ -19,11 +19,12 @@ export const isTerminal = (state: unknown): state is typeof terminal[number] => 
 // zeta's run catalog reports a run's live step, turns, and tool calls, but no reply and no waiting state: those come
 // from the chat transcript's live sub-agent row for the run (fulcrum's sub_agent item)
 const waiting: Record<string, AgentRun["waiting"]> = { waiting_approval: "needs approval", waiting_input: "needs input" };
-export function withLiveRow(row: AgentRun, live: { status: string; summary?: string } | undefined): AgentRun {
+export function withLiveRow(row: AgentRun, live: { status: string; summary?: string; latestActivity?: string } | undefined): AgentRun {
   if (!live) return row;
   if (["done", "error", "canceled"].includes(live.status)) return live.summary ? { ...row, reply: live.summary } : row;
   const shown = isTerminal(row.status) ? undefined : waiting[live.status];
-  return shown ? { ...row, waiting: shown } : row;
+  // a waiting run's step is what it waits on (the question, the approval), not the catalog's older step
+  return shown ? { ...row, waiting: shown, currentStep: live.latestActivity || shown } : row;
 }
 
 type Profile = { name: string; description: string; tools: string[] | null };

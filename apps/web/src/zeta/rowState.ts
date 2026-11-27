@@ -37,11 +37,40 @@ export function rowState(stored: RowState | null | undefined, live?: Live): { sh
   return { shown: next ?? stored ?? null, write: next !== null && next !== stored ? next : null };
 }
 
-const written = new Set<() => void>();
-/** Called after each stored write, so the chat list loads again. */
-export function subscribeRowWrites(listener: () => void) {
+// the state this tab last wrote for each chat it holds: forgotten when another tab writes the chat, a list load shows
+// another, a write fails, or the chat leaves this tab
+const lastWritten = new Map<string, RowState>();
+/** Each test case is a fresh tab. */
+export const forgetRowWrites = () => lastWritten.clear();
+/** The chats this tab holds now: a chat released, taken by another tab or device, or closed is forgotten. */
+export const keepRowWrites = (held: ReadonlySet<string>) => { for (const id of lastWritten.keys()) if (!held.has(id)) lastWritten.delete(id); };
+const written = new Set<(remote: boolean) => void>();
+const notify = (remote: boolean) => { for (const listener of [...written]) listener(remote); };
+// the other tabs of this browser hear each chat write here (a post never reaches its own sender); other browsers and
+// devices load the list again when they come back (focus, visibility). open only while a list listens: an open channel
+// keeps a non-browser process (a bun script importing this module) alive
+let channel: BroadcastChannel | null = null;
+/**
+ * Called after each chat write, so the chat list loads again. `remote`: another tab of this browser wrote; that tab
+ * holds the chat and just stored its state, so a reload it caused must not check the rows with zeta (verifyChatStates).
+ */
+export function subscribeRowWrites(listener: (remote: boolean) => void) {
   written.add(listener);
-  return () => { written.delete(listener); };
+  if (!channel && typeof BroadcastChannel !== "undefined") {
+    channel = new BroadcastChannel("achilles:chats");
+    channel.addEventListener("message", (event: MessageEvent) => { if (typeof event.data === "string") lastWritten.delete(event.data); notify(true); });
+  }
+  return () => {
+    written.delete(listener);
+    if (written.size === 0) { channel?.close(); channel = null; }
+  };
+}
+
+/** Every chat PATCH: an answered write loads the list again here and in the other tabs of this browser. */
+export async function patchChat(sessionId: string, body: object, fetchFn: typeof fetch = fetch): Promise<Response> {
+  const response = await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (response.ok) { notify(false); channel?.postMessage(sessionId); }
+  return response;
 }
 
 /**
@@ -49,15 +78,17 @@ export function subscribeRowWrites(listener: () => void) {
  * overwrites a newer state of the tab that does (achilles answers the row as it is, and nothing changes; the list
  * loads again either way).
  */
-export async function writeRowState(sessionId: string, state: RowState | null, { expected }: { expected?: { last_state: RowState | null; updated_at: string } } = {}, fetchFn: typeof fetch = fetch): Promise<boolean> {
+export async function writeRowState(sessionId: string, state: RowState | null, { expected }: { expected?: { last_state: RowState | null; state_version: number } } = {}, fetchFn: typeof fetch = fetch): Promise<boolean> {
   if (state === null) return false;
-  const body = { last_state: state, ...(expected ? { expected_last_state: expected.last_state, expected_updated_at: expected.updated_at } : {}) };
-  try {
-    const response = await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (!response.ok) return false;
-  } catch { return false; }
-  for (const listener of [...written]) listener();
-  return true;
+  // a holder's write of the state it last wrote, with no write by anyone else seen since, changes nothing: skip it
+  // (each write reloads the list in every tab)
+  if (!expected && lastWritten.get(sessionId) === state) return false;
+  if (expected) lastWritten.delete(sessionId); else lastWritten.set(sessionId, state);
+  const body = { last_state: state, ...(expected ? { expected_last_state: expected.last_state, expected_state_version: expected.state_version } : {}) };
+  let ok = false;
+  try { ok = (await patchChat(sessionId, body, fetchFn)).ok; } catch { /* not stored */ }
+  if (!ok && lastWritten.get(sessionId) === state) lastWritten.delete(sessionId);
+  return ok;
 }
 
 /** This tab's shown chat changed state (its header): only this tab holds it, so the state is stored as is. */
@@ -76,19 +107,20 @@ async function readStatus(client: ZetaClient, sessionId: string): Promise<unknow
   } catch (caught) { return notFound(caught) ? null : undefined; }
 }
 
-type ListedChat = { session_id: string; last_state?: RowState | null; updated_at?: string };
+type ListedChat = { session_id: string; last_state?: RowState | null; state_version: number };
 /**
  * A tab that closed (or a zeta restart) leaves "running" or "needs you" behind. Once per chat list load, this checks
  * each such row this tab does not hold with zeta (a read that attaches nothing) and stores zeta's state as a
  * compare-and-set. Returns how many rows changed.
  */
 export async function verifyChatStates(client: ZetaClient, chats: readonly ListedChat[], held: ReadonlySet<string>, fetchFn: typeof fetch = fetch): Promise<number> {
+  for (const chat of chats) if (lastWritten.has(chat.session_id) && lastWritten.get(chat.session_id) !== chat.last_state) lastWritten.delete(chat.session_id);
   const stale = chats.filter((chat) => (chat.last_state === "running" || chat.last_state === "approval") && !held.has(chat.session_id));
   const changed = await Promise.all(stale.map(async (chat) => {
     const status = await readStatus(client, chat.session_id);
     if (status === undefined) return false;
     const stored = chat.last_state ?? null;
-    return writeRowState(chat.session_id, rowState(stored, { from: "zeta", status }).write, { expected: chat.updated_at ? { last_state: stored, updated_at: chat.updated_at } : undefined }, fetchFn);
+    return writeRowState(chat.session_id, rowState(stored, { from: "zeta", status }).write, { expected: { last_state: stored, state_version: chat.state_version } }, fetchFn);
   }));
   return changed.filter(Boolean).length;
 }
