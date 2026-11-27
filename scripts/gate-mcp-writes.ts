@@ -64,12 +64,12 @@ export async function gateMcpWrites(browser: Browser, origin: string, home: stri
     const tab = await open(connection("user", userName));
     await action(tab, "enabled").click(wait);
     await confirm(tab).waitFor(wait);
-    if (methods.length || roles.join(",") !== "observer") throw new Error("MCP observer acted before confirmation");
+    // every tab is its own zeta controller: the connections tab writes while a chat tab is open.
+    if (methods.length || roles.join(",") !== "controller") throw new Error("MCP tab acted before confirmation or did not open as a controller");
     await confirm(tab).click(wait);
-    await tab.getByRole("alert").filter({ hasText: "a chat tab keeps control" }).waitFor(wait);
-    if (methods.length) throw new Error("MCP observer sent a write while a chat owns control");
+    await receipt(tab);
     await holder.close();
-    for (const word of ["enable", "disable"]) {
+    for (const word of ["disable"]) {
       await settings(tab).getByRole("button", { name: word, exact: true }).click(wait);
       await confirm(tab).click(wait);
       await receipt(tab);
@@ -104,7 +104,7 @@ export async function gateMcpWrites(browser: Browser, origin: string, home: stri
       throw new Error("MCP sends did not match the six confirmed attempts");
     await capture(zoom);
     if (errors.length) throw new Error("MCP browser reported an error");
-    console.log("MCP observer refusal, enable/disable, trust/untrust, stale review, remove, receipts and redaction verified");
+    console.log("MCP write next to an open chat tab, enable/disable, trust/untrust, stale review, remove, receipts and redaction verified");
     return ids;
   } finally {
     await Promise.all([context.close(), zoomContext.close()]);

@@ -2,16 +2,16 @@ import { join } from "node:path";
 import type { Browser, Page } from "../apps/web/node_modules/playwright";
 
 export type Discovery = { url: string; controller_token: string; observer_token: string };
-export const agentControlArtifacts = ["spawn-review-1440.png", "spawn-observer-refusal-1440.png", "cancel-review-1440.png", "cancel-review-390.png", "cancel-review-390-200pct.png", "canceled-run-390.png"];
+export const agentControlArtifacts = ["spawn-review-1440.png", "spawn-busy-refusal-1440.png", "chat-agents-1440.png", "cancel-review-1440.png", "cancel-review-390.png", "cancel-review-390-200pct.png", "canceled-run-390.png"];
 const task = "inspect a synthetic child run";
 const spawnButton = '[data-write-surface="agents.spawn"]';
 const cancelButton = '[data-write-surface="agents.cancel"]';
 
+// drives agent controls from the chat tab that holds the parent session: header "Agents" → spawn → select the run → cancel.
 export async function gateAgentControls(browser: Browser, origin: string, discovery: Discovery,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>, screenshots?: string) {
   const main = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   main.setDefaultTimeout(10_000);
-  let driver: WebSocket | undefined;
   const frames: { role?: string; method: string; params: Record<string, unknown> }[] = [];
   function watch(tab: Page) {
     tab.on("websocket", (socket) => {
@@ -19,108 +19,105 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
       socket.on("framesent", ({ payload }) => {
         const { method, params } = JSON.parse(String(payload));
         if (method === "hello") role = params.role;
-        if (method === "child_run_spawn" || method === "child_run_cancel" || method === "abort") frames.push({ role, method, params });
+        if (method === "child_run_spawn" || method === "child_run_cancel") frames.push({ role, method, params });
       });
     });
   }
   await main.route("**/api/zeta/discovery", (route) => route.fulfill({ json: discovery }));
   watch(main);
   const capture = (tab: Page, label: string) => screenshots ? tab.screenshot({ path: join(screenshots, `${label}.png`) }) : undefined;
-  const openDriver = () => new Promise<void>((resolve, reject) => {
-    const ws = new WebSocket(discovery.url, { protocols: ["zeta.v1", `zeta.bearer.${discovery.controller_token}`], headers: { Origin: origin } });
-    driver = ws;
-    const timer = setTimeout(() => { ws.close(); reject(new Error("agent gate controller open timeout")); }, 5000);
-    ws.onerror = () => { clearTimeout(timer); reject(new Error("agent gate socket error")); };
-    ws.onopen = () => { clearTimeout(timer); resolve(); };
-  });
-  let id = 0;
-  const request = (method: string, params: object) => new Promise<Record<string, any>>((resolve, reject) => {
-    const ws = driver!;
-    const requestId = ++id;
-    const receive = (event: MessageEvent) => {
-      const frame = JSON.parse(String(event.data));
-      if (frame.id !== requestId) return;
-      clearTimeout(timer);
-      ws.removeEventListener("message", receive);
-      if (frame.error) reject(new Error(`${method}: ${frame.error.code}`)); else resolve(frame.result);
-    };
-    const timer = setTimeout(() => { ws.removeEventListener("message", receive); reject(new Error(`${method}: no reply`)); }, 5000);
-    ws.addEventListener("message", receive);
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id: requestId, method, params }));
-  });
-  const closeDriver = () => new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("agent gate controller close timeout")), 5000);
-    driver!.onclose = () => { clearTimeout(timer); resolve(); };
-    driver!.close();
-  });
-  const hello = () => request("hello", { client_version: "1.2", protocol_version: "1.2", features: ["serve_observers", "child_run_control_v1"], role: "controller" });
+  const openAgents = async (tab: Page) => {
+    await tab.getByRole("button", { name: "Agents", exact: true }).click();
+    const dialog = tab.locator("dialog.chat-agents");
+    await dialog.waitFor();
+    return dialog;
+  };
   try {
-    await openDriver();
-    await hello();
-    const session = await request("new_session", {});
-    const root: unknown = session.session?.session_id;
-    if (typeof root !== "string") throw new Error("missing fixture root session");
-    await main.goto(`${origin}/agents`);
-    await main.getByRole("button", { name: "+ spawn agent" }).click();
-    const picker = main.getByRole("combobox", { name: "profile" });
+    await main.goto(`${origin}/#new-chat`);
+    const composer = main.getByRole("textbox", { name: "message" });
+    await composer.fill("hold a synthetic parent turn", { timeout: 20_000 });
+    await composer.press("Enter");
+    // the fixture provider holds the parent turn open: spawn is refused while it runs
+    const stop = main.getByRole("button", { name: "stop the running turn" });
+    await stop.waitFor();
+    const root = await main.locator(".chat-header [data-session-id]").getAttribute("data-session-id");
+    if (!root) throw new Error("the chat header has no session id");
+    if (new URL(main.url()).searchParams.get("chat") !== root) await main.goto(`${origin}/?chat=${encodeURIComponent(root)}`);
+    const agents = await openAgents(main);
+    await agents.getByText("no agents in this chat yet.").waitFor();
+    await agents.getByRole("button", { name: "+ spawn agent" }).click();
+    const picker = agents.getByRole("combobox", { name: "profile" });
     await picker.getByRole("option", { name: "run", exact: true }).waitFor({ state: "attached" });
     await picker.selectOption("run");
-    await main.getByRole("textbox", { name: "task" }).fill(task);
-    await main.locator(spawnButton).click();
-    const dialog = main.getByRole("dialog");
-    await dialog.getByText(root, { exact: true }).waitFor();
-    await dialog.getByText("inherited cwd", { exact: true }).waitFor();
+    await agents.getByRole("textbox", { name: "task" }).fill(task);
+    await agents.locator(spawnButton).click();
+    const review = main.locator("dialog.confirmation-dialog");
+    // the review names the chat by its title; the frames check below proves the session id
+    const chatTitle = await main.locator(".chat-header [data-session-id]").getAttribute("title");
+    if (!chatTitle) throw new Error("the chat header has no title");
+    await review.getByText(chatTitle, { exact: true }).waitFor();
+    await review.getByText("inherited cwd", { exact: true }).waitFor();
     await capture(main, "spawn-review-1440");
-    await dialog.getByRole("checkbox", { name: "i reviewed the scope" }).check();
-    await dialog.getByRole("button", { name: "spawn agent" }).click();
-    await dialog.getByText(/another tab had control/).waitFor();
-    await capture(main, "spawn-observer-refusal-1440");
-    if (frames.length) throw new Error("observer refusal sent a child write");
-    await request("send", { text: "hold a synthetic parent turn" });
-    await waitFor(async () => (await request("status", {})).state === "running", "parent turn active");
-    await dialog.getByRole("button", { name: "spawn agent" }).click();
-    await dialog.getByText(/another tab had control/).waitFor();
-    if (frames.length) throw new Error("mid-turn refusal sent a child write");
-    await request("abort", {});
-    await waitFor(async () => (await request("status", {})).state === "idle", "parent turn idle");
-    await closeDriver();
-    await dialog.getByRole("button", { name: "spawn agent" }).click();
-    await main.getByText(/spawned run as/).waitFor();
-    const run = main.getByRole("link", { name: new RegExp(task) });
-    await run.click();
-    const review = main.locator(cancelButton);
-    // The form is no longer needed; preserve room for the selected run in narrow layouts.
-    await main.getByRole("button", { name: "close spawn form" }).click();
-    const name = async (tab: Page) => (await tab.getByRole("dialog").locator(".confirmation-proof strong").innerText()).trim();
-    await review.click();
+    await review.getByRole("checkbox", { name: "i reviewed the scope" }).check();
+    await review.getByRole("button", { name: "spawn agent" }).click();
+    await review.getByText(/zeta is busy/).waitFor();
+    await capture(main, "spawn-busy-refusal-1440");
+    await main.keyboard.press("Escape");
+    await review.waitFor({ state: "hidden" });
+    await agents.getByRole("button", { name: "close", exact: true }).click();
+    await stop.click();
+    await stop.waitFor({ state: "hidden" });
+    const again = await openAgents(main);
+    await again.getByRole("button", { name: "+ spawn agent" }).click();
+    await again.getByRole("combobox", { name: "profile" }).getByRole("option", { name: "run", exact: true }).waitFor({ state: "attached" });
+    await again.getByRole("combobox", { name: "profile" }).selectOption("run");
+    await again.getByRole("textbox", { name: "task" }).fill(task);
+    await again.locator(spawnButton).click();
+    await review.getByRole("checkbox", { name: "i reviewed the scope" }).check();
+    await review.getByRole("button", { name: "spawn agent" }).click();
+    await main.getByText(/spawned run:/).waitFor();
+    // child_started puts a live sub-agent row in the transcript; the row reopens the agents dialog on that run
+    await again.getByRole("button", { name: "close", exact: true }).click();
+    await again.waitFor({ state: "hidden" });
+    await main.locator(`.transcript button[data-part="sub-agent"][aria-label*="${task}"]`).click();
+    const detail = main.locator("dialog.chat-agents");
+    await detail.locator(".agents-row[aria-current=true]", { hasText: task }).waitFor();
+    await detail.locator(".agents-run-head", { hasText: task }).waitFor();
+    await capture(main, "chat-agents-1440");
+    const cancel = detail.locator(cancelButton);
+    const name = async (tab: Page) => (await tab.locator("dialog.confirmation-dialog .confirmation-proof strong").innerText()).trim();
+    await cancel.click();
     await capture(main, "cancel-review-1440");
     await main.keyboard.press("Escape");
-    await dialog.waitFor({ state: "hidden" });
-    if (!await review.evaluate(node => node === document.activeElement)) throw new Error("cancel review did not restore opener focus");
+    await review.waitFor({ state: "hidden" });
+    if (!await cancel.evaluate(node => node === document.activeElement)) throw new Error("cancel review did not restore opener focus");
+    if (!await detail.isVisible()) throw new Error("escape on the cancel review closed the agents dialog");
     await main.setViewportSize({ width: 390, height: 844 });
     await Bun.sleep(350);
-    await review.click();
-    if ((await dialog.boundingBox())?.height !== 844) throw new Error("390 cancel review is not full height");
+    await cancel.click();
+    if ((await review.boundingBox())?.height !== 844) throw new Error("390 cancel review is not full height");
     await capture(main, "cancel-review-390");
-    const zoom = await browser.newPage({ viewport: { width: 195, height: 422 }, deviceScaleFactor: 2 });
-    try {
-      await zoom.route("**/api/zeta/discovery", route => route.fulfill({ json: discovery }));
-      await zoom.goto(main.url());
-      await zoom.locator(cancelButton).click();
-      await zoom.getByRole("textbox", { name: /^type/ }).fill(await name(zoom));
-      await Bun.sleep(350);
-      await capture(zoom, "cancel-review-390-200pct");
-    } finally { await zoom.close(); }
-    await dialog.getByRole("textbox", { name: /^type/ }).fill(await name(main));
-    await dialog.getByRole("button", { name: "cancel run" }).click();
+    // 200% zoom of a 390 px screen lays out at 195 css px; a second tab cannot open the same chat, so resize this one
+    await review.getByRole("textbox", { name: /^type/ }).fill(await name(main));
+    await main.setViewportSize({ width: 195, height: 422 });
+    await Bun.sleep(350);
+    await capture(main, "cancel-review-390-200pct");
+    await main.setViewportSize({ width: 390, height: 844 });
+    await Bun.sleep(350);
+    await review.getByRole("button", { name: "cancel run" }).click();
     await main.getByText("cancellation requested.", { exact: false }).waitFor();
-    await waitFor(async () => await main.locator(".agents-run-head .agents-state[data-status=canceled]").count() === 1, "terminal canceled row after refresh");
+    await waitFor(async () => {
+      if (await detail.locator(".agents-run-head .agents-state[data-status=canceled]").count() === 1) return true;
+      const refresh = detail.getByRole("button", { name: "refresh", exact: true });
+      if (await refresh.isEnabled()) await refresh.click();
+      return false;
+    }, "terminal canceled run after refresh");
     await capture(main, "canceled-run-390");
-    const [spawn, cancel] = frames;
+    const [spawn, done] = frames;
     if (frames.length !== 2 || spawn?.role !== "controller" || spawn.method !== "child_run_spawn" || spawn.params.session_id !== root || spawn.params.background !== true ||
-      cancel?.role !== "controller" || cancel.method !== "child_run_cancel" || cancel.params.session_id !== root || cancel.params.reason !== "user_cancelled")
-      throw new Error("agent control frames do not match confirmed controller requests");
-    console.log("agent controls: observer and mid-turn refusal; controller child_run_spawn → child_run_cancel → canceled");
+      done?.role !== "controller" || done.method !== "child_run_cancel" || done.params.session_id !== root || done.params.reason !== "user_cancelled")
+      throw new Error(`agent control frames do not match confirmed requests from the chat tab: ${JSON.stringify(frames)}`);
+    console.log("agent controls from the chat tab: busy refusal; child_run_spawn → child_run_cancel → canceled");
     return ["agents.spawn", "agents.cancel"];
-  } finally { driver?.close(); await main.close(); }
+  } finally { await main.close(); }
 }

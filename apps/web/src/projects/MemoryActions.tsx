@@ -12,7 +12,7 @@ const focusBack = (origin: HTMLButtonElement, feedback: boolean) => requestAnima
 });
 
 /** The router keeps the review, exact receipt, and writer above a socket remount. Only `start`, called by a button, may take control. */
-export function useMemoryActions(control: { live: () => ZetaClient | null; take: () => Promise<string | null>; release: () => Promise<void> }) {
+export function useMemoryActions(control: { live: () => ZetaClient | null; take: () => Promise<string | null> }) {
   const [writer] = useState(() => createMemoryWriter(() => {
     const client = control.live();
     return client && memoryWriteAccess(client, true) ? client : null;
@@ -25,8 +25,7 @@ export function useMemoryActions(control: { live: () => ZetaClient | null; take:
 
   const tell = (projectId: string, message: string, error: boolean, receipt?: MemoryReceipt) =>
     setFeedback({ projectId, message, error, receipt });
-  async function end(origin: HTMLButtonElement, showFeedback: boolean) {
-    await control.release();
+  function end(origin: HTMLButtonElement, showFeedback: boolean) {
     busy.current = false;
     setWorking(false);
     focusBack(origin, showFeedback);
@@ -54,7 +53,7 @@ export function useMemoryActions(control: { live: () => ZetaClient | null; take:
     }
     if (prepared.problem) tell(projectId, prepared.problem, true, prepared.refresh ? undefined : prior);
     if (prepared.refresh) setRefresh((n) => n + 1);
-    await end(origin, !!prepared.problem);
+    end(origin, !!prepared.problem);
   }
 
   function close(attempt: Review, result?: Exclude<MemoryOutcome, { status: "unknown" }>) {
@@ -65,7 +64,7 @@ export function useMemoryActions(control: { live: () => ZetaClient | null; take:
       tell(attempt.sent.projectId, result.message, !committed, committed ? result.receipt : result.refresh ? undefined : attempt.sent.prior);
       if (committed || result.refresh) setRefresh((n) => n + 1);
     }
-    void end(attempt.origin, !!result);
+    end(attempt.origin, !!result);
   }
 
   async function perform(attempt: Review, check: boolean): Promise<Result<{ status: "committed"; receipt: ReviewText }>> {

@@ -13,7 +13,18 @@ export const displayControl = (value: string, limit = 300): ReviewText =>
 export const runDisplayId = (profile: string | undefined, id: string) =>
   displayControl(`${displayControl(profile || "agent", 100)} · ${id.slice(-8)}`);
 const terminal = ["completed", "failed", "canceled"] as const;
+// the chat transcript's sub-agent row says "done"; use the same word in agent views
+export const stateWord = (status: string) => status === "completed" ? "done" : status;
 export const isTerminal = (state: unknown): state is typeof terminal[number] => terminal.some((value) => value === state);
+// zeta's run catalog reports a run's live step, turns, and tool calls, but no reply and no waiting state: those come
+// from the chat transcript's live sub-agent row for the run (fulcrum's sub_agent item)
+const waiting: Record<string, AgentRun["waiting"]> = { waiting_approval: "needs approval", waiting_input: "needs input" };
+export function withLiveRow(row: AgentRun, live: { status: string; summary?: string } | undefined): AgentRun {
+  if (!live) return row;
+  if (["done", "error", "canceled"].includes(live.status)) return live.summary ? { ...row, reply: live.summary } : row;
+  const shown = isTerminal(row.status) ? undefined : waiting[live.status];
+  return shown ? { ...row, waiting: shown } : row;
+}
 
 type Profile = { name: string; description: string; tools: string[] | null };
 export type ControlParent = { id: string; cwd: string; profiles: Profile[]; idle: boolean };
@@ -45,7 +56,7 @@ const unknown: Outcome = { status: "unknown" };
 const fail = (reason: "changed" | "denied" | "not-applied" | "refused", message?: ReviewText, final?: true): Outcome =>
   ({ status: "failed", reason, message, final });
 const committed = (receipt: ReviewText): Outcome => ({ status: "committed", receipt });
-const spawned = (profile: string, id: string) => committed(displayControl(`spawned ${profile} as ${runDisplayId(profile, id)}`, 420));
+const spawned = (intent: Extract<Intent, { kind: "spawn" }>) => committed(displayControl(`spawned ${intent.profile.name}: ${intent.task}`, 420));
 const parentChanged = () => fail("changed", reviewText("the active parent or reviewed scope changed. reopen the review."), true);
 const busy = () => fail("not-applied", reviewText("zeta is busy. wait for the parent to be idle, then try again."));
 function refusal(code: unknown) {
@@ -64,10 +75,10 @@ function refusal(code: unknown) {
 function parseReply(intent: Intent, reply: unknown): Outcome {
   const data = object(reply) ? reply.data : null;
   if (!object(data) || data.accepted !== true || !text(data.run_id)) return unknown;
-  if (intent.kind === "spawn") return spawned(intent.profile.name, data.run_id);
+  if (intent.kind === "spawn") return spawned(intent);
   if (data.run_id !== intent.row.runId) return unknown;
   if (data.state === "cancelling") return committed(reviewText("cancellation requested."));
-  return isTerminal(data.state) ? committed(displayControl(`this run was already ${data.state}.`)) : unknown;
+  return isTerminal(data.state) ? committed(displayControl(`this run was already ${stateWord(data.state)}.`)) : unknown;
 }
 
 /** Owns unresolved attempts across view and socket replacement. Checks are read-only. */
@@ -89,11 +100,11 @@ export function createChildControls(connection: Pick<Connection, "client" | "wit
         refresh();
         if (intent.kind === "cancel") {
           const state = rows.find((row) => row.runId === intent.row.runId)?.status;
-          return isTerminal(state) ? committed(displayControl(`zeta reports this run is ${state}.`)) : unknown;
+          return isTerminal(state) ? committed(displayControl(`zeta reports this run is ${stateWord(state)}.`)) : unknown;
         }
         const matches = rows.filter((row) => before && !before.has(row.runId) && row.parentRunId === null &&
           row.agentType === intent.profile.name && row.description === intent.task);
-        return matches.length === 1 ? spawned(intent.profile.name, matches[0].runId) : unknown;
+        return matches.length === 1 ? spawned(intent) : unknown;
       };
       const send = async (): Promise<Outcome> => {
         const observer = connection.client;

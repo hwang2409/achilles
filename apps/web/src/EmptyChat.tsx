@@ -89,7 +89,7 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
     try { await onSelect(); } finally { sendingRef.current = false; setSending(false); }
   };
   return <div className="empty-chat">
-    <h1 title={`New chat on ${page.title}`}>New chat on {page.title}</h1>
+    <h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1>
     <div className="chat-starters" data-write-surface={WRITE_SURFACE.emptySend}>{starters.map((starter, index) => <button key={index} title={!canWrite ? disabledReason : undefined} aria-describedby={!canWrite ? "read-only-reason" : undefined} disabled={sending || !canWrite} onClick={(event) => { keyboardFocusToComposer(event); void select(starter.onSelect); }}><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
   </div>;
 }

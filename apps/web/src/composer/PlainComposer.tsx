@@ -16,6 +16,9 @@ import {
 } from "./useComposerDelivery";
 import { ComposerHint } from "./hint";
 
+// send while the composer is held: shown, and off
+export const HeldSend = () => <button type="button" data-part="composer-submit" aria-label="send message" disabled>send</button>;
+
 /** A textarea adapter for the shared Achilles composer delivery module. */
 export function PlainComposer(props: ComposerAdapterProps) {
   const {
@@ -86,6 +89,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
         data-part="composer"
         data-write-surface={WRITE_SURFACE.composerSend}
         data-state="read-only"
+        data-held={props.held || undefined}
         role="group"
         aria-label={label}
       >
@@ -99,7 +103,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
             aria-label={label}
           />
         </div>
-        {props.controls && <div data-part="composer-bar">{props.controls}</div>}
+        {(props.controls || props.held) && <div data-part="composer-bar">{props.controls}{props.held && <><p data-part="composer-reason">{props.reason}</p><HeldSend /></>}</div>}
       </div>
     );
 

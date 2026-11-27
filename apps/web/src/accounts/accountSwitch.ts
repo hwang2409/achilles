@@ -3,7 +3,7 @@ import { reviewText, type Result, type ReviewText } from "../surface/Confirmatio
 import { readAccounts, safeAccountId, supportsRequest, type Account, type Connection } from "../zeta";
 
 export type ChatDestination = { id: string; title: string };
-export type SwitchTarget = { chat: ChatDestination; from: string | null; to: string; borrow?: true; onRefused?(reason: string): void; onCatalog?(rows: Account[]): void };
+export type SwitchTarget = { chat: ChatDestination; from: string | null; to: string; onCatalog?(rows: Account[]): void };
 type SwitchResult = Result<{ status: "committed"; receipt: ReviewText }>;
 const UNKNOWN = { status: "unknown" } as const;
 const CHANGED = { status: "failed", reason: "changed", final: true } as const;
@@ -18,7 +18,7 @@ export async function activeAccountChat(client: ZetaClient): Promise<ChatDestina
   return { id: session.session_id, title: typeof session.name === "string" && session.name.trim() ? session.name : session.session_id };
 }
 
-export function createAccountSwitch(connection: Pick<Connection, "client" | "state" | "subscribe" | "takeControl" | "releaseControl">) {
+export function createAccountSwitch(connection: Pick<Connection, "client" | "state" | "subscribe">) {
   const live = () => connection.state.phase === "connected" && connection.state.authority === "controller" ? connection.client : null;
   function waitForController() {
     return new Promise<ZetaClient | null>(resolve => {
@@ -29,7 +29,7 @@ export function createAccountSwitch(connection: Pick<Connection, "client" | "sta
       check();
     });
   }
-  return ({ chat, from, to, borrow, onRefused, onCatalog }: SwitchTarget) => {
+  return ({ chat, from, to, onCatalog }: SwitchTarget) => {
     // Bind writes and reads to the reviewed chat, not whichever chat happens to be active later.
     const read = async (client: ZetaClient) => {
       if ((await activeAccountChat(client))?.id !== chat.id) return null;
@@ -39,26 +39,28 @@ export function createAccountSwitch(connection: Pick<Connection, "client" | "sta
     const receipt = (checked = false): SwitchResult => ({ status: "committed", receipt:
       `${chat.title}: ${checked ? "current account confirmed as" : "switched to"} ${to}. the failed request was not retried.` as ReviewText });
     let catalog: Account[] | null = null;
+    // a new socket has no chat until the chat tab resumes it again: wait for that before reading.
+    const reattached = async (client: ZetaClient) => {
+      const deadline = Date.now() + options.timeoutMs;
+      while (live() === client && Date.now() < deadline) {
+        if ((await activeAccountChat(client))?.id === chat.id) return client;
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      return null;
+    };
     const settle = async (): Promise<SwitchResult> => {
-      const client = await waitForController();
+      const controller = await waitForController();
+      const client = controller && await reattached(controller).catch(() => null);
       const rows = client && await read(client).catch(() => null);
       if (!rows) return UNKNOWN;
       catalog = rows;
       return currentAccount(rows, to) === to ? receipt(true) : UNKNOWN;
     };
     const withController = async (run: (client: ZetaClient) => Promise<SwitchResult>): Promise<SwitchResult> => {
-      const refusal = borrow ? await connection.takeControl() : null;
       const client = live();
-      if (refusal || !client) {
-        if (refusal) onRefused?.(refusal);
-        return { status: "failed", reason: "refused", final: true,
-          message: refusal ? refusal as ReviewText : reviewText("not changed. this tab does not control zeta.") };
-      }
+      if (!client) return { status: "failed", reason: "refused", final: true, message: reviewText("not changed. this tab does not control zeta.") };
       try { return await run(client); }
-      finally {
-        if (borrow) await connection.releaseControl();
-        if (catalog) { onCatalog?.(catalog); catalog = null; }
-      }
+      finally { if (catalog) { onCatalog?.(catalog); catalog = null; } }
     };
     let sent = false;
     return {

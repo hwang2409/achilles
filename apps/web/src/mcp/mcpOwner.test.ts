@@ -22,7 +22,6 @@ function rig() {
   const jobs: Promise<unknown>[] = [];
   let read = (scope: string) => list(b, row(scope === "effective" ? "project" : scope, false));
   let wait = (_signal: AbortSignal): Promise<void> => Promise.resolve();
-  let release = (): Promise<void> => Promise.resolve();
   const request = (method: string, params: { scope: string }, options?: { signal?: AbortSignal; timeoutMs?: number }) => {
     if (method === "mcp_server_list") { reads.push(params.scope); return read(params.scope); }
     writes.push({ method, params });
@@ -32,7 +31,7 @@ function rig() {
   let live: ZetaClient | null = client;
   let acquire = (): Promise<ZetaClient | null> => Promise.resolve(client);
   const owner = createMcpOwner({ live: () => live, canRead: () => true, supports: () => true,
-    acquire: () => { events.push("acquire"); return acquire(); }, release: () => { events.push("release"); return release(); },
+    acquire: () => { events.push("acquire"); return acquire(); },
     wait: (ms, signal) => { waits.push(ms); return wait(signal); } });
   const forms: string[] = [];
   const open = () => {
@@ -63,7 +62,7 @@ function rig() {
   }
   return { owner, open, writes, reads, events, waits, replies, deadline, gate,
     read: (fn: typeof read) => { read = fn; }, acquire: (fn: typeof acquire) => { acquire = fn; },
-    release: (fn: typeof release) => { release = fn; }, wait: (fn: typeof wait) => { wait = fn; }, drop: () => { live = null; }, reconnect: () => { live = client; },
+    wait: (fn: typeof wait) => { wait = fn; }, drop: () => { live = null; }, reconnect: () => { live = client; },
     async cleanup() { cancel(); await deadline("drain owner jobs", Promise.allSettled(jobs)); },
   };
 }
@@ -87,7 +86,7 @@ for (const [name, sent, mutation, items] of [
   expect(r.writes).toEqual([{ method: mcpMethods[sent.action], params: { revision: a, mutation } }]);
   expect(form.outcomes).toEqual([{ status: "committed", restart: { sessions: restart.sessions, complete: false } }]);
   expect(r.reads).toEqual(allScopes);
-  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.events).toEqual(["acquire"]);
 });
 
 rowTest("identical double submit joins; conflicting project action never reaches the wire", async (r) => {
@@ -102,7 +101,7 @@ rowTest("identical double submit joins; conflicting project action never reaches
   gate.resume();
   await r.deadline("original write and refresh", running);
   expect(r.writes).toHaveLength(1);
-  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.events).toEqual(["acquire"]);
 });
 
 for (const retries of [1, 4]) rowTest(`busy ${retries === 1 ? "then success" : "exhaustion"}`, async (r) => {
@@ -113,24 +112,24 @@ for (const retries of [1, 4]) rowTest(`busy ${retries === 1 ? "then success" : "
   expect(r.writes).toHaveLength(retries === 1 ? 2 : 4);
   expect(r.writes.every((sent) => JSON.stringify(sent) === JSON.stringify(r.writes[0]))).toBe(true);
   expect(form.outcomes[0]?.status).toBe(retries === 1 ? "committed" : "busy");
-  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.events).toEqual(["acquire"]);
 });
 
 for (const [error, status, refresh] of [[stale, "stale", true], [{ code: -32005 }, "unavailable", true],
   [{ code: -32602 }, "invalid", false], [{ code: -32601 }, "unsupported", false], [{ code: -32008 }, "refused", false]] as const) {
-  rowTest(`${status}: release on definite failure and never resend`, async (r) => {
+  rowTest(`${status}: definite failure never resends`, async (r) => {
     const form = r.open();
     r.replies.push(fail(error));
-    await r.deadline("write failure and release", form.execute());
+    await r.deadline("write failure settles", form.execute());
     expect(form.outcomes).toEqual([{ status }]);
     expect(r.reads).toEqual(refresh ? allScopes : []);
     if (refresh) expect(r.owner.reads.snapshot()?.user).toMatchObject({ revision: b });
     expect(r.writes).toHaveLength(1);
-    expect(r.events).toEqual(["acquire", "release"]);
+    expect(r.events).toEqual(["acquire"]);
   });
 }
 
-rowTest("controller refusal sends nothing and does not release a slot it never took", async (r) => {
+rowTest("controller refusal sends nothing", async (r) => {
   r.acquire(() => Promise.resolve(null));
   const form = r.open();
   await r.deadline("controller refusal", form.execute());
@@ -148,7 +147,7 @@ for (const [sent, matches] of [[enabled, true], [trusted, true], [remove, true],
     await r.deadline("lost reply and concrete read", form.execute(sent));
     expect(form.outcomes).toEqual([matches ? { status: "committed", restart: null } : { status: "changed" }]);
     expect(r.writes).toHaveLength(1);
-    expect(r.events).toEqual(["acquire", "release"]);
+    expect(r.events).toEqual(["acquire"]);
   });
 }
 
@@ -162,10 +161,10 @@ rowTest("unknown at the base revision: check twice by reading, not sending", asy
   await r.deadline("explicit check after the intended change appears", form.check());
   expect(form.outcomes).toEqual([{ status: "unknown" }, { status: "unknown" }, { status: "committed", restart: null }]);
   expect(r.writes).toHaveLength(1);
-  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.events).toEqual(["acquire"]);
 });
 
-for (const phase of ["take control", "send", "busy wait", "release", "read"] as const) for (const cause of ["close", "drop"] as const) {
+for (const phase of ["take control", "send", "busy wait", "read"] as const) for (const cause of ["close", "drop"] as const) {
   rowTest(`${cause} while awaiting ${phase} never authorizes another send`, async (r) => {
     const form = r.open();
     const control = r.gate(null), write = r.gate(saved), pause = r.gate(undefined), read = r.gate(list(b));
@@ -174,7 +173,6 @@ for (const phase of ["take control", "send", "busy wait", "release", "read"] as 
       r.acquire(async () => { await r.deadline("resume pending acquire", control.hold()); return client; });
     } else if (phase === "send") r.replies.push(write.hold);
     else if (phase === "busy wait") { r.replies.push(fail(busy)); r.wait(pause.hold); }
-    else if (phase === "release") r.release(pause.hold);
     else { r.replies.push(fail(new Error("dropped"))); r.read(read.hold as unknown as (scope: string) => ReturnType<typeof list>); }
     const waiting = phase === "take control" ? control : phase === "send" ? write : phase === "read" ? read : pause;
     const job = form.execute();
@@ -183,7 +181,7 @@ for (const phase of ["take control", "send", "busy wait", "release", "read"] as 
     waiting.resume();
     await r.deadline(`drain ${phase}`, job);
     expect(r.writes).toHaveLength(phase === "take control" ? 0 : 1);
-    expect(r.events).toEqual(["acquire", "release"]);
+    expect(r.events).toEqual(["acquire"]);
     if (cause === "close") expect(form.outcomes).toEqual([]);
   });
 }
@@ -201,7 +199,7 @@ rowTest("outcome while detached is delivered once when reattached", async (r) =>
   form.attach(); form.detach(); form.attach();
   expect(form.outcomes.map(({ status }) => status)).toEqual(["committed"]);
   expect(r.writes).toHaveLength(1);
-  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.events).toEqual(["acquire"]);
 });
 
 const rawAdd = { name: "fixture", scope: "user", enabled: true, env: { FIXTURE_ENV: "add-private-env" },
@@ -267,14 +265,14 @@ for (const [row, status, toolCount] of [["success", "ok", 2], ["failure", "faile
       expect(options?.timeoutMs).toBeUndefined();
       return { data: { status, tool_count: toolCount, tools: [{ name: "fixture-canary", description: "not a receipt" }], stderr: "fixture-stderr" } };
     });
-    await r.deadline("test response and release", form.test(testTarget));
+    await r.deadline("test response settles", form.test(testTarget));
     if (status === "failed") {
       r.replies.push(fail({ code: -32000, message: "fixture-internal-error" }));
-      await r.deadline("test transport error response and release", form.test(testTarget));
+      await r.deadline("test transport error response settles", form.test(testTarget));
     }
     const count = status === "failed" ? 2 : 1;
     expect(form.testOutcomes).toEqual(Array(count).fill({ status: "tested", result: { status, toolCount } }));
-    expect(r.events).toEqual(Array(count).fill(["acquire", "release"]).flat());
+    expect(r.events).toEqual(Array(count).fill("acquire"));
     expect(r.writes).toEqual(Array(count).fill({ method: mcpTestMethod, params: { name: "fixture", scope: "project" } }));
     expect(r.reads).toEqual(Array(count).fill("project"));
   });
@@ -299,12 +297,12 @@ rowTest("test drop: unknown without a retry or settlement read", async (r) => {
   expect(r.events).toEqual(["acquire"]);
   r.drop();
   pending.resume();
-  await r.deadline("dropped test outcome and release", running);
+  await r.deadline("dropped test outcome settles", running);
   expect(form.testOutcomes).toEqual([{ status: "unknown" }]);
   expect(r.writes).toHaveLength(1);
-  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.events).toEqual(["acquire"]);
   expect(r.reads).toEqual(["project"]);
-  // A new action after reconnect may send once. Unmount must release while the reply is still pending.
+  // A new action after reconnect may send once. Unmount settles while the reply is still pending.
   r.reconnect();
   const fresh = r.open();
   const inFlight = r.gate({ data: { status: "ok", tool_count: 1 } });
@@ -319,11 +317,11 @@ rowTest("test drop: unknown without a retry or settlement read", async (r) => {
   const runningAgain = fresh.test(testTarget);
   await r.deadline("explicit repeat request sent", inFlight.entered);
   fresh.close();
-  try { await r.deadline("release on unmount before reply", runningAgain); }
+  try { await r.deadline("unmount before reply settles", runningAgain); }
   finally { inFlight.resume(); }
   expect(fresh.testOutcomes).toEqual([]);
   expect(r.writes).toHaveLength(2);
-  expect(r.events).toEqual(["acquire", "release", "acquire", "release"]);
+  expect(r.events).toEqual(["acquire", "acquire"]);
   expect(r.reads).toEqual(["project", "project"]);
 });
 
@@ -332,10 +330,10 @@ rowTest("test stale review: a changed definition sends no test request", async (
   const changed = { ...row("project", true), config: { transport: "streamable-http", url: "<redacted-url>" } };
   r.read((scope) => list(b, ...(scope === "user" ? [] : [changed])));
   r.replies.push(() => ({ data: { status: "ok", tool_count: 1 } }));
-  await r.deadline("confirm stale test review and release", form.test(testTarget));
+  await r.deadline("confirm stale test review settles", form.test(testTarget));
   expect(r.writes.filter(({ method }) => method === mcpTestMethod)).toHaveLength(0);
   expect(form.testOutcomes).toEqual([{ status: "stale" }]);
-  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.events).toEqual(["acquire"]);
   expect(r.reads).toEqual(["project", "effective", "user", "project"]);
   expect(r.owner.reads.snapshot()?.project).toMatchObject({ revision: b, rows: [{ config: { transport: "streamable-http" } }] });
 });

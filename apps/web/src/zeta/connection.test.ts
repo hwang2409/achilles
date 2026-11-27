@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ZetaError, type ZetaDiscovery } from "@fulcrum/zeta";
-import { createConnection, FEATURES, isObserverPresentation, refusedReason, transitionRole, type ConnectionState } from "./connection";
+import { createConnection, FEATURES, isObserverPresentation, type ConnectionState } from "./connection";
 
 const discovery: ZetaDiscovery = { url: "ws://127.0.0.1:8765", controller_token: "c", observer_token: "o", origins: [] };
 
@@ -39,28 +39,7 @@ test("startup and offline failures never retain observer presentation", async ()
   rejected.stop();
 });
 
-const controllerRole = { role: "controller", reason: null } as const;
-const observerRole = { role: "observer", reason: null } as const;
-const refusedAt = new Date(2030, 0, 1, 10, 31).getTime();
-const refusedRole = { ...observerRole, reason: refusedReason(refusedAt) };
-const refused = /^at .{1,15} another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/;
-test.each([
-  ["connect on a read-only route", controllerRole, ["connect_read_only", "observer_busy", "retry"], observerRole],
-  ["connect on a writable route", observerRole, ["connect_writable", "retry"], controllerRole],
-  ["controller granted", controllerRole, ["controller_granted"], controllerRole],
-  ["controller busy probes observer", controllerRole, ["controller_busy"], observerRole],
-  ["observer accepted and reconnects as observer", controllerRole, ["controller_busy", "observer_granted", "retry"], observerRole],
-  ["previously accepted observer is busy", observerRole, ["observer_busy", "retry"], observerRole],
-  ["both busy retries as controller", controllerRole, ["controller_busy", "both_busy", "retry"], controllerRole],
-  ["refused takeover keeps observer and exposes reason", observerRole, ["takeover_refused"], refusedRole],
-  ["retry clears refusal without promoting observer", refusedRole, ["retry"], observerRole],
-  ["released controller slot grants takeover and clears reason", refusedRole, ["controller_granted"], controllerRole],
-  ["closed controller retries as controller", controllerRole, ["controller_closed", "retry"], controllerRole],
-] as const)("role transition: %s", (_name, initial, events, expected) => {
-  let state: Parameters<typeof transitionRole>[0] = initial;
-  for (const event of events) state = transitionRole(state, event, refusedAt);
-  expect(state).toEqual(expected);
-});
+const refused = /^zeta is still full at .{1,15}\.$/;
 
 describe("createConnection controller capacity vs version mismatch", () => {
   test("falls back to a live observer and remains live when take-control is still busy", async () => {
@@ -90,162 +69,43 @@ describe("createConnection controller capacity vs version mismatch", () => {
       expect(result).toMatch(refused);
       expect(connection.client).toBe(observer);
       expect(observerCloses).toBe(0);
+      // an observer reconnect tries controller first, and falls back again while zeta is still full
+      closeObserver();
+      connection.retryNow();
+      await flush();
+      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
       released = true;
       await connection.takeControl();
       expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
       expect(connection.client).toBe(controller);
       expect(observerCloses).toBe(1);
-      expect(roles).toEqual(["controller", "observer", "controller", "controller"]);
+      expect(roles).toEqual(["controller", "observer", "controller", "controller", "observer", "controller"]);
     } finally { connection.stop(); }
   });
 
-  test.each([
-    ["locked read-only", "locked", "observer"],
-    ["writable", undefined, "controller"],
-  ] as const)("connects and reconnects on a %s route", async (_route, readOnly, authority) => {
+  test("every tab connects and reconnects as controller, and takeControl on a controller does nothing", async () => {
     const roles: string[] = [];
     let drop = () => {};
     const client = { onClose(callback: () => void) { drop = callback; }, close() {} };
-    const route = { readOnly };
     const connection = createConnection({
-      ...route,
       origin: "http://localhost",
       discover: async () => discovery,
       connect: async (_discovery, role) => { roles.push(role); return client as never; },
     });
     try {
       await flush();
-      expect(connection.state).toEqual({ phase: "connected", authority });
+      expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
       expect(connection.client).toBe(client);
-      expect(connection.observerPresentation).toBe(authority === "observer");
-      await connection.takeControl();
+      expect(connection.observerPresentation).toBe(false);
+      expect(await connection.takeControl()).toBeNull();
+      expect(roles).toEqual(["controller"]);
       drop();
       connection.retryNow();
       await flush();
-      expect(roles).toEqual([authority, authority]);
-      expect(connection.state).toEqual({ phase: "connected", authority });
-    } finally { connection.stop(); }
-  });
-  test("an upgradable route starts as observer, takes control on request, and a refusal keeps the live observer", async () => {
-    const roles: string[] = [];
-    let slotFree = false;
-    let observerCloses = 0;
-    const observer = { onClose() {}, close() { observerCloses++; } };
-    const controller = { onClose() {}, close() {} };
-    const connection = createConnection({
-      readOnly: "upgradable",
-      origin: "http://localhost",
-      discover: async () => discovery,
-      connect: async (_discovery, role) => {
-        roles.push(role);
-        if (role === "controller" && !slotFree) throw new ZetaError("busy", -32001);
-        return (role === "observer" ? observer : controller) as never;
-      },
-    });
-    try {
-      await flush();
-      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
-      expect(await connection.takeControl()).toMatch(refused);
-      expect(connection.client).toBe(observer);
-      expect(observerCloses).toBe(0);
-      slotFree = true;
-      expect(await connection.takeControl()).toBeNull();
+      expect(roles).toEqual(["controller", "controller"]);
       expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
-      expect(connection.client).toBe(controller);
-      expect(observerCloses).toBe(1);
-      expect(roles).toEqual(["observer", "controller", "controller"]);
     } finally { connection.stop(); }
   });
-
-  test.each([
-    ["an observer slot is free: it swaps to an observer socket", true],
-    ["no observer slot: it closes the controller and reconnects as observer", false],
-  ] as const)("an upgradable route gives control back: %s; a drop while holding reconnects as controller", async (_name, observerSlot) => {
-    const roles: string[] = [];
-    const drops: (() => void)[] = [];
-    let observerHellos = 0;
-    const connection = createConnection({
-      readOnly: "upgradable",
-      origin: "http://localhost",
-      discover: async () => discovery,
-      connect: async (_discovery, role) => {
-        roles.push(role);
-        // the first observer connects; the one release asks for is refused when there is no observer slot.
-        if (role === "observer" && ++observerHellos === 2 && !observerSlot) throw new ZetaError("busy", -32001);
-        return { onClose(callback: () => void) { drops.push(callback); }, close() { drops.at(-1)?.(); } } as never;
-      },
-    });
-    try {
-      await flush();
-      expect(await connection.takeControl()).toBeNull();
-      drops.at(-1)!(); // a drop while an editor holds control
-      connection.retryNow();
-      await flush();
-      expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
-      await connection.releaseControl();
-      connection.retryNow();
-      await flush();
-      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
-      drops.at(-1)!();
-      connection.retryNow();
-      await flush();
-      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
-      expect(roles).toEqual(observerSlot
-        ? ["observer", "controller", "controller", "observer", "observer"]
-        : ["observer", "controller", "controller", "observer", "observer", "observer"]);
-    } finally { connection.stop(); }
-  });
-
-  test.each(["before reconnect", "during reconnect"] as const)("releases a dropped hold %s", async (when) => {
-    const roles: string[] = [];
-    const reconnectHello = Promise.withResolvers<void>();
-    let drop = () => {};
-    let closedControllers = 0;
-    async function deadline<T>(operation: string, promise: Promise<T>): Promise<T> {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`deadline: ${operation}`)), 10_000); })]);
-      } finally { clearTimeout(timer); }
-    }
-    const connection = createConnection({
-      readOnly: "upgradable",
-      origin: "http://localhost",
-      discover: async () => discovery,
-      connect: async (_discovery, role) => {
-        roles.push(role);
-        if (when === "during reconnect" && role === "controller" && roles.length === 3)
-          await deadline("finish the controller reconnect hello", reconnectHello.promise);
-        let onClose = () => {};
-        return {
-          onClose(callback: () => void) { drop = onClose = callback; },
-          close() { if (role === "controller") closedControllers++; onClose(); },
-        } as never;
-      },
-    });
-    try {
-      await deadline("open the initial observer", flush());
-      expect(await deadline("take control", connection.takeControl())).toBeNull();
-      drop();
-      expect(connection.state.phase).toBe("dropped");
-      if (when === "during reconnect") {
-        connection.retryNow();
-        await deadline("start the controller reconnect", flush());
-        expect(roles).toEqual(["observer", "controller", "controller"]);
-        expect(connection.state.phase).toBe("connecting");
-      }
-      await deadline("release control", connection.releaseControl());
-      reconnectHello.resolve();
-      connection.retryNow();
-      await deadline("reconnect as observer", flush());
-      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
-      expect(roles).toEqual(when === "before reconnect" ? ["observer", "controller", "observer"] : ["observer", "controller", "controller", "observer"]);
-      expect(closedControllers).toBe(when === "before reconnect" ? 0 : 1);
-    } finally {
-      connection.stop();
-      reconnectHello.resolve();
-      await deadline("drain reconnect and close", flush());
-    }
-  }, 60_000);
 
   // zeta's serve protocol (docs/serve-protocol.md) sends -32001 "connection_capacity" when a second controller
   // connects (the second-tab case) and -32002 "protocol_mismatch" for a real version mismatch. @fulcrum/zeta
@@ -257,7 +117,7 @@ describe("createConnection controller capacity vs version mismatch", () => {
       connect: async () => { throw new ZetaError("busy", -32001); },
     });
     await flush();
-    expect(connection.state.phase).toBe("observer_limit");
+    expect(connection.state.phase).toBe("controller_taken");
     connection.stop();
   });
 
@@ -347,7 +207,7 @@ describe("connection role and terminal matrix", () => {
     });
     try {
       await flush();
-      expect(connection.state.phase).toBe("observer_limit");
+      expect(connection.state.phase).toBe("controller_taken");
       expect(roles).toEqual(["controller", "observer"]);
       released = true;
       connection.retryNow();
@@ -358,57 +218,39 @@ describe("connection role and terminal matrix", () => {
   });
 });
 
-describe("withControl borrows control for one read and always gives it back", () => {
-  type Row = { name: string; slotFree: boolean; read: "ok" | "fails" | "drops" | "hangs"; result: "value" | "error" | "refused" | "no answer"; reads: number };
+describe("withControl runs on the controller, and an observer takes control once and keeps it", () => {
+  type Row = { name: string; start: "controller" | "observer"; slotFree: boolean; read: "ok" | "fails"; result: "value" | "error" | "refused"; reads: number; hellos: string[]; end: "controller" | "observer" };
   test.each<Row>([
-    { name: "read succeeds -> released", slotFree: true, read: "ok", result: "value", reads: 1 },
-    { name: "read fails -> released", slotFree: true, read: "fails", result: "error", reads: 1 },
-    { name: "take refused -> no read sent, nothing to release", slotFree: false, read: "ok", result: "refused", reads: 0 },
-    { name: "drop during read -> observer after reconnect, never holding", slotFree: true, read: "drops", result: "error", reads: 1 },
-    { name: "no answer within the limit -> released, then no answer", slotFree: true, read: "hangs", result: "no answer", reads: 1 },
-  ])("$name", async ({ slotFree, read, result, reads }) => {
-    const sockets: { role: string; open: boolean; drop: () => void }[] = [];
-    // the 20 s borrow limit fires only when the test says so; other timers stay real.
-    const limits: (() => void)[] = [];
+    { name: "controller tab -> read runs on the same socket", start: "controller", slotFree: true, read: "ok", result: "value", reads: 1, hellos: ["controller"], end: "controller" },
+    { name: "controller tab, read fails -> error, still controller", start: "controller", slotFree: true, read: "fails", result: "error", reads: 1, hellos: ["controller"], end: "controller" },
+    { name: "observer tab, slot free -> takes control, reads, keeps control", start: "observer", slotFree: true, read: "ok", result: "value", reads: 1, hellos: ["controller", "observer", "controller"], end: "controller" },
+    { name: "observer tab, zeta full -> refused, no read sent", start: "observer", slotFree: false, read: "ok", result: "refused", reads: 0, hellos: ["controller", "observer", "controller"], end: "observer" },
+  ])("$name", async ({ start, slotFree, read, result, reads, hellos, end }) => {
+    const roles: string[] = [];
+    let full = start === "observer";
     const connection = createConnection({
-      readOnly: "upgradable",
       origin: "http://localhost",
       discover: async () => discovery,
-      setTimer: (callback, ms) => ms === 20_000 ? limits.push(callback) : setTimeout(callback, ms),
-      clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
       connect: async (_discovery, role) => {
-        if (role === "controller" && !slotFree) throw new ZetaError("busy", -32001);
-        let closed = () => {};
-        const socket = { role, open: true, drop: () => { socket.open = false; closed(); } };
-        sockets.push(socket);
-        return { onClose(callback: () => void) { closed = callback; }, close() { socket.drop(); } } as never;
+        roles.push(role);
+        if (role === "controller" && full) throw new ZetaError("busy", -32001);
+        return { onClose() {}, close() {} } as never;
       },
     });
     try {
       await flush();
+      expect(connection.state).toEqual({ phase: "connected", authority: start });
+      if (start === "observer") full = !slotFree;
       const sent: string[] = [];
-      let outcome = "pending";
-      let controllerOpenAtOutcome = false;
-      void connection.withControl(async (client) => {
+      const outcome = await connection.withControl(async (client) => {
         sent.push((client as unknown as { authority: string }).authority);
         if (read === "fails") throw new Error("read failed");
-        if (read === "drops") { sockets.find((socket) => socket.role === "controller" && socket.open)!.drop(); throw new Error("closed"); }
-        if (read === "hangs") return new Promise<string>(() => {});
         return "text";
-      }).then((value) => "refused" in value ? "refused" : "value", (error) => error instanceof Error && error.constructor.name === "NoAnswer" ? "no answer" : "error").then((value) => {
-        outcome = value;
-        controllerOpenAtOutcome = sockets.some((socket) => socket.role === "controller" && socket.open);
-      });
-      await flush();
-      limits.forEach((fire) => fire());
-      await flush();
-      connection.retryNow();
-      await flush();
+      }).then((value) => "refused" in value ? "refused" : "value", () => "error");
       expect(outcome).toBe(result);
-      expect(controllerOpenAtOutcome).toBe(false);
       expect(sent).toEqual(Array(reads).fill("controller"));
-      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
-      expect(sockets.filter((socket) => socket.role === "controller" && socket.open)).toEqual([]);
+      expect(roles).toEqual(hellos);
+      expect(connection.state).toEqual({ phase: "connected", authority: end });
     } finally { connection.stop(); }
   });
 });

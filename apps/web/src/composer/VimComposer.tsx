@@ -8,6 +8,7 @@ import { WRITE_SURFACE } from "../writeSurfaces";
 import { composerStatus, enterAction, submitAction, type ComposerModel } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
 import { ComposerHint } from "./hint";
+import { HeldSend } from "./PlainComposer";
 import { useComposerDelivery, type ComposerAdapterProps } from "./useComposerDelivery";
 import "./vim-composer.css";
 
@@ -165,10 +166,10 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     return () => { if (document.activeElement === button) viewRef.current?.focus(); };
   }, []);
 
-  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-write-surface={WRITE_SURFACE.composerSend} data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
+  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-write-surface={WRITE_SURFACE.composerSend} data-state={state} data-held={props.held || undefined} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
     <QueuedMessages model={model} onRetry={(id) => { retry(id); viewRef.current?.focus(); }} onRestore={restore} onCancel={(id) => { cancel(id); viewRef.current?.focus(); }} />
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
-    {state === "read-only" ? <><p data-part="composer-reason">{reason}</p>{props.controls && <div data-part="composer-bar">{props.controls}</div>}</> : <div data-part="composer-bar">
+    {state === "read-only" ? <><p data-part="composer-reason">{reason}</p>{(props.controls || props.held) && <div data-part="composer-bar">{props.controls}{props.held && <HeldSend />}</div>}</> : <div data-part="composer-bar">
       {props.controls}
       <div className="vim-guidance">
         <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
