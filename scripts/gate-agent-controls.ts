@@ -52,7 +52,10 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await agents.getByRole("textbox", { name: "task" }).fill(task);
     await agents.locator(spawnButton).click();
     const review = main.locator("dialog.confirmation-dialog");
-    await review.getByText(root, { exact: true }).waitFor();
+    // the review names the chat by its title; the frames check below proves the session id
+    const chatTitle = await main.locator(".chat-header [data-session-id]").getAttribute("title");
+    if (!chatTitle) throw new Error("the chat header has no title");
+    await review.getByText(chatTitle, { exact: true }).waitFor();
     await review.getByText("inherited cwd", { exact: true }).waitFor();
     await capture(main, "spawn-review-1440");
     await review.getByRole("checkbox", { name: "i reviewed the scope" }).check();
