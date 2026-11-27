@@ -1,0 +1,36 @@
+{
+  "good": {
+    "pages": [
+      {"id": "home", "alias": "home"},
+      {"id": "smoke", "alias": "smoke", "route": "/eval-smoke"}
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {"page_id": "smoke", "route": "/eval-smoke"}
+      }
+    ],
+    "browser": [
+      {"page_id": "smoke", "text": "smoke"}
+    ]
+  },
+  "bad": {
+    "pages": [
+      {"id": "home", "alias": "home"},
+      {"id": "smoke", "alias": "smoke", "route": "/eval-smoke"}
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {"page_id": "smoke", "route": "/eval-smoke"}
+      }
+    ],
+    "browser": [
+      {"page_id": "smoke", "text": "not rendered"}
+    ]
+  }
+}
