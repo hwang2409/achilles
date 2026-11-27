@@ -2048,7 +2048,7 @@ with _database() as db:
     throw new Error("rollback did not change the live generated schema");
   const allowPage = await homeMcp(15, "tools/call", {
     name: "create_page",
-    arguments: { route: "/allow", title: "allow mode", package: { source: "export default function Page(){return <main />}", dependencies: {} } },
+    arguments: { route: "/allow", title: "allow mode" },
   });
   if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
     throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
