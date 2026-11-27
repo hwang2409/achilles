@@ -7,6 +7,7 @@ import { useFocusAfterCommit } from "../keyboard";
 import { surfaceHref } from "./routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import type { ParkedRow } from "../zeta/parked";
+import { rowState } from "../zeta/rowState";
 
 export type PageLink = {
   id: string;
@@ -308,7 +309,7 @@ function ChatRow({ chat, build, parked, onScreen, current, active, index, query,
   useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
   // A page build's state comes only from the build owner; with no row there is no claim.
   // a chat this tab keeps running reads its live state, not the last one written
-  const state = chat.purpose === "page_build" ? buildTone(build) : parked ? (parked.pending_approvals > 0 ? "approval" : "running") : chat.last_state;
+  const state = chat.purpose === "page_build" ? buildTone(build) : rowState(chat.last_state, parked && { from: "parked", row: parked }).shown;
   const shown = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
   const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
   // a chat this tab keeps running gets a short mark (the tooltip says what it means), so a long title keeps its room

@@ -35,7 +35,8 @@ import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { TOO_MANY_CHATS } from "./zeta/session";
-import { parkedRows, subscribeParked, verifyChatStates } from "./zeta/parked";
+import { parkedRows, subscribeParked } from "./zeta/parked";
+import { subscribeRowWrites, verifyChatStates } from "./zeta/rowState";
 import { trackQueuedSteer, useActiveChat, type Page, type ParkedChat, type StopState } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -424,15 +425,17 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   });
   // a page build's running turn reads "building", as in the nav, the switcher, and /create (the open chat is always listed)
   // rows that say "running" or "needs you" for a chat this tab does not hold (a closed tab, a zeta restart): check them
-  // with zeta once per list load, and store what zeta says (the list then loads again)
+  // with zeta once per list load, and store what zeta says
   const listedChats = nav.catalog.chats;
   const heldIds = [ready?.sessionId, active.stop?.sessionId, ...parked.map((row) => row.session_id)].filter((id): id is string => Boolean(id)).join(" ");
   useEffect(() => {
     if (!client || !connected || !canWrite || !listedChats.length) return;
-    let current = true;
-    void verifyChatStates(client, listedChats, new Set(heldIds.split(" "))).then((changed) => { if (current && changed) nav.catalog.reload(); });
-    return () => { current = false; };
+    void verifyChatStates(client, listedChats, new Set(heldIds.split(" ")));
   }, [client, connected, canWrite, listedChats]);
+  // every stored row state (this tab's chats, or a corrected stale row) loads the list again
+  const reloadChats = useRef(nav.catalog.reload);
+  reloadChats.current = nav.catalog.reload;
+  useEffect(() => subscribeRowWrites(() => reloadChats.current()), []);
   const building = nav.catalog.chats.some((chat) => chat.session_id === ready?.sessionId && chat.purpose === "page_build");
   const stateLabel = runStateLabel(state, composerActivity.queued, building);
   useEffect(() => {

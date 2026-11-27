@@ -10,7 +10,8 @@ import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { applyApprovalMode, ChatBusyError, CONTROLLED_RETRIES, creationApprovalMode, loadSession, openHomeSession, pageBinding, ParkedLimitError, runningSession, SessionControlledError, SessionNotFoundError, TOO_MANY_CHATS } from "./zeta/session";
-import { holdAttached, parkedRows, persistChatState, reclaimHeld, refreshParked, stopParked } from "./zeta/parked";
+import { holdAttached, parkedRows, reclaimHeld, refreshParked, stopParked } from "./zeta/parked";
+import { stoppedChatWork, writeShownState, type RowState } from "./zeta/rowState";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
@@ -1149,7 +1150,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     return whenTurnEnds(client, sessionId, () => { setBusy(null); if (retry === "attach" && sessionId !== openSessionId) retryAttachment(); });
   }, [busy, client, openSessionId, retryAttachment]);
 
-  const recordLastState = useCallback((lastState: string) => {
+  const recordLastState = useCallback((lastState: RowState) => {
     // the one owner of the pending selection: a state counts only while its chat is the shown chat. a user who moved
     // away (new chat, another chat, back/forward) shows another view, so that chat's turn end cannot take the view back.
     const pending = pendingSelection.current;
@@ -1158,10 +1159,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (lastState === "idle" && pending.sawRunning) { setSelectedId(pending.sessionId); pendingSelection.current = null; }
     }
     // the tab that controls the chat records its state; a tab that only reads it does not
+    // (the chat list loads again after each stored state)
     if (state.phase !== "ready" || !canWrite || state.controlledElsewhere) return;
-    const token = owner.current.token();
-    void persistChatState(state.sessionId, lastState)
-      .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
+    void writeShownState(state.sessionId, lastState);
   }, [canWrite, state]);
 
   const approvalMode = "page" in state ? creationApprovalMode(state.page.approval_mode, autoApproveDefault) : null;

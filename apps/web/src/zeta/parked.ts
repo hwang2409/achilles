@@ -1,4 +1,5 @@
 import type { ZetaClient } from "@fulcrum/zeta";
+import { rowState, writeRowState } from "./rowState";
 import { CONTROLLED_RETRIES, CONTROLLED_RETRY_MS, controlledRetry, isResidentLimit, rebindPage, type pageBinding } from "./session";
 
 /**
@@ -17,13 +18,6 @@ const ownerOf = (client: object) => {
   return owner;
 };
 
-export async function persistChatState(sessionId: string, lastState: string, fetchFn: typeof fetch = fetch): Promise<boolean> {
-  try {
-    const response = await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ last_state: lastState }) });
-    return response.ok;
-  } catch { return false; }
-}
-
 // the ids this tab holds in zeta, so a reload can take them back from zeta's grace; ids only, never a credential
 const HELD_KEY = "achilles:held";
 export type Held = { attached: string | null; parked: string[] };
@@ -40,7 +34,6 @@ function writeHeld(change: Partial<Held>) {
 /** Records the chat this tab shows (zeta's attached session). */
 export const holdAttached = (sessionId: string) => writeHeld({ attached: sessionId });
 
-const lastStateOf = (row: ParkedRow) => row.pending_approvals > 0 ? "approval" : row.state === "idle" ? "idle" : "running";
 const STATES = new Set(["running", "tool", "idle"]);
 const parseRow = (value: unknown): ParkedRow | null => {
   const row = value as { session_id?: unknown; state?: unknown; pending_approvals?: unknown } | null;
@@ -74,8 +67,7 @@ export async function refreshParked(client: ZetaClient): Promise<string | null> 
 
 /**
  * Takes a `parked_session_changed` frame off the socket: true when `text` is one (the caller then drops it, so it never
- * reaches a fulcrum store as an unknown row), false for any other frame. Only this tab holds a parked chat, so it writes
- * the chat's state for every tab's sidebar.
+ * reaches a fulcrum store as an unknown row), false for any other frame.
  */
 export function takeParkedEvent(client: object | null, text: string): boolean {
   if (!text.includes('"parked_session_changed"')) return false;
@@ -86,13 +78,16 @@ export function takeParkedEvent(client: object | null, text: string): boolean {
   if (!client || typeof sessionId !== "string") return true;
   const rows = ownerOf(client).rows;
   const index = rows.findIndex((row) => row.session_id === sessionId);
+  // only this tab holds a parked chat, so it stores the chat's state for every tab's sidebar: on a change, and on close
+  const before = index < 0 ? undefined : rowState(undefined, { from: "parked", row: rows[index]! }).shown;
   if (frame.params.data?.state === "closed") {
+    void writeRowState(sessionId, rowState(before, { from: "closed" }).write);
     if (index >= 0) publish(client, rows.filter((row) => row.session_id !== sessionId));
     return true;
   }
   const row = parseRow({ ...frame.params.data, session_id: sessionId });
   if (!row) return true;
-  if (index < 0 || lastStateOf(rows[index]!) !== lastStateOf(row)) void persistChatState(sessionId, lastStateOf(row));
+  void writeRowState(sessionId, rowState(before, { from: "parked", row }).write);
   publish(client, index < 0 ? [...rows, row] : rows.map((old, at) => at === index ? row : old));
   return true;
 }
@@ -176,22 +171,4 @@ async function resumeHeld(client: ZetaClient, sessionId: string, bindingOf: (ses
       await controlledRetry.wait(CONTROLLED_RETRY_MS);
     }
   }
-}
-
-// zeta's live status of a chat, for a sidebar row: "running", "approval" or "idle" (not resident, or failed); null unknown
-const LIVE: Record<string, string> = { running: "running", approval: "approval", idle: "idle", failed: "idle" };
-/**
- * The sidebar shows a chat's stored last_state, which only the tab that holds the chat writes. A tab that closed (or a
- * zeta restart) leaves "running" or "needs you" behind. This checks each such row this tab does not hold, once per chat
- * list load, with a read that attaches nothing (`state_session`; a chat zeta no longer keeps is idle), and stores
- * zeta's state. Returns how many rows changed.
- */
-export async function verifyChatStates(client: ZetaClient, chats: readonly { session_id: string; last_state?: string | null }[], held: ReadonlySet<string>, fetchFn: typeof fetch = fetch): Promise<number> {
-  const stale = chats.filter((chat) => (chat.last_state === "running" || chat.last_state === "approval") && !held.has(chat.session_id));
-  const changed = await Promise.all(stale.map(async (chat) => {
-    const read = await client.request("state_session", { session_id: chat.session_id, collection: "attention", limit: 1 }).catch(() => null) as { session?: { status?: unknown } | null } | null;
-    const live = typeof read?.session?.status === "string" ? LIVE[read.session.status] : undefined;
-    return live !== undefined && live !== chat.last_state && await persistChatState(chat.session_id, live, fetchFn);
-  }));
-  return changed.filter(Boolean).length;
 }

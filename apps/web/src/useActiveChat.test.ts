@@ -6,7 +6,7 @@ import * as queues from "./composer/chatQueues";
 import { draftStore } from "./draftStore";
 import { MAYBE_SENT } from "./composer/composer-machine";
 import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
-import { persistChatState } from "./zeta/parked";
+import { writeRowState } from "./zeta/rowState";
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -271,7 +271,7 @@ describe("chat state persistence", () => {
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
     try {
-      const write = persistChatState("session", "idle", () => Promise.reject(new Error("achilles stopped")));
+      const write = writeRowState("session", "idle", undefined, () => Promise.reject(new Error("achilles stopped")));
       await new Promise((resolve) => setImmediate(resolve));
       expect(unhandled).toBe(0);
       expect(await write).toBe(false);

@@ -17,7 +17,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
-from .pages import CHAT_PURPOSES, PageStore
+from .pages import CHAT_PURPOSES, ChatChanged, PageStore
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
 
@@ -301,12 +301,19 @@ def create_app() -> Starlette:
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
         body = _validated_chat_changes(await request.json())
+        expected = (
+            (body.pop("expected_last_state"), body.pop("expected_updated_at"))
+            if "expected_updated_at" in body
+            else None
+        )
         try:
             row = await anyio.to_thread.run_sync(
-                store.update_chat, request.path_params["session_id"], body
+                store.update_chat, request.path_params["session_id"], body, expected
             )
         except KeyError as exc:
             raise HTTPException(404, "chat not found") from exc
+        except ChatChanged as exc:
+            raise HTTPException(409, "chat changed") from exc
         return JSONResponse(row)
 
     async def page_tools(request):
@@ -558,13 +565,32 @@ def _text(value: str) -> str:
     return value.encode("utf-8", "ignore").decode()
 
 
+CHAT_FIELDS = {
+    "title",
+    "last_state",
+    "titled_by_user",
+    "first_message",
+    "expected_last_state",
+    "expected_updated_at",
+}
+
+
 def _validated_chat_changes(body: Any) -> dict[str, Any]:
     if (
         not isinstance(body, dict)
         or not body
-        or not set(body) <= {"title", "last_state", "titled_by_user", "first_message"}
+        or not set(body) <= CHAT_FIELDS
     ):
         raise HTTPException(400, "provide only title, last_state, titled_by_user, or first_message")
+    # expected_*: a compare-and-set of last_state, both together with last_state
+    expected = {"expected_last_state", "expected_updated_at"} & set(body)
+    if expected and (
+        len(expected) != 2
+        or "last_state" not in body
+        or body["expected_last_state"] not in {None, "idle", "running", "approval", "failed"}
+        or not isinstance(body["expected_updated_at"], str)
+    ):
+        raise HTTPException(400, "expected_last_state and expected_updated_at go together with last_state")
     if "first_message" in body:
         first = body["first_message"]
         if not isinstance(first, str) or len(first) > 200:
