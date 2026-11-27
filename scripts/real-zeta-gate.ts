@@ -3345,7 +3345,7 @@ with _database() as db:
   }
   await Promise.all(catalogTabs.map((tab) => tab.close()));
   console.log("cap step: five catalog tabs next to the chat tab all control zeta");
-  const capFillers: Array<{ close: () => void }> = [];
+  const capFillers: Array<{ client: ReturnType<typeof createClient>; sessionId: string }> = [];
   for (let opened = 0; ; opened++) {
     if (opened > 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
     // the same handoff the browser reads, so the raw controllers reach the zeta serve the tabs use.
@@ -3358,8 +3358,9 @@ with _database() as db:
       if ((error as { code?: unknown }).code === -32001) break;
       throw error;
     }
-    capFillers.push(filler);
-    await filler.request("new_session", {});
+    const created = await filler.request("new_session", {}) as { session?: { session_id?: string } };
+    if (!created.session?.session_id) { filler.close(); throw new Error("a cap filler new_session returned no session id"); }
+    capFillers.push({ client: filler, sessionId: created.session.session_id });
   }
   if (!capFillers.length) throw new Error("no session-holding controller connected before the cap step");
   console.log(`cap step: ${capFillers.length} session-holding controllers filled zeta next to the chat tab`);
@@ -3593,7 +3594,14 @@ with _database() as db:
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-takeover-no-reload-1440x900.png") });
   await waitFor(async () => observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed"), "promoted controller released its observer socket");
   if (helloRoles() !== "controller,observer,controller,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles()}`);
-  capFillers.forEach((filler) => filler.close());
+  // a closed controller keeps its session resident for the ~90 s reconnect grace, and 15 of those would fill zeta's 20
+  // resident records for later steps. so the first filler reclaims each closed filler's session in turn: each resume
+  // swaps away from its idle session, which closes it. only the last session stays in grace.
+  const [keeper, ...released] = capFillers;
+  released.forEach(({ client }) => client.close());
+  for (const { sessionId } of released)
+    await waitFor(() => keeper.client.request("resume", { session_id: sessionId }).then(() => true, (error) => { if ((error as { code?: unknown }).code === -32014) return false; throw error; }), "first cap filler reclaims a closed filler's session");
+  keeper.client.close();
   console.log("cap step: the seventeenth session-holding controller tab showed the observer banner, stayed live, and took control once a tab closed");
   await observerPage.reload({ waitUntil: "domcontentloaded" });
   await gateWait.playwright(observerPage.locator(`[data-session-id="${controllerChat}"]`), "waitFor", { state: "attached" });
