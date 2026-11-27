@@ -222,6 +222,11 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   // another tab controls the open chat: writes to this chat go there; tab writes (new chat, settings, page data) stay here
   const chatCanWrite = canWrite && !ready?.controlledElsewhere;
   const chatReadOnlyReason = canWrite && ready?.controlledElsewhere ? CHAT_CONTROLLED_REASON : readOnlyReason;
+  // "try again" on a held chat: pending until a new attach (a new lease) lands; still held after it says so
+  const [heldRetry, setHeldRetry] = useState<{ sessionId: string; lease: unknown } | null>(null);
+  useEffect(() => { if (!ready?.controlledElsewhere) setHeldRetry(null); }, [ready?.controlledElsewhere]);
+  const retryingHeld = Boolean(heldRetry && ready?.lease === heldRetry.lease);
+  const stillHeld = Boolean(heldRetry && ready?.sessionId === heldRetry.sessionId && ready.lease !== heldRetry.lease);
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
   const activePage = ready?.page ?? empty?.page ?? null;
@@ -379,7 +384,8 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "Ask about this page" : "Message Zeta";
-  const composerProps: ComposerProps = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "read-only" }
+  // canWrite here means only this chat is off: another tab holds it
+  const composerProps: ComposerProps = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: canWrite ? "read-only: this chat is open in another tab" : "read-only" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); }, placeholder);
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
@@ -390,7 +396,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const keptNew = active.creationError && active.creationPageId ? chatQueues.unsent(`new:${active.creationPageId}`) : [];
   const state = headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent));
   const nav = useAgentNavAdapter({
-    sessionId: ready?.sessionId ?? null, waiting, canWrite, onSelectChat: active.selectChat,
+    sessionId: ready?.sessionId ?? null, waiting, canWrite, heldChatId: ready?.controlledElsewhere ? ready.sessionId : null, onSelectChat: active.selectChat,
     onRenameChat: (chat, text) => { if (canWrite) void active.rename(chat.session_id, text); },
     refreshKey: active.listRefresh, pageRefreshKey: pageRefreshNonce,
   });
@@ -422,7 +428,8 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   } : undefined;
   // the chat's own model; a new chat shows zeta's default, the one it will start with
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
-  const needsDefaultModel = connected && client !== null && (empty !== null || (ready !== null && !ready.model));
+  // a chat held elsewhere has no known model (zeta answers session_settings only to its holder): show none, not the default
+  const needsDefaultModel = connected && client !== null && (empty !== null || (ready !== null && !ready.model && !ready.controlledElsewhere));
   useEffect(() => {
     if (!needsDefaultModel) return;
     let live = true;
@@ -430,7 +437,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     return () => { live = false; };
   }, [client, needsDefaultModel]);
   const serverForcesAsk = (ready ?? empty)?.serverApprovalMode === "ask";
-  const composerModes = activePage && <ComposerModes model={ready?.model ?? defaultModel}
+  const composerModes = activePage && <ComposerModes model={ready?.controlledElsewhere ? null : ready?.model ?? defaultModel}
     create={createMode && { on: createMode.enabled, toggle: createMode.available ? createMode.toggle : undefined, busy: createMode.pending ? "saving…" : undefined,
       reason: !chatCanWrite ? chatReadOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined }}
     approval={{ on: ready ? activePage.approval_mode === "allow" : active.build.approvalMode === "allow", toggle: chatCanWrite ? active.toggleApprovalMode : undefined,
@@ -442,7 +449,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
-    {ready?.controlledElsewhere && <div className="create-mode-alert" role="status"><span>this chat is open in another tab. you can read it here.</span><span><button type="button" onClick={() => void active.newChat()} disabled={!canWrite}>new chat</button><button type="button" onClick={active.retryAttachment}>try again</button></span></div>}
+    {ready?.controlledElsewhere && <div className="chat-held-notice" role="status"><p>{stillHeld ? "this chat is still open in another tab. you can read it here." : "this chat is open in another tab. you can read it here."}</p><span className="chat-held-actions"><button type="button" onClick={() => void active.newChat()} disabled={!canWrite}>new chat</button><button type="button" aria-disabled={retryingHeld || undefined} onClick={() => { if (retryingHeld) return; setHeldRetry({ sessionId: ready.sessionId, lease: ready.lease }); active.retryAttachment(); }}>{retryingHeld ? "trying…" : "try again"}</button></span></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
@@ -481,7 +488,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
     workspace: landing ? undefined : { canWrite, serverForcesAsk, createMode },
-    header: !landing && activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
+    header: !landing && activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} renameReason={ready?.controlledElsewhere ? chatReadOnlyReason : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
     children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} /> : content,
   });
 }
@@ -547,7 +554,7 @@ function runStateLabel(state: string, queued: number, building: boolean) {
   return state === "approval" ? "needs you" : state === "running" && building ? "building" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state;
 }
 
-function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
+function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, renameReason, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; renameReason?: string; onHistory: (opener: HTMLElement | null) => void }) {
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
   const startRename = () => { if (onRename && sessionId) rename.start(title === "new chat" ? "" : title, (value) => onRename(sessionId, value)); };
@@ -575,7 +582,7 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRenam
   }, [onRename, rename.editing, sessionId, title]);
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
-    : <strong ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
+    : <strong ref={titleControl} title={renameReason ?? title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   const routeLabel = page.route === "/" ? "Home" : page.title;
   if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
   return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;

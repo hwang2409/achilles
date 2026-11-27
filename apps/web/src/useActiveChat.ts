@@ -9,7 +9,7 @@ import { draftStore } from "./draftStore";
 import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
-import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionControlledError, SessionNotFoundError } from "./zeta/session";
+import { applyApprovalMode, ChatBusyError, CONTROLLED_RETRIES, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionControlledError, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
@@ -160,7 +160,8 @@ export async function attachPage(
       let controlledElsewhere = false;
       let session: { id: string; name: string | null; approvalMode?: string | null; model: string | null; pending: boolean; rebind: boolean; cwd: string | null } = unresumed;
       if (!observer) {
-        try { session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token)); }
+        // only a url-named chat can meet its own reload, so only it waits out the reload race; a default attach falls back at once
+        try { session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token), selectedId ? CONTROLLED_RETRIES : 0); }
         // only a chat the url names opens read-only; a default attach held elsewhere is the caller's (it starts a new chat)
         catch (caught) { if (!(caught instanceof SessionControlledError) || !selectedId) throw caught; controlledElsewhere = true; }
       }
@@ -171,9 +172,10 @@ export async function attachPage(
       if (continued) lease.store.dispatch({ type: "notification", notification_id: continuationNotification, data: { text: `today · continuing session ${session.id}. zeta keeps the full history; new messages append to it.` } });
       if (!owner.accept(token, lease)) throw new StaleAttachment();
       ownsLease = true;
-      if (reader) {
-        // A reader gets the true per-session mode and model without resuming the session or writing settings, or shows
-        // them as unknown. After the join: zeta answers an observer's session_settings only for a session it joined.
+      // An observer reads the true per-session mode and model without resuming the session or writing settings.
+      // After the join: zeta answers an observer's session_settings only for a session it joined. zeta answers it for
+      // a controller only for the session that controller holds (-32003 otherwise), so a chat held elsewhere shows no model.
+      if (observer) {
         const observed = await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { model?: string; approval_mode?: string | null } | null;
         requireCurrent(owner, token);
         session = { ...session, approvalMode: serverApprovalMode === "ask" ? "ask" : observed?.approval_mode ?? serverApprovalMode, model: observed?.model ?? null };

@@ -1,5 +1,5 @@
 import "./test-dom";
-import { expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { act, createElement } from "react";
 import type { RenderResult } from "@testing-library/react";
 
@@ -7,6 +7,7 @@ import { isMac } from "./keyboard";
 import { draftStore } from "./draftStore";
 import { getSettings, SETTINGS_KEY, updateSettings } from "./settings";
 import { WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
+import { controlledRetry } from "./zeta/session";
 
 const { fireEvent, render } = await import("@testing-library/react");
 
@@ -1117,30 +1118,52 @@ test("a create mode failure that cannot be retried shows once on a page with blo
 
 // the "controller, chat controlled elsewhere" column: another tab holds this chat (zeta refuses `resume` with
 // -32014 session_controlled), so this tab reads it live: chat-scoped surfaces say why they are off, tab-level ones work
+describe("controller, chat controlled elsewhere", () => {
+const realWait = controlledRetry.wait;
+beforeEach(() => { controlledRetry.wait = async () => {}; });
+afterEach(() => { controlledRetry.wait = realWait; });
 const controlledReason = "this chat is open in another tab. write there, or start a new chat here.";
-const heldElsewhere = (extra: Options = {}): Options => ({ attached: true, ...extra, rpc: { ...extra.rpc, resume: () => ({ error: { code: -32014, message: "session is controlled by another client", data: { code: "session_controlled", session_id: "session" } } }) } });
+const notice = "this chat is open in another tab. you can read it here.";
+const refusal = { error: { code: -32014, message: "session is controlled by another client", data: { code: "session_controlled", session_id: "session" } } };
+const heldElsewhere = (extra: Options = {}): Options => ({ attached: true, ...extra, rpc: { ...extra.rpc, resume: () => refusal } });
 const pendingApproval = { joined: { messages: [userMessage], status: { state: "tool", session: { session_id: "session" }, pending_approvals: [{ request_id: "waiting", delegated: false, tool_call: { id: "tool", name: "fixture", arguments: {} } }] } } };
+const chatWrites = (writes: string[]) => writes.filter((write) => write !== "resume");
 const chatOff = (selector: string) => async (app: RenderResult, writes: string[]) => {
   const control = select(app, selector);
   expect(disabled(control)).toBe(true);
   expect(control.getAttribute("title") ?? document.getElementById(control.getAttribute("aria-describedby") ?? "")?.textContent ?? app.container.textContent).toContain(controlledReason);
   await click(control);
-  expect(writes.filter((write) => write !== "resume")).toEqual([]);
+  expect(chatWrites(writes)).toEqual([]);
 };
 test.each([
   ["composer.send", heldElsewhere({ joined: { messages: [userMessage] } }), async (app: RenderResult, writes: string[]) => {
     expect(app.container.querySelector(`button${tag("composer.send")}`)).toBeNull();
     const field = select(app, '[data-part="composer"] textarea');
-    expect(field.getAttribute("placeholder")).toBe("read-only"); // the chat notice above says why
+    expect(field.getAttribute("placeholder")).toBe("read-only: this chat is open in another tab");
     await keydown(field, "Enter");
-    expect(writes.filter((write) => write !== "resume")).toEqual([]);
+    expect(chatWrites(writes)).toEqual([]);
   }],
   ["approval.approve", heldElsewhere(pendingApproval), chatOff('[data-part="approval"] button[data-action="approve"]')],
   ["composer.auto-approve", heldElsewhere(), chatOff(tag("composer.auto-approve"))],
   ["composer.create-mode", heldElsewhere(), chatOff(tag("composer.create-mode"))],
   ["page.chat", heldElsewhere({ page: { layout: { blocks: [{ type: "list", title: "Books", collection: "books" }] } } }), async (app: RenderResult, writes: string[]) => {
     expect(app.queryByText("Ask the chat", { selector: "button", exact: true })).toBeNull();
-    expect(writes.filter((write) => write !== "resume")).toEqual([]);
+    expect(chatWrites(writes)).toEqual([]);
+  }],
+  // the holder tab would never see a new title, so only the holder renames this chat
+  ["header.rename and sidebar.rename", heldElsewhere(), async (app: RenderResult, writes: string[]) => {
+    const title = select(app, tag("header.rename"));
+    expect(title.getAttribute("role")).toBeNull();
+    expect(title.getAttribute("title")).toBe(controlledReason);
+    await click(title);
+    await keydown(window, "F2");
+    expect(app.container.querySelector(".chat-title-edit")).toBeNull();
+    expect(app.container.querySelector(`[data-chat-id="session"] ${tag("sidebar.rename")}`)).toBeNull();
+    expect(chatWrites(writes)).toEqual([]);
+  }],
+  // a stored chat whose title comes from first_title differs from its zeta name: only a holder would PATCH it
+  ["no title or state record from a reading tab", heldElsewhere({ chat: { ...chat, title: null, first_title: "first fixture", titled_by_user: false } }), async (_app: RenderResult, writes: string[]) => {
+    expect(chatWrites(writes)).toEqual([]);
   }],
   ["shell.new-chat (tab-level)", heldElsewhere(), async (app: RenderResult, writes: string[]) => {
     const control = select(app, tag("shell.new-chat"));
@@ -1148,19 +1171,43 @@ test.each([
     await click(control);
     didWrite(writes, "new_session");
   }],
-  ["header.rename (tab-level)", heldElsewhere(), async (app: RenderResult, writes: string[]) => {
-    await click(select(app, tag("header.rename")));
-    const editor = select(app, ".chat-title-edit");
-    await change(editor, "renamed fixture");
-    await keydown(editor, "Enter");
-    didWrite(writes, 'PATCH /api/chats/session {"title":"renamed fixture"');
-  }],
-] as const)("controller, chat controlled elsewhere: %s", async (_id, options, check) => {
+] as const)("%s", async (_id, options, check) => {
   await withApp("controller", options, async (app, writes, requests) => {
-    await app.findByText("this chat is open in another tab. you can read it here.", {}, { timeout: 3000 });
+    await app.findByText(notice, {}, { timeout: 3000 });
     // the bounded retry for the reload race, then a read-only join: never a 5th resume, no page binding after that
     expect(writes.filter((write) => write === "resume")).toHaveLength(4);
     expect(requests).toContain("session_history_and_subscribe");
+    // zeta answers session_settings only to the holder: no failing call, and no model label
+    expect(requests).not.toContain("session_settings");
+    expect(app.container.querySelector('[data-part="composer-model"]')).toBeNull();
     await check(app, writes);
   });
+});
+
+test("try again shows it is trying, then says the chat is still held", async () => {
+  let release = () => {};
+  const resume = (_params: Record<string, unknown>, requests: readonly string[]) => requests.filter((method) => method === "resume").length !== 5
+    ? refusal : new Promise<object>((done) => { release = () => done(refusal); });
+  await withApp("controller", { attached: true, rpc: { resume } }, async (app, writes) => {
+    await app.findByText(notice, {}, { timeout: 3000 });
+    await click(app.getByRole("button", { name: "try again" }));
+    const pending = app.getByRole("button", { name: "trying…" });
+    expect(pending.getAttribute("aria-disabled")).toBe("true");
+    await click(pending);
+    expect(writes.filter((write) => write === "resume")).toHaveLength(5);
+    await act(async () => release());
+    await app.findByText("this chat is still open in another tab. you can read it here.", {}, { timeout: 3000 });
+    expect(app.getByRole("button", { name: "try again" })).toBeTruthy();
+    expect(writes.filter((write) => write === "resume")).toHaveLength(8);
+  });
+});
+
+test("a default attach whose newest chat is held elsewhere opens a fresh chat without retrying", async () => {
+  await withApp("controller", { chat, rpc: { resume: () => refusal } }, async (app, writes) => {
+    for (let turn = 0; turn < 20 && !writes.includes("new_session"); turn++) await act(async () => {});
+    // one refused resume, then the fresh chat (this fixture's new_session reuses the id, so its own resume follows)
+    expect(writes.slice(0, writes.indexOf("new_session"))).toEqual(["resume"]);
+    expect(app.queryByText(notice)).toBeNull();
+  });
+});
 });

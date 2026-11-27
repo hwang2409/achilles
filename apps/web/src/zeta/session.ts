@@ -62,10 +62,12 @@ export class SessionControlledError extends Error {
 }
 // a reload can reach zeta before zeta has seen the old page's socket close; the chat is free a moment later, so retry
 // a refusal that names this chat
-const CONTROLLED_RETRIES = 3;
+export const CONTROLLED_RETRIES = 3;
 const CONTROLLED_RETRY_MS = 500;
+// the retry pause; tests replace `wait` so a held chat does not sleep for real
+export const controlledRetry = { wait: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)) };
 
-export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null, current: () => boolean = () => true, wait = (ms: number) => new Promise((done) => setTimeout(done, ms))) {
+export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null, current: () => boolean = () => true, retries = CONTROLLED_RETRIES) {
   let controlledRetries = 0;
   let name: string | null = null;
   let sessionCwd: string | null = null;
@@ -87,8 +89,8 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
       if (reason === "session_owned") throw new Error(sessionOwned);
       if (isResidentLimit(caught)) throw new TooManyChatsError();
       if (reason === "session_controlled") {
-        if (refusedId !== id || ++controlledRetries > CONTROLLED_RETRIES) throw new SessionControlledError(id);
-        await wait(CONTROLLED_RETRY_MS);
+        if (refusedId !== id || ++controlledRetries > retries) throw new SessionControlledError(id);
+        await controlledRetry.wait(CONTROLLED_RETRY_MS);
         if (!current()) throw aborted();
         continue;
       }

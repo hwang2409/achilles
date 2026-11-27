@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, SessionControlledError, SessionNotFoundError, TooManyChatsError } from "./session";
+import { applyApprovalMode, ChatBusyError, controlledRetry, creationApprovalMode, loadSession, openHomeSession, SessionControlledError, SessionNotFoundError, TooManyChatsError } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -99,11 +99,14 @@ describe("openHomeSession", () => {
   });
 
   test.each([
-    ["held for good -> controlled elsewhere after 3 retries", 99, "existing", SessionControlledError, 4],
-    ["freed during the retries (reload race) -> resumes", 2, "existing", null, 3],
-    ["a refusal that does not name this chat -> controlled elsewhere, no retry", 99, "other", SessionControlledError, 1],
-  ] as const)("a -32014 session_controlled resume refusal: %s", async (_name, refusals, refusedId, kind, resumes) => {
+    ["held for good -> controlled elsewhere after 3 retries", 99, "existing", 3, SessionControlledError, 4],
+    ["freed during the retries (reload race) -> resumes", 2, "existing", 3, null, 3],
+    ["a refusal that does not name this chat -> controlled elsewhere, no retry", 99, "other", 3, SessionControlledError, 1],
+    ["no retries asked (a default attach) -> controlled elsewhere at once", 99, "existing", 0, SessionControlledError, 1],
+  ] as const)("a -32014 session_controlled resume refusal: %s", async (_name, refusals, refusedId, retries, kind, resumes) => {
     const methods: string[] = []; const waits: number[] = [];
+    const realWait = controlledRetry.wait;
+    controlledRetry.wait = async (ms) => { waits.push(ms); };
     const client = { features: ["resume_attach"], request: async (method: string) => {
       methods.push(method);
       if (method === "resume" && methods.filter((sent) => sent === "resume").length <= refusals) throw Object.assign(new Error("session is controlled by another client"), { code: -32014, data: { code: "session_controlled", session_id: refusedId } });
@@ -111,7 +114,7 @@ describe("openHomeSession", () => {
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       throw new Error(`unexpected ${method}`);
     } };
-    const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow", () => true, async (ms) => { waits.push(ms); }).catch((error: unknown) => error);
+    const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow", () => true, retries).catch((error: unknown) => error).finally(() => { controlledRetry.wait = realWait; });
     if (kind === null) expect(result).toMatchObject({ id: "existing", name: "existing" });
     else expect(result).toBeInstanceOf(kind);
     if (kind) expect((result as SessionControlledError).sessionId).toBe("existing");
