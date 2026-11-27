@@ -2,6 +2,7 @@ import "./test-dom";
 import { afterEach, expect, test } from "bun:test";
 import { act, createElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
+import { createRunStore } from "@fulcrum/core";
 import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
@@ -1143,7 +1144,8 @@ test.each([
   }
 });
 
-test("a default attach names its chat in the url, so a reload reopens this tab's chat, not the page's newest", async () => {
+test("a default attach names its chat in the url, so a reload or reconnect reopens this tab's chat, not the page's newest", async () => {
+  let chats = [chat];
   const replaced: string[] = [];
   const pushed: string[] = [];
   const location = { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
@@ -1156,18 +1158,166 @@ test("a default attach names its chat in the url, so a reload reopens this tab's
       const url = String(input);
       if (url === "/api/pages/home") return Response.json(page);
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
-      if (url.startsWith("/api/chats?")) return Response.json({ chats: [chat], next: null });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats, next: null });
       if (url === "/api/chats/chat" && init?.method === "PATCH") return new Response(null, { status: 204 });
       throw new Error(`unexpected fetch ${url}`);
     },
   });
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
-  const zeta = client();
-  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
-  await act(async () => { mounted = render(createElement(Harness)); });
+  const resumed: string[] = [];
+  const recording = () => {
+    const zeta = client();
+    return { ...zeta, request: (method: string, params?: { session_id?: string }) => { if (method === "resume") resumed.push(params?.session_id ?? ""); return zeta.request(method); } };
+  };
+  const Harness = ({ zeta }: { zeta: unknown }) => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness, { zeta: recording() })); });
   await flushUntil(() => active.state.phase === "ready");
   expect(replaced, "the default attach left the url without ?chat=").toEqual(["/?chat=chat"]);
   expect(location.search).toBe("?chat=chat");
   expect(pushed, "a default attach adds no history entry").toEqual([]);
+  // another tab's chat is now the page's newest; a reconnect (a new client) must still resume this tab's chat
+  chats = [{ ...chat, session_id: "other", title: "other" }, chat];
+  await act(async () => { mounted!.rerender(createElement(Harness, { zeta: recording() })); });
+  await flushUntil(() => resumed.length === 2 && active.state.phase === "ready");
+  expect(resumed.at(-1), "the reconnect resumed the page's newest chat, not the url's").toBe("chat");
 });
+
+test("a new tab whose default chat is open in another tab gets its own new chat, not zeta's refusal, and Back leaves", async () => {
+  const location = { pathname: "/", search: "", hash: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
+  const go = (path: string) => { const url = new URL(path, location.href); Object.assign(location, { pathname: url.pathname, search: url.search, hash: url.hash, href: url.href }); };
+  // the tab's history: the entry it arrived on, plus any it pushes
+  const entries = ["/"];
+  let current = 0;
+  const pops: (() => void)[] = [];
+  let creates = 0;
+  setGlobals({
+    localStorage: new MemoryStorage(), location,
+    history: {
+      state: null,
+      pushState(_state: unknown, _title: string, path: string) { entries.splice(current + 1, Infinity, path); current += 1; go(path); },
+      replaceState(_state: unknown, _title: string, path: string) { entries[current] = path; go(path); },
+    },
+    addEventListener: (type: string, listener: () => void) => { if (type === "popstate") pops.push(listener); },
+    removeEventListener: (type: string, listener: () => void) => { if (type === "popstate") pops.splice(pops.indexOf(listener), 1); },
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
+      // like achilles, the default list hides the fresh chat until it has a sent message, so the default chat stays the held one
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: url.includes("include=fresh") ? [{ ...chat, session_id: "fresh" }, chat] : [chat], next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const resumed: string[] = [];
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq"],
+    request: async (method: string, params?: { session_id?: string }) => {
+      if (method === "resume") {
+        resumed.push(params?.session_id ?? "");
+        if (params?.session_id === "chat") throw Object.assign(new Error("session is controlled by another client"), { code: -32014, data: { code: "session_controlled" } });
+        return { session: { name: null } };
+      }
+      if (method === "new_session") { creates += 1; return { session: { session_id: "fresh" } }; }
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
+      if (method === "status") return { session: { session_id: "fresh" }, state: "idle" };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  for (let flush = 0; flush < 40 && !(active.state.phase === "ready" || active.state.phase === "error"); flush += 1) await act(async () => {});
+  expect(active.state.phase === "error" ? active.state.error : active.state.phase, "the tab showed zeta's refusal instead of opening a new chat").toBe("ready");
+  expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
+  expect(resumed[0]).toBe("chat");
+  expect(location.search).toBe("?chat=fresh");
+  // Back: go to the previous entry of this tab, if it has one; else the browser leaves achilles
+  if (current > 0) {
+    current -= 1; go(entries[current]!);
+    await act(async () => { for (const pop of [...pops]) pop(); });
+    for (let flush = 0; flush < 40; flush += 1) await act(async () => {});
+  }
+  expect(creates, "Back from the fresh chat created another zeta session").toBe(1);
+  expect(entries, "the fresh chat took the entry the tab arrived on").toEqual(["/?chat=fresh"]);
+});
+
+// a message sent in the last moment of a turn goes out as a steer; the turn ends before zeta reads it and zeta drops it.
+// Forced order: zeta answers the status poll with "dropped" before its delivery_status event (the reason) arrives.
+test.each([
+  { name: "a new turn starts: it goes out once as a new message", reason: "turn_end", send: () => ({ accepted: true }), sends: 1 },
+  { name: "dropped as disconnect while this connection answers: it goes out once as a new message", reason: "disconnect", send: () => ({ accepted: true }), sends: 1 },
+  { name: "another turn already started: it stays unsent with the true reason", reason: "disconnect", send: () => { throw TURN_RUNNING_ERROR(); }, sends: 1, error: "the turn ended before zeta read it." },
+  { name: "a different refusal stays unsent with zeta's reason", reason: "disconnect", send: () => { throw Object.assign(new Error("host binding required"), { code: -32003 }); }, sends: 1, error: "host binding required", bubbleReason: "disconnect" },
+  { name: "a stop dropped it: never resent", reason: "abort", send: () => ({ accepted: true }), sends: 0, error: "zeta dropped this message before reading it." },
+])("a steer its turn ended without reading: $name", async (row) => {
+  setGlobals({
+    localStorage: new MemoryStorage(),
+    location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ ...chat, last_state: "running", message_sent: true }], next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const store = Object.assign(createRunStore(), { resync() {} });
+  const requests: { method: string; text?: string; delivery_id?: string; intent?: string }[] = [];
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "turn_reconnect"],
+    request: async (method: string, params?: { text?: string; delivery_id?: string }, options?: { intent?: string }) => {
+      if (method === "resume") return { session: { name: null } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "running", pending_approvals: [] } };
+      if (method === "status") return { session: { session_id: "chat" }, state: "running" };
+      requests.push({ method, text: params?.text, delivery_id: params?.delivery_id, intent: options?.intent });
+      if (method === "steer") {
+        store.dispatch({ type: "user_message", text: params!.text!, mode: "steer", delivery_id: params!.delivery_id!, intent: options?.intent });
+        return { accepted: true };
+      }
+      if (method === "delivery_status") {
+        const id = params!.delivery_id!;
+        setTimeout(() => store.dispatch({ type: "delivery_status", delivery_id: id, method: "steer", status: "dropped", content: "", reason: row.reason }), 5);
+        return { status: "dropped" };
+      }
+      if (method === "send") {
+        const reply = row.send();
+        // fulcrum stamps the echo with the request's intent: the resend takes over the steer's row
+        store.dispatch({ type: "user_message", text: params!.text!, mode: "send", delivery_id: params!.delivery_id!, intent: options?.intent });
+        return reply;
+      }
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const harness = { active: null as unknown as ReturnType<typeof useActiveChat> };
+  const clock = new ManualClock();
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => harness.active.state.phase === "ready");
+  let failure: unknown = null;
+  await act(async () => { await harness.active.send("late", { steer: true }, () => {}).catch((caught) => { failure = caught; }); });
+  const [steer] = requests;
+  const sends = requests.filter((request) => request.method === "send");
+  expect(sends, "a steer its turn did not read was not sent again as a new message").toEqual(Array.from({ length: row.sends }, () => ({ method: "send", text: "late", delivery_id: expect.not.stringMatching(`^${steer!.delivery_id}$`), intent: steer!.delivery_id })));
+  expect(steer).toMatchObject({ method: "steer", intent: steer!.delivery_id });
+  expect(failure === null ? null : String((failure as Error).message)).toBe(row.error ?? null);
+  // one bubble: the delivered resend, or the dropped steer with the reason the composer row gives
+  const users = store.getState().outline.map(({ id }) => store.getItem(id)).filter((item) => item?.type === "user");
+  expect(users.map((item) => item?.type === "user" && item.event.type === "user_message" ? `${item.event.mode}:${item.event.delivery_status ?? "ok"}:${item.event.delivery_reason ?? ""}` : "")).toEqual([row.sends && !row.error ? "send:ok:" : `steer:dropped:${row.bubbleReason ?? (row.error === TURN_ENDED ? "turn_end" : row.reason)}`]);
+});
+const TURN_ENDED = "the turn ended before zeta read it.";

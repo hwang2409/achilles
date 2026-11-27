@@ -23,8 +23,9 @@ export class ChatBusyError extends Error {
 }
 
 /** zeta refuses `resume` and `new_session` (-32004, `data.reason: "resident_limit"`) while it holds all the open chats it allows. */
+export const TOO_MANY_CHATS = "zeta has too many open chats. a closed tab keeps its chat open for about 90 s, so wait a minute or close a chat tab, then try again.";
 export class TooManyChatsError extends Error {
-  constructor() { super("zeta has too many open chats. close a chat tab or wait, then try again."); }
+  constructor() { super(TOO_MANY_CHATS); }
 }
 export const isResidentLimit = (caught: unknown) => {
   const error = caught as { code?: unknown; data?: { reason?: unknown } | null } | null;
@@ -55,16 +56,12 @@ export function creationApprovalMode(serverMode: string | null | undefined, auto
 }
 
 export class SessionNotFoundError extends Error {}
-
-/** zeta refuses `resume` (-32014 `session_controlled`) while another controller, such as another tab, holds this chat. */
-export class ChatControlledError extends Error {
-  constructor(readonly sessionId: string) { super("this chat is open in another tab"); }
+/** zeta refuses `resume` (-32014, `data.code: "session_controlled"`) while another client, such as another tab, holds the chat. */
+export class SessionControlledError extends Error {
+  constructor(readonly sessionId: string) { super("this chat is open in another tab."); }
 }
-const isControlled = (caught: unknown, id: string) => {
-  const error = caught as { code?: unknown; data?: { code?: unknown; session_id?: unknown } | null } | null;
-  return error?.code === -32014 && error.data?.code === "session_controlled" && error.data.session_id === id;
-};
-// a reload can reach zeta before zeta has seen the old page's socket close; the chat is free a moment later
+// a reload can reach zeta before zeta has seen the old page's socket close; the chat is free a moment later, so retry
+// a refusal that names this chat
 const CONTROLLED_RETRIES = 3;
 const CONTROLLED_RETRY_MS = 500;
 
@@ -85,12 +82,12 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
       sessionCwd = typeof resumed.session?.cwd === "string" ? resumed.session.cwd : null;
       break;
     } catch (caught) {
-      const reason = (caught as { data?: { code?: string } }).data?.code;
+      const { code: reason, session_id: refusedId } = (caught as { data?: { code?: string; session_id?: string } }).data ?? {};
       if (reason === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
       if (reason === "session_owned") throw new Error(sessionOwned);
       if (isResidentLimit(caught)) throw new TooManyChatsError();
-      if (isControlled(caught, id)) {
-        if (++controlledRetries > CONTROLLED_RETRIES) throw new ChatControlledError(id);
+      if (reason === "session_controlled") {
+        if (refusedId !== id || ++controlledRetries > CONTROLLED_RETRIES) throw new SessionControlledError(id);
         await wait(CONTROLLED_RETRY_MS);
         if (!current()) throw aborted();
         continue;

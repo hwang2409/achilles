@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ZetaError, type ZetaDiscovery } from "@fulcrum/zeta";
-import { createConnection, FEATURES, isObserverPresentation, refusedReason, transitionRole, type ConnectionState } from "./connection";
+import { createConnection, FEATURES, isObserverPresentation, type ConnectionState } from "./connection";
 
 const discovery: ZetaDiscovery = { url: "ws://127.0.0.1:8765", controller_token: "c", observer_token: "o", origins: [] };
 
@@ -10,10 +10,6 @@ async function flush(times = 20) {
 
 test("negotiates tool approval origin without changing the wire data", () => {
   expect(FEATURES).toContain("tool_approval_origin");
-});
-
-test("asks zeta for multi-controller mode, so every tab can be a controller", () => {
-  expect(FEATURES).toContain("multi_controller");
 });
 
 test("observer presentation is server-derived, not a synonym for read-only", () => {
@@ -43,26 +39,7 @@ test("startup and offline failures never retain observer presentation", async ()
   rejected.stop();
 });
 
-const controllerRole = { role: "controller", reason: null } as const;
-const observerRole = { role: "observer", reason: null } as const;
-const refusedAt = new Date(2030, 0, 1, 10, 31).getTime();
-const refusedRole = { ...observerRole, reason: refusedReason(refusedAt) };
-const refused = /^at .{1,15} zeta had no free control slot: too many tabs control it, or another app does\. close one, then try again\.$/;
-test.each([
-  ["controller granted", controllerRole, ["controller_granted"], controllerRole],
-  ["controller busy probes observer", controllerRole, ["controller_busy"], observerRole],
-  ["observer accepted and reconnects as observer", controllerRole, ["controller_busy", "observer_granted", "retry"], observerRole],
-  ["previously accepted observer is busy", observerRole, ["observer_busy", "retry"], observerRole],
-  ["both busy retries as controller", controllerRole, ["controller_busy", "both_busy", "retry"], controllerRole],
-  ["refused takeover keeps observer and exposes reason", observerRole, ["takeover_refused"], refusedRole],
-  ["retry clears refusal without promoting observer", refusedRole, ["retry"], observerRole],
-  ["released controller slot grants takeover and clears reason", refusedRole, ["controller_granted"], controllerRole],
-  ["closed controller retries as controller", controllerRole, ["controller_closed", "retry"], controllerRole],
-] as const)("role transition: %s", (_name, initial, events, expected) => {
-  let state: Parameters<typeof transitionRole>[0] = initial;
-  for (const event of events) state = transitionRole(state, event, refusedAt);
-  expect(state).toEqual(expected);
-});
+const refused = /^zeta is still full at .{1,15}\.$/;
 
 describe("createConnection controller capacity vs version mismatch", () => {
   test("falls back to a live observer and remains live when take-control is still busy", async () => {
@@ -92,12 +69,17 @@ describe("createConnection controller capacity vs version mismatch", () => {
       expect(result).toMatch(refused);
       expect(connection.client).toBe(observer);
       expect(observerCloses).toBe(0);
+      // an observer reconnect tries controller first, and falls back again while zeta is still full
+      closeObserver();
+      connection.retryNow();
+      await flush();
+      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
       released = true;
       await connection.takeControl();
       expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
       expect(connection.client).toBe(controller);
       expect(observerCloses).toBe(1);
-      expect(roles).toEqual(["controller", "observer", "controller", "controller"]);
+      expect(roles).toEqual(["controller", "observer", "controller", "controller", "observer", "controller"]);
     } finally { connection.stop(); }
   });
 
@@ -135,7 +117,7 @@ describe("createConnection controller capacity vs version mismatch", () => {
       connect: async () => { throw new ZetaError("busy", -32001); },
     });
     await flush();
-    expect(connection.state.phase).toBe("observer_limit");
+    expect(connection.state.phase).toBe("controller_taken");
     connection.stop();
   });
 
@@ -225,7 +207,7 @@ describe("connection role and terminal matrix", () => {
     });
     try {
       await flush();
-      expect(connection.state.phase).toBe("observer_limit");
+      expect(connection.state.phase).toBe("controller_taken");
       expect(roles).toEqual(["controller", "observer"]);
       released = true;
       connection.retryNow();

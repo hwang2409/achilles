@@ -492,6 +492,8 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
   const wait = { timeout: 20_000 };
   try {
     await a.goto(origin);
+    // let tab a's default attach settle first: a click while it loads used to be dropped, leaving tab a on the other chat
+    await a.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait });
     const newChat = a.getByRole("button", { name: "new chat", exact: true });
     await newChat.and(a.locator(":enabled")).waitFor(wait);
     await newChat.click(wait);

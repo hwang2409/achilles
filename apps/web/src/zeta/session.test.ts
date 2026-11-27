@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, ChatBusyError, ChatControlledError, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError, TooManyChatsError } from "./session";
+import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, SessionControlledError, SessionNotFoundError, TooManyChatsError } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -81,7 +81,7 @@ describe("openHomeSession", () => {
 
   // -32004 has two meanings in multi-controller mode: this tab's own turn runs, or zeta holds all the chats it allows
   test.each([
-    ["resident_limit -> too many chats, not busy", { reason: "resident_limit" }, TooManyChatsError, "zeta has too many open chats. close a chat tab or wait, then try again.", ["resume"]],
+    ["resident_limit -> too many chats, not busy", { reason: "resident_limit" }, TooManyChatsError, "zeta has too many open chats. a closed tab keeps its chat open for about 90 s, so wait a minute or close a chat tab, then try again.", ["resume"]],
     ["no reason, this tab's turn runs -> busy", undefined, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
     ["another reason -> busy", { reason: "future_reason" }, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
   ] as const)("a -32004 resume refusal: %s", async (_name, data, kind, message, sent) => {
@@ -99,9 +99,9 @@ describe("openHomeSession", () => {
   });
 
   test.each([
-    ["held for good -> controlled elsewhere after 3 retries", 99, "existing", ChatControlledError, 4],
+    ["held for good -> controlled elsewhere after 3 retries", 99, "existing", SessionControlledError, 4],
     ["freed during the retries (reload race) -> resumes", 2, "existing", null, 3],
-    ["another session's refusal -> raw error, no retry", 99, "other", Error, 1],
+    ["a refusal that does not name this chat -> controlled elsewhere, no retry", 99, "other", SessionControlledError, 1],
   ] as const)("a -32014 session_controlled resume refusal: %s", async (_name, refusals, refusedId, kind, resumes) => {
     const methods: string[] = []; const waits: number[] = [];
     const client = { features: ["resume_attach"], request: async (method: string) => {
@@ -114,8 +114,7 @@ describe("openHomeSession", () => {
     const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow", () => true, async (ms) => { waits.push(ms); }).catch((error: unknown) => error);
     if (kind === null) expect(result).toMatchObject({ id: "existing", name: "existing" });
     else expect(result).toBeInstanceOf(kind);
-    if (kind === ChatControlledError) expect((result as ChatControlledError).sessionId).toBe("existing");
-    else expect(result).not.toBeInstanceOf(ChatControlledError);
+    if (kind) expect((result as SessionControlledError).sessionId).toBe("existing");
     expect(methods.filter((sent) => sent === "resume")).toHaveLength(resumes);
     expect(waits.reduce((total, ms) => total + ms, 0)).toBe(refusedId === "other" ? 0 : (resumes - 1) * 500);
   });

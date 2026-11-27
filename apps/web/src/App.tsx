@@ -31,6 +31,7 @@ import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyb
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
+import { TOO_MANY_CHATS } from "./zeta/session";
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -69,11 +70,12 @@ function ChatNotification({ id }: { id: string }) {
 
 const renderers: Renderers = { notification: ChatNotification, message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: CompactTool, error: ErrorRow };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
-// inside the reply that is still streaming. it shows here once delivery settles.
+// inside the reply that is still streaming. it shows here once delivery settles (a drop its turn did not read stays
+// hidden while it goes out again as a new message, which then takes over this row).
 function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
   const item = useItem(id);
   const event = item?.type === "user" && item.event.type === "user_message" ? item.event : undefined;
-  if (event?.mode === "steer" && event.delivery_id && !event.delivery_status && queued.has(event.delivery_id)) return null;
+  if (event?.mode === "steer" && event.delivery_id && queued.has(event.delivery_id)) return null;
   return <Fallback id={id} />;
 }
 
@@ -200,8 +202,7 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
-    // both the controller and the observer hello were refused: zeta's controller and observer slots are full, or a
-    // client in the other mode (legacy single controller) holds it. the page retries by itself with backoff.
+    // both the controller and the observer hello were refused: zeta has no free slot. the page retries by itself with backoff.
     case "controller_taken": return "zeta has no free slot for this tab: too many tabs or apps are connected. close one, and this page reconnects by itself.";
     default: return null;
   }
@@ -378,7 +379,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "Ask about this page" : "Message Zeta";
-  const composerProps: ComposerProps = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "Read-only" }
+  const composerProps: ComposerProps = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "read-only" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); }, placeholder);
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
@@ -446,7 +447,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
-      : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
+      : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p>{active.state.error === TOO_MANY_CHATS && <button className="primary" type="button" onClick={active.retryAttachment}>try again</button>}</div>
       : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
