@@ -50,8 +50,8 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
       if (!abort.signal.aborted) setReading(false);
     });
     return () => abort.abort();
-    // A control handoff replaces the socket without going offline. The owner refreshes after it writes.
-  }, [connected, supported, reads, retry]);
+    // a take control swaps the client: read again with the new authority, so an observer-era failure does not stay
+  }, [client, reads, retry]);
   useEffect(() => {
     const back = () => { focus.current = true; setPath(location.pathname); };
     window.addEventListener("popstate", back);

@@ -58,6 +58,9 @@
 .module-state p { max-width: 55ch; margin: 8px 0 0; color: var(--g1-muted); overflow-wrap: anywhere; }
 .module-state button { min-height: 44px; margin-top: 16px; padding: 0 12px; }
 .module-state[data-state="offline"] h2 { color: var(--g1-warn); }
+/* like the observer banner: a quiet note, not a failure */
+.module-state[data-state="observer"] h2 { font-size: inherit; font-weight: 400; color: var(--g1-muted); }
+.module-state[data-state="observer"] h2::first-letter { text-transform: none; }
 .module-state[data-state="failed"] h2 { color: var(--g1-danger); }
 .module-skeleton { margin-top: 16px; }
 .module-skeleton i { display: block; width: min(48ch, 100%); height: 10px; margin-top: 14px; background: var(--g1-surface); }

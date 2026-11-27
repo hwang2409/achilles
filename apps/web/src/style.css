@@ -68,10 +68,12 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .observer-banner strong { color: var(--fulcrum-accent); }
 .observer-banner span { color: var(--fulcrum-muted); text-wrap: pretty; }
 .observer-action { display: grid; justify-items: end; flex: none; }
-#take-control-feedback { flex-basis: 100%; }
+#take-control-feedback { display: block; margin-top: 2px; }
 #take-control-feedback:empty { position: absolute; }
 .observer-banner button { flex: 0 0 auto; min-height: 40px; padding: 0 12px; }
 .observer-banner button[aria-disabled="true"] { cursor: wait; opacity: .65; }
+/* an observer's create buttons look disabled; a click still tries to take control once */
+:root:has(.observer-banner) .module-frame :is([data-write-surface="mcp.add"], [data-write-surface="library.create"], [data-write-surface="library.edit"]) { opacity: .65; }
 fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .approval-control { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .approval-control button { min-height: 40px; padding: 0 12px; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }
@@ -137,7 +139,7 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .command button { color: var(--fulcrum-fg); }
 .command code { grid-column: 1 / -1; padding: 18px 12px; white-space: pre-wrap; word-break: break-all; }
 .connection-state > .primary { margin-top: 24px; padding: 12px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); }
-.full-state > .primary { min-height: 40px; }
+.full-state > .primary { justify-self: start; min-height: 40px; padding: 0 16px; }
 .full-state-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .full-state-actions > button { min-height: 40px; padding: 0 16px; }
 .kept-message { margin: 0; max-width: min(60ch, 100%); }

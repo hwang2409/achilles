@@ -18,7 +18,8 @@ type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route).
 // `slot`: like zeta, one controller at a time across every socket (a second controller hello gets -32001); `roles`
 // records each hello role.
-type Options = { path?: string; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
+// `freed`: set it to let later controller hellos of an "observer" app through (a slot frees up after load).
+type Options = { freed?: { current: boolean }; path?: string; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   options.roles?.splice(0);
@@ -58,7 +59,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
       const taken = options.slot && method === "hello" && params.role === "controller" && [...controllers].some((other) => other !== this);
       if (options.slot && method === "hello" && params.role === "controller" && !taken) controllers.add(this);
       const custom = taken ? { error: { code: -32001, message: "controller occupied" } } : options.rpc?.[method]?.(params, requests);
-      const response = method === "hello" && authority === "observer" && params.role === "controller"
+      const response = method === "hello" && authority === "observer" && params.role === "controller" && !options.freed?.current
         ? { error: { code: -32001, message: "controller occupied" } }
         : custom ?? { result: ({
           hello: { protocol_version: "1.2", capabilities: { features: params.features } },
@@ -965,6 +966,18 @@ test("a library take-control refusal still shows after the observer socket is re
     expect(await app.findByText(/^zeta is still full at .+\.$/, {}, { timeout: 3_000 })).toBeTruthy();
     expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
     expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
+  });
+});
+
+test("+ new skill on an observer tab takes control and opens the editor in one click", async () => {
+  const freed = { current: false };
+  await withApp("observer", { ...library(true), freed }, async (app) => {
+    await app.findByText("no skills found");
+    freed.current = true;
+    await click(select(app, tag("library.create")));
+    for (let turn = 0; turn < 20 && app.container.querySelector(".observer-banner"); turn++) await act(async () => {});
+    expect(app.container.querySelector(".observer-banner"), "take control did not succeed").toBeNull();
+    expect(app.container.querySelector(".library-editor"), "the editor did not open after take control").not.toBeNull();
   });
 });
 
