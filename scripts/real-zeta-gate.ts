@@ -2466,7 +2466,8 @@ with _database() as db:
   });
   if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
-  if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
+  if (await page.locator(".run-state, .page-chat-readouts").filter({ hasText: /offline/ }).count() !== 1)
+    throw new Error("dropped connection did not mark the chat offline");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-connection-lost-review-1440x900.png"), fullPage: true });
   await restartZeta("zeta reconnect after dropped connection");
   // automatic reconnect can clear the compact banner before the manual retry click.
