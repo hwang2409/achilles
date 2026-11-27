@@ -108,7 +108,7 @@ function usePageChatSheet() {
 }
 
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
-function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps & { hint?: string }; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const commandOpener = useRef<HTMLElement | null>(null);
   const commands = useComposerCommands(client, chat, canWrite);
@@ -406,8 +406,10 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "Ask about this page" : "Message Zeta";
   // canWrite here means only this chat is off: another tab holds it
-  const composerProps: ComposerProps = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "read-only" }
+  const composerProps: ComposerProps & { hint?: string } = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "read-only" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
+    // a swap is pending: typing stays (the draft is kept), send is off, and the running turn can still be stopped
+    : active.swapping && connected && client ? { state: "running", onSubmit: send, onStop: turn === "running" ? () => { if (ready) void client.request("abort", { session_id: ready.sessionId }); } : undefined, placeholder, hint: "opening chat… send waits until it opens" }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); }, placeholder);
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
   const hasComposer = observerBanner ? Boolean(activePage) : !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);

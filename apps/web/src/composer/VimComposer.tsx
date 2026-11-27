@@ -173,7 +173,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       <div className="vim-guidance">
         <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
         <p data-part="composer-status" data-tone={tone} title={model.error?.text}>
-          <ComposerHint id={`${id}-hint`} state={state} mode={mode} queues={queues} focused={focused} questionWaiting={questionWaiting} override={note || undefined} hidden={Boolean(message)} />
+          <ComposerHint id={`${id}-hint`} state={state} mode={mode} queues={queues} focused={focused} questionWaiting={questionWaiting} override={note || props.hint || undefined} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>{message}</span>
         </p>
       </div>

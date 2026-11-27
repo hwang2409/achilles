@@ -496,7 +496,10 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
     await a.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait });
     const newChat = a.getByRole("button", { name: "new chat", exact: true });
     await newChat.and(a.locator(":enabled")).waitFor(wait);
+    const before = await a.locator("[data-session-id]").first().getAttribute("data-session-id");
     await newChat.click(wait);
+    // the shown chat stays usable until the new chat lands: type once the new chat is on screen
+    await a.waitForFunction((old) => { const id = document.querySelector("[data-session-id]")?.getAttribute("data-session-id"); return Boolean(id) && id !== old; }, before, wait);
     await field(a).fill("first message in tab a", wait);
     await field(a).press("Enter", wait);
     await a.getByText("you said: first message in tab a", { exact: true }).waitFor(wait);

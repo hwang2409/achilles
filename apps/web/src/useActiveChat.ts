@@ -40,6 +40,8 @@ export type StopState = { sessionId: string; from: string | null } & ({ phase: "
 // the one swap attempt (select a chat, new chat, try again); kept: the chat shown when it began
 type Swap = { retry: "attach" | "new"; target: Chat | null; replace: boolean; kept: string | null };
 type Refusal = { kind: "busy"; sessionId: string | null } | { kind: "parked"; parked: string[] } | { kind: "resident" };
+// a send while a swap is pending stays in the draft: it was meant for the chat being opened, not the kept one
+export const SWAP_SEND_OFF = "opening chat… send it once the chat opens";
 const tooMany = (caught: unknown) => caught instanceof Error && caught.message === TOO_MANY_CHATS;
 const ATTACH_SLOW_MS = 15_000;
 type AttachmentClock = Pick<typeof globalThis, "setTimeout" | "clearTimeout">;
@@ -670,15 +672,19 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   // stay until zeta answers. A switch then takes the url (pushed once, so Back works); a refusal leaves the url and the
   // sidebar as they were and shows its notice above the kept chat.
   const swap = useRef<Swap | null>(null);
+  // a swap with a chat on screen is pending: that chat's composer takes typing but never sends (a send meant for the
+  // chat the user is opening must not reach the kept one); a refusal or a landing ends it
+  const [swapping, setSwapping] = useState(false);
+  const setSwap = useCallback((next: Swap | null) => { swap.current = next; setSwapping(Boolean(next?.kept)); }, []);
   const beginSwap = useCallback((token: number, attempt: Omit<Swap, "kept">, fallback: State) => {
-    swap.current = { ...attempt, kept: state.phase === "ready" ? state.sessionId : null };
+    setSwap({ ...attempt, kept: state.phase === "ready" ? state.sessionId : null });
     // a stop's repeated swap keeps its notice ("trying again…") until zeta answers
     if (stopRef.current?.phase !== "retrying") setBusy(null);
     applyActive(token, { kind: "state", update: (current) => current.phase === "ready" ? current : fallback });
-  }, [applyActive, state]);
+  }, [applyActive, setSwap, state]);
   const refused = useCallback(async (token: number, retry: BusyChat["retry"], refusal: Refusal) => {
     const attempt = swap.current?.retry === retry ? swap.current : null;
-    if (attempt) swap.current = null;
+    if (attempt) setSwap(null);
     if (refusal.kind === "busy") {
       const chat = refusal.sessionId ? await findChat(refusal.sessionId).catch(() => null) : null;
       if (!owner.current.current(token)) return;
@@ -698,7 +704,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     // the kept chat stays on screen; its lease went with the attempt (and a stop may have left zeta another chat
     // attached), so it is opened again: zeta takes back its own parked chat, never refused
     if (attempt?.kept) { setSelectedId(attempt.kept); setRouteRefresh((value) => value + 1); }
-  }, [applyActive, client, settleStop]);
+  }, [applyActive, client, setSwap, settleStop]);
 
   const applyPendingCreateMode = useCallback(async (ready: ReadyState, enabled: boolean) => {
     if (!client) throw new Error("zeta is not connected");
@@ -755,7 +761,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       // a switch landed: it takes the url now (a refused one never touched it)
       const attempt = swap.current;
       if (next.phase === "ready" && attempt?.retry === "attach" && attempt.target?.session_id === next.sessionId) {
-        swap.current = null;
+        setSwap(null);
         const url = routeWithChat(location.pathname, next.sessionId);
         if (attempt.replace) history.replaceState({}, "", url); else history.pushState({}, "", url);
       }
@@ -775,7 +781,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (tooMany(caught) && swap.current?.retry === "attach" && swap.current.kept) return void refused(token, "attach", { kind: "resident" });
       // the screen shows this attach's error: the url names its chat, so a reload opens the same one
       const attempt = swap.current;
-      swap.current = null;
+      setSwap(null);
       if (attempt?.retry === "attach" && attempt.target) {
         const url = routeWithChat(location.pathname, attempt.target.session_id);
         if (attempt.replace) history.replaceState({}, "", url); else history.pushState({}, "", url);
@@ -798,7 +804,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [applyActive, applyPendingCreateMode, canWrite, client, clock, connected, createPath, homeAlias, openFresh, publishReady, refused, routeRefresh, selectedId, stopRetryFailed]);
 
   useEffect(() => {
-    const pop = () => { swap.current = null; owner.current.clear(); applyActive(owner.current.token(), { kind: "state", update: { phase: "loading" } }); setSelectedId(selectedFromUrl()); setRouteRefresh((value) => value + 1); };
+    const pop = () => { setSwap(null); owner.current.clear(); applyActive(owner.current.token(), { kind: "state", update: { phase: "loading" } }); setSelectedId(selectedFromUrl()); setRouteRefresh((value) => value + 1); };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
   }, [applyActive]);
@@ -853,7 +859,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const kept = swap.current?.kept;
     try {
       const next = await attachPage(client, key, null, owner.current, creation.current, token, true, canWrite ? applyPendingCreateMode : undefined, (ready) => publishReady(ready, token, readAt, replace, focusClaim.owns(), "attached"), true, canWrite);
-      if (swap.current?.retry === "new" && next.phase === "ready") swap.current = null;
+      if (swap.current?.retry === "new" && next.phase === "ready") setSwap(null);
       // zeta refused the new chat: say why. with no chat shown, the new chat's box stays; text typed there was written
       // for a new chat, so it must never go to the running chat
       if (next.phase === "busy" && owner.current.current(token)) {
@@ -867,7 +873,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     } catch (caught) {
       if (!owner.current.current(token)) return;
       if (kept && tooMany(caught)) return void refused(token, "new", { kind: "resident" });
-      if (swap.current?.retry === "new") swap.current = null;
+      if (swap.current?.retry === "new") setSwap(null);
       stopRetryFailed(tooMany(caught));
       if (!creation.current.status(context.pageId).pending && applyActive(token, { kind: "state", update: { phase: "error", error: attachmentError(caught, "creation") } })) refusedCreate.current = replace;
     } finally {
@@ -1076,6 +1082,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const send = useCallback(async (text: string, intent: SendIntent, track: (id: string) => void) => {
     if (!canWrite) throw new Error("this tab is read-only; take control to make changes");
     if (!client || (state.phase !== "ready" && state.phase !== "empty")) throw new Error("zeta is not connected");
+    if (swap.current?.kept && state.phase === "ready" && state.sessionId === swap.current.kept) throw new Error(SWAP_SEND_OFF);
     await modeToggle.current.beforeSend();
     const token = owner.current.token();
     const steer = pageDeliverySteer(state.phase, intent);
@@ -1243,5 +1250,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [canWrite, state]);
 
   const approvalMode = "page" in state ? creationApprovalMode(state.page.approval_mode, autoApproveDefault) : null;
-  return { build: { approvalMode, draft: buildDraft, setDraft: setBuildDraft, pending: startingChat === "build", unavailable: startingChat !== null, error: buildError, locked: Boolean(buildTarget.current?.deliveryId), start: buildPage }, state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat: startingChat === "new" && state.phase !== "ready", startingChat: startingChat !== null, focusSessionId, retrySaving, discardCreation, retryAttachment, retryLimit, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat, stay, stop, stopAndRetry, retryStopped };
+  return { build: { approvalMode, draft: buildDraft, setDraft: setBuildDraft, pending: startingChat === "build", unavailable: startingChat !== null, error: buildError, locked: Boolean(buildTarget.current?.deliveryId), start: buildPage }, state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat: startingChat === "new" && state.phase !== "ready", swapping: swapping && state.phase === "ready" && state.sessionId === swap.current?.kept, startingChat: startingChat !== null, focusSessionId, retrySaving, discardCreation, retryAttachment, retryLimit, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat, stay, stop, stopAndRetry, retryStopped };
 }

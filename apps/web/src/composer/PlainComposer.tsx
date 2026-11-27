@@ -138,7 +138,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           data-tone={tone}
           title={model.error?.text}
         >
-          <ComposerHint id={`${id}-hint`} state={state} queues={queues} questionWaiting={questionWaiting} hidden={Boolean(message)} />
+          <ComposerHint id={`${id}-hint`} state={state} queues={queues} questionWaiting={questionWaiting} override={props.hint} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>

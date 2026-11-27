@@ -6,6 +6,7 @@ import { createRunStore } from "@fulcrum/core";
 import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
+import * as activeChat from "./useActiveChat";
 import { useActiveChat } from "./useActiveChat";
 import { TOO_MANY_CHATS } from "./zeta/session";
 import { parkedRows, takeParkedEvent } from "./zeta/parked";
@@ -1577,15 +1578,17 @@ test("the parked_limit notice and its stop take the oldest chat from status, not
 // sidebar as they were and puts its notice above the kept chat; "stop the oldest and switch" lands the swap; "stay"
 // keeps the chat. zeta: "chat" attached and running; a swap parks it, unless this tab keeps 3 (parked_limit) or zeta is
 // full (resident_limit); the oldest parked chat holds no work, so a stop frees its slot.
-type SwapRow = { entry: "select" | "new"; zeta: "parks" | "parked_limit" | "resident_limit"; then: "nothing" | "stop" | "stay" };
+// typed: the user types and sends while zeta has not answered yet
+type SwapRow = { entry: "select" | "new"; zeta: "parks" | "parked_limit" | "resident_limit"; then: "nothing" | "stop" | "stay"; typed?: true };
 const swapRows: SwapRow[] = (["select", "new"] as const).flatMap((entry) => [
   { entry, zeta: "parks" as const, then: "nothing" as const },
   { entry, zeta: "parked_limit" as const, then: "nothing" as const },
   { entry, zeta: "resident_limit" as const, then: "nothing" as const },
   { entry, zeta: "parked_limit" as const, then: "stop" as const },
   { entry, zeta: "parked_limit" as const, then: "stay" as const },
+  { entry, zeta: "parked_limit" as const, then: "nothing" as const, typed: true as const },
 ]);
-test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zeta $zeta, then $then", async (row) => {
+test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zeta $zeta, then $then (typed: $typed)", async (row) => {
   const location = { pathname: "/", search: "?chat=chat", hash: "", href: "http://achilles.test/?chat=chat", origin: "http://achilles.test", assign() {} };
   const go = (path: string) => { const url = new URL(path, location.href); Object.assign(location, { pathname: url.pathname, search: url.search, hash: url.hash, href: url.href }); };
   const pushes: string[] = [];
@@ -1612,10 +1615,14 @@ test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zet
   // a swap parks the attached chat (it runs), or closes it when a stop ended its work
   const swapTo = (id: string) => { if (zeta.attached !== zeta.stopped) zeta.parked = [...zeta.parked, zeta.attached]; zeta.attached = id; };
   const calls: string[] = [];
+  const answer = deferred<void>();
+  let held = false;
   const client = {
     features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "session_park"],
     request: async (method: string, params?: { session_id?: string }) => {
       calls.push(params?.session_id ? `${method} ${params.session_id}` : method);
+      // zeta answers the swap only after the user typed and sent
+      if (row.typed && (method === "new_session" || (method === "resume" && params?.session_id === "target"))) { held = true; await answer.promise; }
       if (method === "status") return { session: { session_id: zeta.attached }, state: "running", parked_sessions: zeta.parked.map((id) => ({ session_id: id, state: "running", pending_approvals: 0 })) };
       if (method === "resume") {
         const id = params!.session_id!;
@@ -1650,7 +1657,19 @@ test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zet
   shown.splice(0); pushes.splice(0);
 
   await act(async () => { if (row.entry === "select") active.selectChat(listed.find((entry) => entry.session_id === "target")!); else void active.newChat(); });
+  if (row.typed) {
+    for (let flush = 0; flush < 30 && !held; flush += 1) await act(async () => {});
+    calls.splice(0);
+    let refusedSend: unknown = null;
+    await act(async () => { await active.send("meant for the new chat", { steer: false }, () => {}).catch((caught) => { refusedSend = caught; }); });
+    expect(calls.filter((call) => call.startsWith("send") || call.startsWith("steer")), "a send typed during the swap reached the kept chat").toEqual([]);
+    expect((refusedSend as Error | null)?.message, "the send was not refused (its draft would be lost)").toBe(activeChat.SWAP_SEND_OFF);
+    expect(active.swapping, "the composer does not show send as off while a swap is pending").toBe(true);
+    await act(async () => { answer.resolve(); });
+  }
   await settle();
+  // the swap settled (here refused, or landed): send works again
+  expect(active.swapping).toBe(false);
   expect(creatingOverKept, "the kept chat was covered by \"creating chat…\" and locked while zeta answered").toBe(false);
   const landed = row.entry === "select" ? "target" : "fresh";
   if (row.zeta !== "parks") {
