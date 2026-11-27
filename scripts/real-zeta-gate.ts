@@ -2073,6 +2073,7 @@ with _database() as db:
     throw new Error(`390px page chat lost its mobile sheet geometry: ${JSON.stringify(shellGeometry)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-390x760.png"), fullPage: true });
   await page.getByRole("button", { name: "close page chat" }).click();
+  await gateWait.playwright(page.locator(".page-chat-backdrop"), "waitFor", { state: "detached" });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
