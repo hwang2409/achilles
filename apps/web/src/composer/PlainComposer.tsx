@@ -31,7 +31,6 @@ export function PlainComposer(props: ComposerAdapterProps) {
   } = props;
   const id = useId();
   const input = useRef<HTMLTextAreaElement>(null);
-  const group = useRef<HTMLDivElement>(null);
   const focusLost = useRef(false);
   const stopFocused = useRef(false);
   const { model, edit, submit, stop, retry, restore, cancel } = useComposerDelivery(props);
@@ -77,42 +76,18 @@ export function PlainComposer(props: ComposerAdapterProps) {
     if (!focusLost.current) return;
     focusLost.current = false;
     stopFocused.current = false;
-    restoreFocus(input.current, group.current);
+    restoreFocus(input.current);
   });
 
-  if (state === "read-only")
-    return (
-      <div
-        ref={group}
-        tabIndex={-1}
-        className={className}
-        data-part="composer"
-        data-write-surface={WRITE_SURFACE.composerSend}
-        data-state="read-only"
-        data-held={props.held || undefined}
-        role="group"
-        aria-label={label}
-      >
-        <div data-part="composer-field" data-value={model.draft}>
-          <textarea
-            ref={input}
-            rows={1}
-            value={model.draft}
-            placeholder={placeholder}
-            readOnly
-            aria-label={label}
-          />
-        </div>
-        {(props.controls || props.held) && <div data-part="composer-bar">{props.controls}{props.held && <><p data-part="composer-reason">{props.reason}</p><HeldSend /></>}</div>}
-      </div>
-    );
-
+  // one form in every state: a hold (read-only) and its end keep the same textarea, so focus and caret stay in it
+  const readOnly = state === "read-only";
   return (
     <form
       className={className}
       data-part="composer"
       data-write-surface={WRITE_SURFACE.composerSend}
       data-state={state}
+      data-held={props.held || undefined}
       data-error={model.error?.kind}
       data-pending={
         model.sending ? "submit" : model.stopping ? "stop" : undefined
@@ -122,7 +97,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       aria-busy={model.sending || model.stopping || undefined}
       onSubmit={onFormSubmit}
     >
-      <QueuedMessages model={model} onRetry={(id) => { retry(id); focusInput(); }} onRestore={(id) => { restore(id); focusInput(); }} onCancel={(id) => { cancel(id); focusInput(); }} />
+      {!readOnly && <QueuedMessages model={model} onRetry={(id) => { retry(id); focusInput(); }} onRestore={(id) => { restore(id); focusInput(); }} onCancel={(id) => { cancel(id); focusInput(); }} />}
       <div data-part="composer-field" data-value={model.draft}>
         <textarea
           ref={input}
@@ -130,12 +105,13 @@ export function PlainComposer(props: ComposerAdapterProps) {
           value={model.draft}
           placeholder={placeholder}
           aria-label={label}
-          aria-describedby={`${id}-hint ${id}-message`}
-          onChange={(event) => edit(event.target.value)}
-          onKeyDown={onKeyDown}
+          aria-describedby={readOnly ? undefined : `${id}-hint ${id}-message`}
+          readOnly={readOnly}
+          onChange={readOnly ? undefined : (event) => edit(event.target.value)}
+          onKeyDown={readOnly ? undefined : onKeyDown}
         />
       </div>
-      <div data-part="composer-bar">
+      {readOnly ? (props.controls || props.held) && <div data-part="composer-bar">{props.controls}{props.held && <><p data-part="composer-reason">{props.reason}</p><HeldSend /></>}</div> : <div data-part="composer-bar">
         {props.controls}
         <p
           data-part="composer-status"
@@ -173,8 +149,8 @@ export function PlainComposer(props: ComposerAdapterProps) {
         >
           {queues ? "queue" : steer ? "steer" : "send"}
         </button>
-      </div>
-    {props.commandOutput}
+      </div>}
+    {!readOnly && props.commandOutput}
     </form>
   );
 }

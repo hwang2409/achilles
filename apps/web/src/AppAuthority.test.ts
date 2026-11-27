@@ -1385,11 +1385,17 @@ test("a pending swap holds the kept chat's composer read-only and says so; a ref
     expect(composer.querySelector('[data-part="composer-reason"]')?.textContent, "no visible opening label").toBe("opening chat…");
     expect((composer.querySelector("textarea") as HTMLTextAreaElement).readOnly, "typing is accepted during the swap").toBe(true);
     expect(disabled(composer.querySelector<HTMLElement>('[data-part="composer-submit"]')!), "send does not show as off").toBe(true);
+    // the user goes on typing in the held composer (ux m-m: the hold's end replaced the field and dropped focus to <body>)
+    const heldField = composer.querySelector("textarea") as HTMLTextAreaElement;
+    heldField.focus();
+    heldField.setSelectionRange(2, 5);
     await act(async () => { answer({ error: { code: -32004, message: "parked limit", data: { reason: "parked_limit", parked: ["parked"] } } }); });
     await waitFor(() => select(app, ".limit-notice"), { timeout: 4000 });
     const field = select(app, '[data-part="composer"] textarea') as HTMLTextAreaElement;
     expect(app.container.querySelector('[data-part="composer"][data-held]'), "the composer stays held after the refusal").toBeNull();
     expect(field.readOnly).toBe(false);
     expect(field.value, "the draft was lost").toBe("my draft");
+    expect(document.activeElement === field, "focus left the composer when the hold ended").toBe(true);
+    expect([field.selectionStart, field.selectionEnd], "the caret moved").toEqual([2, 5]);
   });
 });
