@@ -943,7 +943,7 @@ const rows: Record<WriteSurfaceId, Row> = {
   } },
   "passive.first-message": { kind: "passive", options: { attached: true, chat: { ...chat, title: null, message_sent: false, titled_by_user: false } }, check: async (app, authority, writes, requests) => {
     await composer("send").check(app, authority, writes, requests);
-    if (authority === "controller") didWrite(writes, 'PATCH /api/chats/session {"first_message":"fixture prompt"');
+    if (authority === "controller") didWrite(writes, 'PATCH /api/chats/session {"message":true,"first_message":"fixture prompt"');
   } },
   "passive.title": { kind: "passive", options: { attached: true, chat: { ...chat, titled_by_user: false }, rpc: { resume: () => ({ result: { session: { name: "updated title" } } }) } }, check: async (_app, authority, writes) => {
     if (authority === "controller") didWrite(writes, 'PATCH /api/chats/session {"title":"updated title"');
