@@ -2010,6 +2010,7 @@ with _database() as db:
   await field.fill("observe version two");
   await field.press("Enter");
   await gateWait.playwright(page.getByText("v2 turn", { exact: true }), "waitFor", { timeout: 20000 });
+  await waitForIdleTurn(page, waitFor);
   const v2Control = JSON.parse(await Bun.file(control).text());
   const v2Schemas = v2Control.schemas ?? [];
   if (!v2Schemas.some((name: string) => name === "achilles__annotate_trace"))
