@@ -97,8 +97,8 @@ jobs:
           PY
       - name: eval setup accepts the baseline achilles revision
         run: |
-          git fetch --depth=1 origin 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
-          git worktree add --detach .cache/achilles-baseline 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
+          git fetch --depth=1 origin 4d29685b2f53ed666232be33eb5b08f564ae0ba8
+          git worktree add --detach .cache/achilles-baseline 4d29685b2f53ed666232be33eb5b08f564ae0ba8
           # earlier steps let the pinned zeta create ~/.zeta at its storage epoch; an older baseline zeta refuses a newer home
           ZETA_HOME="$RUNNER_TEMP/baseline-zeta-home" EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 ACHILLES_DIR="$PWD/.cache/achilles-baseline" BASE=none REPORT_DIR=.cache/eval-ci-baseline-setup bun scripts/eval.ts
       - run: |
