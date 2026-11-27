@@ -310,7 +310,7 @@ function ChatRow({ chat, build, parked, onScreen, current, active, index, query,
   // a chat this tab keeps running reads its live state, not the last one written
   const state = chat.purpose === "page_build" ? buildTone(build) : parked ? (parked.pending_approvals > 0 ? "approval" : "running") : chat.last_state;
   const shown = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
-  const label = parked && shown ? `${shown} · this tab` : shown;
+  const label = parked && shown ? `${shown} here` : shown;
   const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
   const meta = label && <span className="chat-row-meta" title={parked ? "running in this tab. closing this tab stops it after about 90 s" : undefined}>{label}</span>;
   if (rename.editing) {

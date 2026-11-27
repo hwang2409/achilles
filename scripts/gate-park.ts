@@ -48,7 +48,7 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
       ids.push((await shown())!);
       await tab.getByRole("button", { name: "stop the running turn" }).waitFor();
     }
-    for (const id of ids.slice(0, 3)) await waitFor(async () => await rowMeta(id) === "running · this tab", `parked row ${id} says running · this tab`);
+    for (const id of ids.slice(0, 3)) await waitFor(async () => await rowMeta(id) === "running here", `parked row ${id} says running here`);
     // a 4th park is refused: the notice names the 3 chats; stay keeps the shown chat
     await newChat.click();
     await notice.waitFor({ timeout: 30_000 });
@@ -74,7 +74,7 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
     if (resumeAt < 0 || abortAt < resumeAt || swapAt < abortAt) throw new Error(`stop-oldest frames out of order: resume ${resumeAt}, abort ${abortAt}, new_session ${swapAt}`);
     const abortReply = frames.slice(beforeStop).find((frame) => frame.dir === "received" && frame.id === stopFrames[abortAt]!.id);
     if (!abortReply || abortReply.error) throw new Error(`abort of the oldest parked chat failed: ${JSON.stringify(abortReply ?? null)}`);
-    await waitFor(async () => !(await rowMeta(ids[0]!))?.includes("this tab"), "the stopped chat's row is no longer parked");
+    await waitFor(async () => !(await rowMeta(ids[0]!))?.endsWith(" here"), "the stopped chat's row is no longer parked");
     // a reload takes the 3 parked chats back (oldest first, each with its page binding) before the shown chat opens
     const fifth = urlChat();
     if (!fifth || ids.includes(fifth)) throw new Error("the new chat is not named in the url");
@@ -87,7 +87,7 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
     if (JSON.stringify(order.slice(0, 4)) !== JSON.stringify(expected) || reload.slice(0, 3).some((frame) => !(frame.params?.mcp_bindings as unknown[] | undefined)?.length))
       throw new Error(`reload did not reclaim the parked chats first: ${JSON.stringify(order)}`);
     await waitFor(async () => JSON.stringify(lastParked(beforeReload)?.map((row) => row.session_id)) === JSON.stringify(ids.slice(1)), "status lists the reclaimed chats as parked");
-    for (const id of ids.slice(1)) await waitFor(async () => await rowMeta(id) === "running · this tab", `reclaimed row ${id} says running · this tab`);
+    for (const id of ids.slice(1)) await waitFor(async () => await rowMeta(id) === "running here", `reclaimed row ${id} says running here`);
     // another tab opens a parked chat: read-only, and the parked turn's new text streams there (zeta G9)
     await reader.goto(`${origin}/?chat=${ids[1]}`);
     await reader.getByText("this chat is open in another tab. you can read it here.", { exact: true }).waitFor();
@@ -95,8 +95,8 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
     await reader.getByText(/park finished/).waitFor({ timeout: 30_000 }).catch(() => {
       throw new Error("G9: a parked chat's live reply did not reach the other tab that reads it");
     });
-    // the turns end: zeta closes the parked chats and the rows drop "this tab"
-    for (const id of ids.slice(1)) await waitFor(async () => !(await rowMeta(id))?.includes("this tab"), `finished chat ${id} is no longer parked`);
+    // the turns end: zeta closes the parked chats and the rows drop "here"
+    for (const id of ids.slice(1)) await waitFor(async () => !(await rowMeta(id))?.endsWith(" here"), `finished chat ${id} is no longer parked`);
     if ((await tab.locator("body").innerText()).includes("parked_session_changed")) throw new Error("a parked_session_changed event reached the page");
     console.log("session_park limit: notice names 3 parked chats; stay; stop oldest = resume, abort, new_session; reload reclaims 3; reader tab streams a parked chat");
     return ids;
