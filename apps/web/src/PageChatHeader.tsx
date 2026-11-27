@@ -4,6 +4,7 @@ import { buildLabel, buildTone, type BuildRow } from "./create/buildActivity";
 import { restorableFocus } from "./keyboard";
 import { NavIcon } from "./surface/SurfaceNav";
 import { WRITE_SURFACE } from "./writeSurfaces";
+import { rowState } from "./zeta/rowState";
 import "./page-chat-header.css";
 
 export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, onSelect, newChat, newReason, close, closeRef }: {
@@ -99,9 +100,11 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
 function ChatChoice({ chat, current, onSelect }: { chat: Chat; current: boolean; onSelect: (chat: Chat) => void }) {
   const catalog = useContext(PageChatCatalog)!;
   const seen = useOnScreen(chat.purpose === "page_build" ? chat.session_id : undefined, catalog.onScreen);
+  const parked = catalog.parked?.find((row) => row.session_id === chat.session_id);
+  const state = rowState(chat.last_state, parked && { from: "parked", row: parked }).shown;
   return <button ref={seen} type="button" className="page-chat-choice" role="option" data-popup-row tabIndex={-1} aria-selected={current} onClick={() => onSelect(chat)}>
     <span className="page-chat-choice-title" title={titleOf(chat)}>{titleOf(chat)}</span>
-    {chat.purpose === "page_build" ? <BuildState build={catalog.builds.find((row) => row.chat.session_id === chat.session_id)} /> : <span className={`page-chat-status state-${chat.last_state ?? "idle"}`}>{chat.last_state === "approval" ? "needs you" : chat.last_state ?? "idle"}</span>}
+    {chat.purpose === "page_build" ? <BuildState build={catalog.builds.find((row) => row.chat.session_id === chat.session_id)} /> : <span className={`page-chat-status state-${state ?? "idle"}`}>{state === "approval" ? "needs you" : state ?? "idle"}</span>}
     <time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time>
   </button>;
 }

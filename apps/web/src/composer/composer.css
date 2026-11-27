@@ -105,3 +105,12 @@
   .main-pane [data-part="composer"] [data-part="composer-mode"] { height: 44px; min-height: 44px; }
   .main-pane [data-part="composer"] [data-part="composer-mode"]::after { display: none; }
 }
+/* held (a swap is pending): the field looks off, a small label beside send says why, and send shows as off. the look
+   comes 150 ms late (the hold itself is at once: these parts mount held), so a fast swap does not blink */
+.main-pane [data-part="composer"][data-held] [data-part="composer-field"] { opacity: .55; animation: composer-held-field 0s 150ms backwards; }
+.main-pane [data-part="composer"][data-held] [data-part="composer-bar"] [data-part="composer-reason"] { flex: none; min-height: 0; margin-inline-start: auto; padding: 0; background: none; animation: composer-held-reason 0s 150ms backwards; }
+.main-pane [data-part="composer"][data-held] [data-part="composer-reason"]::before { content: none; }
+.main-pane [data-part="composer"][data-held] [data-part="composer-submit"] { margin-inline-start: auto; border-color: var(--fulcrum-muted); background: transparent; color: var(--fulcrum-muted); opacity: .65; animation: composer-held-field 0s 150ms backwards; }
+.main-pane [data-part="composer"][data-held] [data-part="composer-reason"] + [data-part="composer-submit"] { margin-inline-start: 8px; }
+@keyframes composer-held-field { from { opacity: 1; } }
+@keyframes composer-held-reason { from { opacity: 0; } }

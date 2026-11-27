@@ -9,7 +9,9 @@ import { getSettings, SETTINGS_KEY, updateSettings } from "./settings";
 import { READ_ONLY_REASON, WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
 import { controlledRetry } from "./zeta/session";
 
-const { fireEvent, render } = await import("@testing-library/react");
+const { fireEvent, render, waitFor } = await import("@testing-library/react");
+// each test is a fresh tab: no chats held from an earlier test for the reload reclaim to take back
+beforeEach(() => { sessionStorage.clear(); });
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
@@ -639,7 +641,7 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
       expect(app.getAllByText(READ_ONLY_REASON).length).toBeGreaterThan(0);
       // the click on the unavailable control opens no review
       await click(control);
-      expect(document.querySelector(".confirmation-primary")).toBeNull();
+      expect(document.querySelector(".confirmation-primary") === null, "review opened").toBe(true);
       expect(writes.slice(written)).toEqual([]);
       return;
     }
@@ -715,17 +717,25 @@ const rows: Record<WriteSurfaceId, Row> = {
   } },
   "create.retry": creationAction("retry"),
   "create.discard": creationAction("discard"),
-  "busy.retry": { kind: "visible", absent: true, options: { rpc: { status: (_params, requests) => ({ result: requests.filter((request) => request === "status").length <= 2 ? { state: "running", session: { session_id: "other" } } : { state: "idle" } }) } }, check: async (app, authority, writes) => {
+  // this tab already keeps a chat running and zeta refuses to park one more: "stop ... and open new chat" stops it, then retries
+  "busy.retry": { kind: "visible", absent: true, options: { extraChat: { ...chat, session_id: "parked", title: "Parked chat" }, rpc: {
+    new_session: (_params, requests) => requests.includes("abort") ? undefined as never : { error: { code: -32004, message: "parked limit", data: { reason: "parked_limit", parked: ["parked"] } } },
+    // the stopped chat closed: it is no longer parked
+    status: (_params, requests) => ({ result: { session: { session_id: "session" }, state: "idle", parked_sessions: requests.includes("abort") ? [] : [{ session_id: "parked", state: "running", pending_approvals: 0 }] } }),
+  } }, check: async (app, authority, writes) => {
     await click(select(app, tag("shell.new-chat")));
-    const control = app.container.querySelector<HTMLElement>(tag("busy.retry"));
     if (authority === "observer") {
-      expect(Boolean(control)).toBe(false);
+      expect(Boolean(app.container.querySelector(tag("busy.retry")))).toBe(false);
       await keydown(select(app, '[data-part="composer"]'), "Enter");
     } else {
-      expect(Boolean(control) && !disabled(control!)).toBe(true);
+      const control = await waitFor(() => select(app, tag("busy.retry")), { timeout: 4000 });
+      expect(control.textContent).toBe('stop "Parked chat" and open new chat');
+      expect(disabled(control)).toBe(false);
       const before = writes.length;
-      await click(control!);
-      didWrite(writes.slice(before), "new_session");
+      await click(control);
+      await waitFor(() => didWrite(writes.slice(before), "new_session"));
+      // the stopped chat first (resume, abort), then the refused swap again; the new chat's own resume follows
+      expect(writes.slice(before).filter((write) => ["resume", "abort", "new_session"].includes(write)).slice(0, 3)).toEqual(["resume", "abort", "new_session"]);
     }
   } },
   "approval.approve": approval("approve"),
@@ -1252,16 +1262,16 @@ describe("controller, chat controlled elsewhere", () => {
 const realWait = controlledRetry.wait;
 beforeEach(() => { controlledRetry.wait = async () => {}; });
 afterEach(() => { controlledRetry.wait = realWait; });
-const controlledReason = "this chat is open in another tab. write there, or start a new chat here.";
-const notice = "this chat is open in another tab. you can read it here.";
+const controlledReason = "this chat is open or kept running in another tab. write there, or start a new chat here.";
+const notice = "this chat is open or kept running in another tab. you can read it here.";
 const refusal = { error: { code: -32014, message: "session is controlled by another client", data: { code: "session_controlled", session_id: "session" } } };
 const heldElsewhere = (extra: Options = {}): Options => ({ attached: true, ...extra, rpc: { ...extra.rpc, resume: () => refusal } });
 const pendingApproval = { joined: { messages: [userMessage], status: { state: "tool", session: { session_id: "session" }, pending_approvals: [{ request_id: "waiting", delegated: false, tool_call: { id: "tool", name: "fixture", arguments: {} } }] } } };
 const chatWrites = (writes: string[]) => writes.filter((write) => write !== "resume");
-const chatOff = (selector: string) => async (app: RenderResult, writes: string[]) => {
+const chatOff = (selector: string, reason = controlledReason) => async (app: RenderResult, writes: string[]) => {
   const control = select(app, selector);
   expect(disabled(control)).toBe(true);
-  expect(control.getAttribute("title") ?? document.getElementById(control.getAttribute("aria-describedby") ?? "")?.textContent ?? app.container.textContent).toContain(controlledReason);
+  expect(control.getAttribute("title") ?? document.getElementById(control.getAttribute("aria-describedby") ?? "")?.textContent ?? app.container.textContent).toContain(reason);
   await click(control);
   expect(chatWrites(writes)).toEqual([]);
 };
@@ -1269,11 +1279,11 @@ test.each([
   ["composer.send", heldElsewhere({ joined: { messages: [userMessage] } }), async (app: RenderResult, writes: string[]) => {
     expect(app.container.querySelector(`button${tag("composer.send")}`)).toBeNull();
     const field = select(app, '[data-part="composer"] textarea');
-    expect(field.getAttribute("placeholder")).toBe("read-only: this chat is open in another tab");
+    expect(field.getAttribute("placeholder")).toBe("read-only");
     await keydown(field, "Enter");
     expect(chatWrites(writes)).toEqual([]);
   }],
-  ["approval.approve", heldElsewhere(pendingApproval), chatOff('[data-part="approval"] button[data-action="approve"]')],
+  ["approval.approve", heldElsewhere(pendingApproval), chatOff('[data-part="approval"] button[data-action="approve"]', "approve it in the tab that has this chat.")],
   ["composer.auto-approve", heldElsewhere(), chatOff(tag("composer.auto-approve"))],
   ["composer.create-mode", heldElsewhere(), chatOff(tag("composer.create-mode"))],
   ["page.chat", heldElsewhere({ page: { layout: { blocks: [{ type: "list", title: "Books", collection: "books" }] } } }), async (app: RenderResult, writes: string[]) => {
@@ -1291,7 +1301,7 @@ test.each([
     const cancel = await app.findByRole("button", { name: "cancel run" });
     expect(disabled(cancel)).toBe(true);
     await click(cancel);
-    expect(document.querySelector(".confirmation-primary")).toBeNull();
+    expect(document.querySelector(".confirmation-primary") === null, "review opened").toBe(true);
     await change(await app.findByRole("textbox", { name: "message fixture-profile" }), "fixture follow-up");
     expect(disabled(select(app, tag("agents.send")))).toBe(true);
     expect(app.getAllByText(controlledReason).length).toBeGreaterThan(0);
@@ -1304,7 +1314,8 @@ test.each([
     await keydown(window, "F2");
     expect(app.container.querySelector(".chat-title-edit")).toBeNull();
     // the refusal is said inline, in the notice, not only in a tooltip
-    expect(app.getByText("rename this chat in the tab that has it open.")).toBeTruthy();
+    // StableText keeps every notice text as an aria-hidden copy: match only the shown one
+    expect(app.getByText("rename this chat in the tab that has it open.", { ignore: '[aria-hidden="true"]' })).toBeTruthy();
     expect(app.container.querySelector(`[data-chat-id="session"] ${tag("sidebar.rename")}`)).toBeNull();
     expect(chatWrites(writes)).toEqual([]);
   }],
@@ -1343,7 +1354,7 @@ test("try again shows it is trying, then says the chat is still held", async () 
     await click(pending);
     expect(writes.filter((write) => write === "resume")).toHaveLength(5);
     await act(async () => release());
-    await app.findByText("still open in another tab. you can read it here.", {}, { timeout: 3000 });
+    await app.findByText("still open or kept running in another tab. you can read it here.", { ignore: '[aria-hidden="true"]' }, { timeout: 3000 });
     expect(app.getByRole("button", { name: "try again" })).toBeTruthy();
     expect(writes.filter((write) => write === "resume")).toHaveLength(8);
   });
@@ -1357,4 +1368,28 @@ test("a default attach whose newest chat is held elsewhere opens a fresh chat wi
     expect(app.queryByText(notice)).toBeNull();
   });
 });
+});
+
+// ux M-A: while zeta answers a New chat, the kept chat's composer is held read-only with a visible "opening chat…" and
+// send shown off, so nothing typed is hidden or lost; refused, it is editable again with its draft
+test("a pending swap holds the kept chat's composer read-only and says so; a refusal gives it back with its draft", async () => {
+  let answer!: (value: object) => void;
+  const held = new Promise<object>((resolve) => { answer = resolve; });
+  await withApp("controller", { attached: true, extraChat: { ...chat, session_id: "parked", title: "Parked chat" }, rpc: {
+    new_session: () => held as never,
+    status: () => ({ result: { session: { session_id: "session" }, state: "idle", parked_sessions: [{ session_id: "parked", state: "running", pending_approvals: 0 }] } }),
+  } }, async (app) => {
+    await change(select(app, '[data-part="composer"] textarea'), "my draft");
+    await click(select(app, tag("shell.new-chat")));
+    const composer = await waitFor(() => select(app, '[data-part="composer"][data-held]'));
+    expect(composer.querySelector('[data-part="composer-reason"]')?.textContent, "no visible opening label").toBe("opening chat…");
+    expect((composer.querySelector("textarea") as HTMLTextAreaElement).readOnly, "typing is accepted during the swap").toBe(true);
+    expect(disabled(composer.querySelector<HTMLElement>('[data-part="composer-submit"]')!), "send does not show as off").toBe(true);
+    await act(async () => { answer({ error: { code: -32004, message: "parked limit", data: { reason: "parked_limit", parked: ["parked"] } } }); });
+    await waitFor(() => select(app, ".limit-notice"), { timeout: 4000 });
+    const field = select(app, '[data-part="composer"] textarea') as HTMLTextAreaElement;
+    expect(app.container.querySelector('[data-part="composer"][data-held]'), "the composer stays held after the refusal").toBeNull();
+    expect(field.readOnly).toBe(false);
+    expect(field.value, "the draft was lost").toBe("my draft");
+  });
 });

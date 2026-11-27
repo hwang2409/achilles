@@ -1,5 +1,6 @@
 import type { Transport, ZetaClient } from "@fulcrum/zeta";
 import { applyApprovalMode, pageBinding, rebindPage, runningSession } from "./session";
+import { takeParkedEvent } from "./parked";
 
 type RunEndListener = (sessionId: string) => void;
 const runEndListeners = new WeakMap<object, Set<RunEndListener>>();
@@ -15,7 +16,8 @@ function publishRunEnd(client: object, sessionId: string) {
 }
 
 /**
- * The transport for one client, with every `agent_end` frame reported to `onRunEnd` listeners. fulcrum's stores
+ * The transport for one client, with every `agent_end` frame reported to `onRunEnd` listeners and every
+ * `parked_session_changed` frame given to the parked owner instead of fulcrum. fulcrum's stores
  * notify once per animation frame, so a whole short turn can pass without a render ever seeing it run: turn ends are
  * read here, off the socket, never from render snapshots.
  */
@@ -26,6 +28,7 @@ export function teeRunEnds(transport: Transport, client: () => object | null): T
     close: () => transport.close(),
     ...(transport.onClose ? { onClose: (callback: (code?: number) => void) => transport.onClose!(callback) } : {}),
     onMessage: (callback) => transport.onMessage((text) => {
+      if (takeParkedEvent(client(), text)) return;
       callback(text);
       if (!text.includes('"agent_end"')) return;
       let frame: { method?: unknown; params?: { event?: unknown; session_id?: unknown } };

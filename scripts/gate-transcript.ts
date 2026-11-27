@@ -496,7 +496,10 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
     await a.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait });
     const newChat = a.getByRole("button", { name: "new chat", exact: true });
     await newChat.and(a.locator(":enabled")).waitFor(wait);
+    const shownBefore = await a.locator("[data-session-id]").first().getAttribute("data-session-id");
     await newChat.click(wait);
+    // the shown chat stays usable until the new chat lands: type once the new chat is on screen
+    await a.waitForFunction((old) => { const id = document.querySelector("[data-session-id]")?.getAttribute("data-session-id"); return Boolean(id) && id !== old; }, shownBefore, wait);
     await field(a).fill("first message in tab a", wait);
     await field(a).press("Enter", wait);
     await a.getByText("you said: first message in tab a", { exact: true }).waitFor(wait);
@@ -530,7 +533,7 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
   } finally { await Promise.all(tabs.map((tab) => tab.close())); }
 }
 
-const SAME_CHAT_NOTICE = "this chat is open in another tab. you can read it here.";
+const SAME_CHAT_NOTICE = "this chat is open or kept running in another tab. you can read it here.";
 
 /**
  * gate step 2: tab C opens the chat tab A controls. zeta refuses C's `resume` (session_controlled) and C reads the chat
@@ -560,7 +563,7 @@ async function gateSameChatReadOnly(browser: Browser, a: Page) {
     if (!await c.getByRole("button", { name: "new chat", exact: true }).first().isEnabled()) throw new Error("tab c's new chat is off");
     // try again while tab a still holds the chat: zeta refuses again, and the notice says the chat is still held
     await c.getByRole("button", { name: "try again", exact: true }).click(wait);
-    await c.getByText("still open in another tab. you can read it here.", { exact: true }).waitFor(wait);
+    await c.getByText("still open or kept running in another tab. you can read it here.", { exact: true }).waitFor(wait);
     if (await field.isEditable()) throw new Error("tab c's try again made the held chat writable");
     const composer = a.getByRole("textbox", { name: "message", exact: true });
     await composer.fill("after tab c joined", wait);

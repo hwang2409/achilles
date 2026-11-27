@@ -297,6 +297,10 @@ def validate_page_route(route: str) -> None:
     validate_schema(route, CREATE_PAGE_SCHEMA["properties"]["route"], "/route")
 
 
+class ChatChanged(Exception):
+    """A compare-and-set chat write found the row changed since the writer read it."""
+
+
 def now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -1153,7 +1157,15 @@ class PageStore:
             raise KeyError(session_id)
         return chat_row(row)
 
-    def update_chat(self, session_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    def update_chat(
+        self,
+        session_id: str,
+        changes: dict[str, Any],
+        expected: tuple[str | None, str] | None = None,
+    ) -> dict[str, Any]:
+        """Writes `changes`. `expected` (last_state, updated_at) makes it a compare-and-set:
+        a tab that does not hold the chat corrects a stale state only if the holder wrote
+        nothing since it read the row (ChatChanged otherwise)."""
         # a title-only write is an automatic name; it never replaces a title the user chose
         changes = dict(changes)
         sent = "first_message" in changes
@@ -1180,16 +1192,21 @@ class PageStore:
             assignments.append("message_sent=1")
         with self.transaction() as db:
             updated = db.execute(
-                f"UPDATE chat SET {','.join(assignments)} WHERE session_id=?",
+                f"UPDATE chat SET {','.join(assignments)} WHERE session_id=?"
+                + (" AND last_state IS ? AND updated_at=?" if expected else ""),
                 (
                     *changes.values(),
                     *([changes["last_state"]] if active else []),
                     now(),
                     *([first_title] if sent else []),
                     session_id,
+                    *(expected or ()),
                 ),
             ).rowcount
             if not updated:
+                found = db.execute("SELECT 1 FROM chat WHERE session_id=?", (session_id,))
+                if expected and found.fetchone():
+                    raise ChatChanged(session_id)
                 raise KeyError(session_id)
             if sent:
                 # older code reads only `title`, so an unnamed chat also takes the first title there

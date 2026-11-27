@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, ChatBusyError, controlledRetry, creationApprovalMode, loadSession, openHomeSession, SessionControlledError, SessionNotFoundError, TooManyChatsError } from "./session";
+import { applyApprovalMode, ChatBusyError, controlledRetry, creationApprovalMode, loadSession, openHomeSession, ParkedLimitError, parkedLimit, SessionControlledError, SessionNotFoundError, TOO_MANY_CHATS, TooManyChatsError } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -81,7 +81,8 @@ describe("openHomeSession", () => {
 
   // -32004 has two meanings in multi-controller mode: this tab's own turn runs, or zeta holds all the chats it allows
   test.each([
-    ["resident_limit -> too many chats, not busy", { reason: "resident_limit" }, TooManyChatsError, "zeta has too many open chats. a closed tab keeps its chat open for about 90 s, so wait a minute or close a chat tab, then try again.", ["resume"]],
+    ["resident_limit -> too many chats, not busy", { reason: "resident_limit" }, TooManyChatsError, TOO_MANY_CHATS, ["resume"]],
+    ["parked_limit -> this tab keeps too many chats running, not busy", { reason: "parked_limit", parked: ["a", "b", "c"] }, ParkedLimitError, "this tab already keeps the most chats running that zeta allows", ["resume"]],
     ["no reason, this tab's turn runs -> busy", undefined, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
     ["another reason -> busy", { reason: "future_reason" }, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
   ] as const)("a -32004 resume refusal: %s", async (_name, data, kind, message, sent) => {
@@ -96,6 +97,28 @@ describe("openHomeSession", () => {
     expect(caught).toBeInstanceOf(kind);
     expect((caught as Error).message).toBe(message);
     expect(methods).toEqual([...sent]);
+  });
+
+  // data.parked is outside input: keep only string ids, and a missing or malformed list is empty, not a crash
+  test.each([
+    ["the listed ids", ["a", "b", "c"], ["a", "b", "c"]],
+    ["non-string entries dropped", ["a", 7, null, { id: "b" }, "c"], ["a", "c"]],
+    ["not a list", "a,b,c", []],
+    ["missing", undefined, []],
+  ] as const)("a parked_limit refusal's chats: %s", async (_name, parked, expected) => {
+    const client = { features: ["resume_attach"], request: async (method: string) => {
+      if (method === "resume") throw Object.assign(new Error("refused"), { code: -32004, data: { reason: "parked_limit", ...(parked === undefined ? {} : { parked }) } });
+      throw new Error(`unexpected ${method}`);
+    } };
+    const caught = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow").catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(ParkedLimitError);
+    expect((caught as ParkedLimitError).parked).toEqual([...expected]);
+  });
+
+  test("parkedLimit ignores other refusals", () => {
+    expect(parkedLimit({ code: -32004, data: { reason: "resident_limit" } })).toBeNull();
+    expect(parkedLimit({ code: -32014, data: { reason: "parked_limit" } })).toBeNull();
+    expect(parkedLimit(null)).toBeNull();
   });
 
   test.each([

@@ -1,11 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { ZetaError } from "@fulcrum/zeta";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
 import * as queues from "./composer/chatQueues";
 import { draftStore } from "./draftStore";
 import { MAYBE_SENT } from "./composer/composer-machine";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistChatState, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
+import { writeRowState } from "./zeta/rowState";
+
+// each test is a fresh tab: App tests in the same process leave held chats for attachPage's reclaim
+beforeEach(() => { sessionStorage.clear(); });
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -270,7 +274,7 @@ describe("chat state persistence", () => {
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
     try {
-      const write = persistChatState("session", "idle", () => Promise.reject(new Error("achilles stopped")));
+      const write = writeRowState("session", "idle", {}, () => Promise.reject(new Error("achilles stopped")));
       await new Promise((resolve) => setImmediate(resolve));
       expect(unhandled).toBe(0);
       expect(await write).toBe(false);
