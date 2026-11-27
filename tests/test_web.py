@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import sqlite3
@@ -1501,6 +1502,27 @@ def test_fresh_home_is_plain_chat_and_a_codeless_page_keeps_the_notice(tmp_path:
     assert home["code"] is None
     assert home["unsupported_format"] is None
     assert old["unsupported_format"] == web.EMPTY_PAGE
+
+
+def test_a_codeless_page_in_a_migrated_home_names_the_layout_backup(tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    root.mkdir()
+    fixture = Path(__file__).parent / "fixtures/old-block-achilles.sqlite3"
+    shutil.copy(fixture, root / "achilles.sqlite3")
+    store = PageStore(root)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("old", "/old", "old block page", "2025-01-01", "2025-01-01"),
+        )
+
+    with TestClient(web.create_app()) as client:
+        old = client.get("/api/pages/old").json()
+
+    backup = root / "achilles.sqlite3.pre-block-model-v3.backup"
+    assert old["unsupported_format"] == (
+        f"{web.EMPTY_PAGE} the old layout of this page is saved in {backup}"
+    )
 
 
 def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) -> None:

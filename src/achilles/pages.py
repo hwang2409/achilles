@@ -349,9 +349,14 @@ class _RouteTaken(Exception):
     """A concurrent create_page committed the same route first."""
 
 
+def block_model_backup(database: Path) -> Path:
+    """Where the v1-v3 migration saves the database with the old block layouts."""
+    return Path(str(database) + ".pre-block-model-v3.backup")
+
+
 def _drop_block_model(db: sqlite3.Connection, database: Path) -> None:
     """Migrate v1-v3 to v4: back up the database once, then drop the block layout model."""
-    backup = Path(str(database) + ".pre-block-model-v3.backup")
+    backup = block_model_backup(database)
     if not backup.exists():
         # a unique name per process, so two first opens cannot collide on one temporary file
         fd, temporary = tempfile.mkstemp(
@@ -397,6 +402,7 @@ class PageStore:
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             directory.chmod(0o700)
         self._database = root / "achilles.sqlite3"
+        self.block_model_backup = block_model_backup(self._database)
         db = self._connect()
         version = db.execute("PRAGMA user_version").fetchone()[0]
         if version not in (0, 1, 2, 3, 4):

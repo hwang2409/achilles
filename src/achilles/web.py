@@ -193,6 +193,10 @@ def create_app() -> Starlette:
         if row is None:
             raise HTTPException(404, "page not found")
         code = await anyio.to_thread.run_sync(store.page_code, row["id"])
+        # create_page always builds code: only home or a migrated block page lacks it
+        unsupported = EMPTY_PAGE if not code and row["id"] != "home" else None
+        if unsupported and store.block_model_backup.exists():
+            unsupported += f" the old layout of this page is saved in {store.block_model_backup}"
         return JSONResponse(
             {
                 key: row[key]
@@ -210,8 +214,7 @@ def create_app() -> Starlette:
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
                 "create_mode": bool(row["create_mode"]),
                 "code": code,
-                # create_page always builds code: only home or a migrated block page lacks it
-                "unsupported_format": EMPTY_PAGE if not code and row["id"] != "home" else None,
+                "unsupported_format": unsupported,
             }
         )
 
