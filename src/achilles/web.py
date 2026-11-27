@@ -294,7 +294,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
 
     async def runtime_error(request):
         page_id = await require_page_bearer(request)
-        body = await request.json()
+        body = await json_object(request)
         await anyio.to_thread.run_sync(
             store.set_runtime_error,
             page_id,
@@ -315,7 +315,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def session(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
-        body = await request.json()
+        body = await json_object(request)
         expected, session_id = body.get("expected_session_id"), body.get("session_id")
         if expected is not None and not isinstance(expected, str):
             raise HTTPException(400, "invalid expected session")
@@ -383,8 +383,8 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def register_chat(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
-        body = await request.json()
-        session_id = body.get("session_id") if isinstance(body, dict) else None
+        body = await json_object(request)
+        session_id = body.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             raise HTTPException(400, "session_id must be a non-empty string")
         purpose = body.get("purpose", "chat")
@@ -403,7 +403,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def patch_chat(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
-        body = _validated_chat_changes(await request.json())
+        body = _validated_chat_changes(await json_object(request))
         try:
             row = await anyio.to_thread.run_sync(
                 store.update_chat, request.path_params["session_id"], body

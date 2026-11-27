@@ -859,6 +859,22 @@ def test_chat_routes_require_same_origin() -> None:
     )
 
 
+def test_json_routes_reject_a_body_that_is_not_a_json_object(tmp_path) -> None:
+    token = PageStore(tmp_path / "achilles").ensure_credential("home")
+    client = TestClient(web.create_app(), client=("127.0.0.1", 1234), raise_server_exceptions=False)
+    headers = {"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"}
+    bearer = {**headers, "authorization": f"Bearer {token}"}
+    for method, path, sent in (
+        ("POST", "/api/pages/home/runtime-error", bearer),
+        ("PUT", "/api/pages/home/session", headers),
+        ("POST", "/api/pages/home/chats", headers),
+        ("PATCH", "/api/chats/session", headers),
+    ):
+        for body in (b"{not json", b"[1]"):
+            response = client.request(method, path, headers=sent, content=body)
+            assert response.status_code == 400, (path, body, response.status_code)
+
+
 def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
     store = PageStore(tmp_path / "achilles")
     store.set_create_mode("home", True)
@@ -1599,8 +1615,11 @@ def test_render_page_runs_two_at_once_and_a_third_is_busy(monkeypatch, tmp_path:
         finally:
             release.set()
         done = [future.result(10) for future in running]
+        # both slots are free again once the renders end
+        after = third("tools/call", call)
     assert busy["isError"] and "busy" in busy["content"][0]["text"], busy
     assert [result.get("isError") for result in done] == [False, False]
+    assert not after.get("isError"), after
 
 
 @pytest.mark.parametrize(

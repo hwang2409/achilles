@@ -83,7 +83,7 @@ try {
   if (timedOut) {
     result.error = `the page did not finish rendering within ${input.timeoutMs / 1000} s`;
     // a polling page never goes network-idle; if the renderer still answers, show what it has
-    await screenshot(2000).then(() => { result.note = "page never went network-idle; screenshot taken at the deadline"; }, () => {});
+    await screenshot(2000).then(() => { if (result.screenshot) result.note = "page never went network-idle; screenshot taken at the deadline"; }, () => {});
   }
   const state = await Promise.race([page.evaluate(() => (window as any).__render).catch(() => null), new Promise((resolve) => setTimeout(resolve, 1000, null))]) as { calls: string[]; rejections: string[] } | null;
   const calls = bounded(), rejections = bounded();
@@ -93,5 +93,6 @@ try {
 } finally {
   await browser.close(); // closing the browser process also ends a hung renderer
 }
-process.stdout.write(JSON.stringify(result));
+// exit drops a pipe write that has not flushed, so wait for it
+await new Promise((resolve) => process.stdout.write(JSON.stringify(result), resolve));
 process.exit(0);
