@@ -1,29 +1,27 @@
 {
   "good": {
     "pages": [
-      {"id": "home", "alias": "home"},
-      {"id": "smoke", "alias": "smoke", "route": "/eval-smoke"}
+      {"id": "home", "alias": "home"}
     ],
     "results": [
       {
         "page_id": "home",
-        "tool": "achilles__create_page",
+        "tool": "achilles__inspect_page",
         "success": true,
-        "data": {"page_id": "smoke", "route": "/eval-smoke"}
+        "data": {"route": "/", "title": "home"}
       }
     ]
   },
   "bad": {
     "pages": [
-      {"id": "home", "alias": "home"},
-      {"id": "smoke", "alias": "smoke", "route": "/wrong"}
+      {"id": "home", "alias": "home"}
     ],
     "results": [
       {
         "page_id": "home",
-        "tool": "achilles__create_page",
-        "success": true,
-        "data": {"page_id": "smoke", "route": "/eval-smoke"}
+        "tool": "achilles__inspect_page",
+        "success": false,
+        "data": {}
       }
     ]
   }

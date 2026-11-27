@@ -521,6 +521,7 @@ function scriptedProvider() {
       if (turn === 1) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "reconnect note" } } }];
       else if (prompt.includes("after reconnect") && turn === 3) toolCalls = [{ function: { name: "achilles__list_notes", arguments: {} } }];
     }
+    else if (prompt.includes("inspect this page") && turn === 1) toolCalls = [{ function: { name: "achilles__inspect_page", arguments: {} } }];
     else if (prompt.includes("/eval-smoke") && turn === 1) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: "export default function Page(){return <main>smoke</main>}", dependencies: {} } } } }];
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
