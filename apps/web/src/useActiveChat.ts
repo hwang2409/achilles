@@ -409,7 +409,7 @@ export async function deliverChatMessage(
   steer: boolean,
   track: (id: string) => void,
   dropReason: (deliveryId: string) => Promise<string | undefined>,
-  // zeta accepted the message (a steer: before it is delivered)
+  // zeta keeps the message: a send accepted, a steer delivered
   onAccepted: () => void = () => {},
 ): Promise<"send" | "steer"> {
   // the delivery id is the message's intent: a resend with a fresh id takes over its row instead of adding one
@@ -510,8 +510,8 @@ async function deliverOnce(
     used = steer ? "send" : "steer";
     accepted(await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId }, { intent }));
   }
-  onAccepted();
   if (used === "steer") await confirmSteerDelivery(client, deliveryId);
+  onAccepted();
   return used;
 }
 
@@ -1057,7 +1057,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const sendReady = useCallback(async (client: ZetaClient, target: ReadyState, token: number, text: string, deliveryId: string, steer: boolean, track: (id: string) => void) => {
     requireCurrent(owner.current, token);
     // not gated on the owner token: a chat switch mid-send must still record the send. each user send (a message or a
-    // steer) moves the chat to the top of Recent once zeta accepts it (a steer: before it is delivered); the first one
+    // steer) moves the chat to the top of Recent once zeta keeps it (a send accepted, a steer delivered); the first one
     // also marks it sent and keeps its title
     let recorded = false;
     const record = () => {

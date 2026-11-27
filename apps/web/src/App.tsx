@@ -595,6 +595,10 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
   </>;
 }
 
+// user-perceived characters: an emoji sequence (a family, a flag) is one, so a cut never splits it
+const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+const graphemes = (text: string) => segmenter ? Array.from(segmenter.segment(text), (part) => part.segment) : Array.from(text);
+
 // zeta refused a swap: this tab keeps 3 chats running (parked_limit), or zeta is full (resident_limit). name the chats
 // that hold the slots, and offer to stop the oldest (zeta's status order) and try the swap again, or to stay. the notice
 // is a choice, not an error; focus moves into it, so the keyboard reaches its buttons next. it stays while a stop and its
@@ -616,14 +620,14 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   // the time is the same too, so each name means one chat
   const shown = [...parked.map((entry) => entry.chat), busy?.target ?? null, stop ? chatOf(stop.sessionId) : null, shownChat].filter((chat): chat is Chat => chat !== null);
   const timeOf = (chat: Chat) => new Date(chat.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase();
-  // [the quoted title, the suffix that tells twins apart ("" without twins)]
-  const partsOf = (chat: Chat | null): [string, string] => {
+  // [the quoted title, the suffix that tells twins apart ("" without twins)]; `clip` shortens the title inside the quotes
+  const partsOf = (chat: Chat | null, clip = (title: string) => title): [string, string] => {
     if (!chat) return ["a chat", ""];
     const title = titleOf(chat);
     const twins = shown.filter((other) => other.session_id !== chat.session_id && titleOf(other) === title);
-    if (twins.length === 0) return [`"${title}"`, ""];
+    if (twins.length === 0) return [`"${clip(title)}"`, ""];
     const time = timeOf(chat);
-    return [`"${title}"`, ` (${time}${twins.some((other) => timeOf(other) === time) ? ` · ${chat.session_id.slice(0, 4)}` : ""})`];
+    return [`"${clip(title)}"`, ` (${time}${twins.some((other) => timeOf(other) === time) ? ` · ${chat.session_id.slice(0, 4)}` : ""})`];
   };
   const nameOf = (chat: Chat | null) => partsOf(chat).join("");
   const name = (sessionId: string) => nameOf(chatOf(sessionId));
@@ -637,8 +641,8 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   const oldest = parked.find((entry) => !entry.finishing);
   // only the title shortens, as text (a clipped box keeps blank space after its ellipsis): the suffix that tells twins
   // apart stays whole, and the verb stays visible
-  const clipped = (title: string) => { const chars = Array.from(title); return chars.length > 40 ? `${chars.slice(0, 39).join("").trimEnd()}…` : title; };
-  const oldestName = partsOf(oldest ? chatOf(oldest.sessionId) : null);
+  const clipped = (title: string) => { const chars = graphemes(title); return chars.length > 40 ? `${chars.slice(0, 39).join("").trimEnd()}…` : title; };
+  const oldestName = partsOf(oldest ? chatOf(oldest.sessionId) : null, clipped);
   const stuck = stop?.phase === "still_stopping";
   // one line for the whole run, the stop and the repeated swap, until zeta answers
   const running = stop?.phase === "stopping" || stop?.phase === "retrying";
@@ -659,7 +663,7 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
       {running ? <button type="button" className="ui-button" disabled>stopping…</button>
         : stuck ? <button type="button" className="ui-button" onClick={() => onRetryStopped()}>try again</button>
         : <>{onRetry && <button type="button" className="ui-button" onClick={onRetry}>try again</button>}
-          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop {clipped(oldestName[0])}{oldestName[1]} and {verb}</button>}</>}
+          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop {oldestName.join("")} and {verb}</button>}</>}
       <button type="button" className="ui-button" onClick={onStay}>stay</button>
     </span>
   </div>;
