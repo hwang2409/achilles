@@ -2381,6 +2381,12 @@ with _database() as db:
   console.log("reload in a woken turn's setup asserted: the page attached, the turn ran a page tool, and ask mode applied after the turn ended");
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const settingsBackdrop = page.locator(".page-chat-backdrop");
+  if (await settingsBackdrop.isVisible()) {
+    await settingsBackdrop.click();
+    await gateWait.playwright(settingsBackdrop, "waitFor", { state: "detached" });
+  }
   await gateSettings(page, origin, gateWait);
   await gateCreationApprovalDefaults(page, requests, awaitApprovalMode, gateWait);
 
