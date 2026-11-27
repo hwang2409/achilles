@@ -7,7 +7,14 @@ from typing import Any
 import anyio
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
-from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool, ToolAnnotations
+from mcp.types import (
+    CallToolResult,
+    ImageContent,
+    ListToolsResult,
+    TextContent,
+    Tool,
+    ToolAnnotations,
+)
 
 from .pages import (
     CREATE_PAGE_SCHEMA,
@@ -19,6 +26,7 @@ from .pages import (
     edits_own_page,
 )
 from .records import call_record, list_input_schema
+from .render_page import RENDER_PAGE_SCHEMA, RenderError, render_page
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
 
@@ -57,6 +65,7 @@ PAGE_RECORDS_API = (
     "update(collection, record_id, fields) merges fields into the record and returns it; "
     "delete(collection, record_id) removes it. A failed call rejects with {detail}. "
 )
+RENDER_AFTER_BUILD = "After a visual change, call render_page to see the result. "
 
 INSPECT_PAGE_SCHEMA = {
     "type": "object",
@@ -191,7 +200,9 @@ def build_mcp(store: PageStore):
             Tool(
                 name="write_page",
                 description="write and compile React/TypeScript that mounts into #root; writes are immediate and audited. "  # noqa: E501
-                "For a small change to existing code, use edit_page instead. " + PAGE_RECORDS_API,
+                "For a small change to existing code, use edit_page instead. "
+                + RENDER_AFTER_BUILD
+                + PAGE_RECORDS_API,
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -224,9 +235,25 @@ def build_mcp(store: PageStore):
                     "resending the whole file. Each old_string must occur exactly once; edits "
                     "apply in order. Pass the revision read_page_file returned as "
                     "expected_revision. The result compiles like write_page; if an edit does "
-                    "not match, nothing changes."
+                    "not match, nothing changes. " + RENDER_AFTER_BUILD
                 ),
                 inputSchema=EDIT_PAGE_SCHEMA,
+            ),
+            Tool(
+                name="render_page",
+                description=(
+                    "open this page's compiled code in headless chromium at 1440 x 900 and "
+                    "return a screenshot plus the visible text, console errors, page errors, "
+                    "failed requests, and bridge rejections. The page reads its real records; "
+                    "writes are blocked during the render, so nothing is saved."
+                    + (
+                        " In create mode, pass route or page_id to render a page this chat created."
+                        if page["create_mode"]
+                        else ""
+                    )
+                ),
+                inputSchema=RENDER_PAGE_SCHEMA,
+                annotations=ToolAnnotations(readOnlyHint=True),
             ),
         ]
         tools: list[Tool] = [
@@ -271,6 +298,7 @@ def build_mcp(store: PageStore):
                         description=(
                             "create and compile a React page; available only in create mode. "
                             "Provide source that mounts into #root and its dependencies, or omit package for a minimal React shell. "  # noqa: E501
+                            + RENDER_AFTER_BUILD
                             + PAGE_RECORDS_API
                             + _FIELD_GUIDANCE
                         ),
@@ -357,6 +385,47 @@ def build_mcp(store: PageStore):
             return _write_error(exc) if exc.path == "/source" else _safe_error(exc)
         return _text(result)
 
+    async def render(context, page, args) -> CallToolResult:
+        try:
+            validate_schema(args, RENDER_PAGE_SCHEMA)
+            if "route" in args and "page_id" in args:
+                raise ValidationError("", "one selector", "invalid_input")
+        except ValidationError as exc:
+            return _safe_error(exc)
+        target = page
+        if "route" in args or "page_id" in args:
+            target = await anyio.to_thread.run_sync(
+                store.page, args.get("route", args.get("page_id"))
+            )
+            # another page needs create mode and must be one this chat's page created
+            if target is None or (
+                target["id"] != page["id"]
+                and not (page["create_mode"] and target["created_by_page_id"] == page["id"])
+            ):
+                return _inspect_error()
+        if not await anyio.to_thread.run_sync(store.page_code, target["id"]):
+            return _safe_error(ValidationError("", "a compiled page", "no_code"))
+        credential = (
+            _token(context)
+            if target["id"] == page["id"]
+            else await anyio.to_thread.run_sync(store.ensure_credential, target["id"])
+        )
+        host, port = context.request.scope["server"]
+        host = f"[{host}]" if ":" in host else host
+        try:
+            result = await anyio.to_thread.run_sync(
+                render_page, f"http://{host}:{port}", target["id"], credential
+            )
+        except RenderError as exc:
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
+        screenshot = result.pop("screenshot", None)
+        content: list[TextContent | ImageContent] = [
+            TextContent(type="text", text=json.dumps(result, sort_keys=True))
+        ]
+        if screenshot:
+            content.insert(0, ImageContent(type="image", data=screenshot, mimeType="image/jpeg"))
+        return CallToolResult(isError=not result.get("ready"), content=content)
+
     async def inspect_page(page, args) -> CallToolResult:
         try:
             validate_schema(args, INSPECT_PAGE_SCHEMA)
@@ -414,6 +483,13 @@ def build_mcp(store: PageStore):
                     content=[TextContent(type="text", text="forbidden: create mode is off")],
                 )
             return await page_editors[params.name](page, args)
+        if params.name == "render_page":
+            if not edits_own_page(page):
+                return CallToolResult(
+                    isError=True,
+                    content=[TextContent(type="text", text="forbidden: create mode is off")],
+                )
+            return await render(context, page, args)
         if params.name == "inspect_page":
             return await inspect_page(page, args)
         if params.name in BUILTIN_TOOL_NAMES:
