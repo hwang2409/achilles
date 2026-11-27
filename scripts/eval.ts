@@ -54,7 +54,14 @@ async function collectSensitiveFiles(root: string, hidden: string[]) {
   try { const row = JSON.parse(await readFile(join(root, "zeta-home/run/serve.ws.json"), "utf8")); for (const key of ["token", "controller_token", "observer_token"]) if (typeof row[key] === "string") hidden.push(row[key], `zeta.bearer.${row[key]}`); } catch {}
 }
 async function sanitizeAndScanRoot(root: string, hidden: string[]) {
-  await collectSensitiveFiles(root, hidden); await rm(join(root, "achilles-home/credentials"), { recursive: true, force: true }); await rm(join(root, "zeta-home/run"), { recursive: true, force: true }); await scanArtifactTree(root, hidden);
+  await collectSensitiveFiles(root, hidden);
+  await Promise.all([
+    rm(join(root, "achilles-home/credentials"), { recursive: true, force: true }),
+    rm(join(root, "achilles-home/build-cache"), { recursive: true, force: true }),
+    rm(join(root, "achilles-home/package-cache"), { recursive: true, force: true }),
+    rm(join(root, "zeta-home/run"), { recursive: true, force: true }),
+  ]);
+  await scanArtifactTree(root, hidden);
 }
 export async function loadTask(id: string, dir = new URL("../evals/tasks/", import.meta.url).pathname) {
   const task = validateTask(JSON.parse(await readFile(join(dir, `${id}.json`), "utf8")));
