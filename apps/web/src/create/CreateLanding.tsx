@@ -18,7 +18,7 @@ const starters = [
   "a weekly habit tracker",
 ];
 
-// the login command when zeta has no usable account for its default provider, else null. a failed or unsupported read
+// the login command when zeta's default provider is claude or codex and has no usable account, else null. a failed or unsupported read
 // shows nothing: the build then reports its own error. shortcut: an API-key provider has no account and reads as missing.
 function useMissingLogin(client: ZetaClient | null) {
   const [missing, setMissing] = useState<string | null>(null);
@@ -28,8 +28,9 @@ function useMissingLogin(client: ZetaClient | null) {
     Promise.all([client.request("state_settings", { collection: "mcp", limit: 1 }), readAccounts(client)]).then(([settings, { accounts }]) => {
       const provider = parseDefaults(settings)?.provider;
       const login = provider === "codex" ? "codex" : provider === "claude" ? "anthropic" : null;
-      const ready = accounts.some((row) => row.available && (!login || row.account.startsWith(`${login}:`)));
-      if (live) setMissing(ready ? null : login ? `zeta login ${login}` : "zeta login");
+      // other providers (a test or local model) need no account login
+      const ready = !login || accounts.some((row) => row.available && row.account.startsWith(`${login}:`));
+      if (live) setMissing(ready ? null : `zeta login ${login}`);
     }, () => {});
     return () => { live = false; };
   }, [client]);
