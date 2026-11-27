@@ -801,7 +801,7 @@ with _database() as db:
       } else {
         await page.setViewportSize({ width, height: desktopHeight });
       }
-      await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
+      await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-frame")?.scrollTo(0, 0); });
       if (assertFrame) await assertFrame(`${width}px`);
       const captureName = state === "page-chat-closed" && width === 390
           ? "page-chat-closed-390x844.png"
@@ -1642,7 +1642,7 @@ with _database() as db:
       return;
     }
     const dock = await page.locator(".page-view.docked").evaluate((grid) => {
-      const pane = grid.querySelector<HTMLElement>(":scope > .page-content")!;
+      const pane = grid.querySelector<HTMLElement>(":scope > .page-frame")!;
       const rail = grid.querySelector<HTMLElement>(":scope > .page-chat")!;
       return {
         tracks: getComputedStyle(grid).gridTemplateColumns,
