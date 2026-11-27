@@ -13,7 +13,7 @@ import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type Ch
 import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
-export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> }; code?: { version: number; digest: string } | null };
+export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; code?: { version: number; digest: string } | null; unsupported_format?: string | null };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
 // newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
 type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
@@ -934,8 +934,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [applyActive, canWrite, state]);
 
   const refreshPage = useCallback(async () => {
-    // Runs for a page with no chat started yet (phase "empty") as well as a ready chat, so a
-    // form write refreshes computed layout values (count metrics) even before the first message.
+    // Runs for a page with no chat started yet (phase "empty") as well as a ready chat.
     if (state.phase !== "ready" && state.phase !== "empty") return;
     const current = state; const token = owner.current.token();
     try {

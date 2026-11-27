@@ -22,9 +22,6 @@ from zeta.storage_format import advance
 
 inspect_turn_release = asyncio.Event()
 page_open_turn_release = asyncio.Event()
-METRIC_BOUNDARY_MATRIX = json.loads(
-    (Path(__file__).parent.parent / "apps/web/src/metric-boundary-matrix.json").read_text()
-)
 
 
 class BarrierBackend(FakeBackend):
@@ -309,17 +306,6 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                             "blocks": [
                                 {"type": "text", "text": "reading list layout"},
                                 {"type": "form", "title": "add book", "tool": "add_book"},
-                                *[
-                                    {
-                                        "type": "metric",
-                                        **{
-                                            key: value
-                                            for key, value in metric.items()
-                                            if key not in {"expectedText", "classification"}
-                                        },
-                                    }
-                                    for metric in METRIC_BOUNDARY_MATRIX
-                                ],
                                 {
                                     "type": "metric",
                                     "label": "review status",

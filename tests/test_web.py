@@ -1418,3 +1418,35 @@ def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: P
     assert artifact.headers["access-control-allow-origin"] == "*"
     assert bootstrap.headers["access-control-allow-origin"] == "*"
     assert "window.achilles" in bootstrap.text
+
+
+def test_block_page_is_named_unsupported_and_code_page_is_not(tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    store = PageStore(root)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO layout_version VALUES('home',1,'old',?,'2025-01-01')",
+            (json.dumps({"blocks": [{"type": "text", "text": "old"}]}),),
+        )
+        db.execute("UPDATE page SET active_layout_version=1 WHERE id='home'")
+    with chat_client() as client:
+        block_page = client.get("/api/pages/home").json()
+        assert block_page["code"] is None
+        assert block_page["unsupported_format"] == web.UNSUPPORTED_BLOCK_PAGE
+        with store.transaction() as db:
+            db.execute(
+                "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+                "artifact_size,diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                ("home", 1, "source", "{}", "b" * 64, 16, None, None, "2025-01-02"),
+            )
+            db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+        code_page = client.get("/api/pages/home").json()
+        history = client.get(
+            "/api/pages/home/versions",
+            headers={"authorization": f"Bearer {store.ensure_credential('home')}"},
+        ).json()
+    assert code_page["code"]["version"] == 1
+    assert code_page["unsupported_format"] is None
+    assert history["code"] == [
+        {"version": 1, "created_at": "2025-01-02", "active": True, "failed": False}
+    ]

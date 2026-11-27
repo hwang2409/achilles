@@ -171,15 +171,6 @@
         }
       }
     ],
-    "form_submits": [
-      {
-        "page_id": "expenses",
-        "tool": "add_expense",
-        "collection": "expenses",
-        "status": 200,
-        "new_records": 1
-      }
-    ],
     "related_page_ids": [
       "expenses"
     ]
@@ -349,15 +340,6 @@
           "amount": 12.5,
           "category": "food"
         }
-      }
-    ],
-    "form_submits": [
-      {
-        "page_id": "expenses",
-        "tool": "add_expense",
-        "collection": "expenses",
-        "status": 200,
-        "new_records": 1
       }
     ],
     "related_page_ids": [

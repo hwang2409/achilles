@@ -67,16 +67,6 @@
       "value": "Synthetic Squats"
     },
     {
-      "id": "form-submit",
-      "type": "form_submit",
-      "page": "workouts",
-      "value": {
-        "string": "Form Squats",
-        "integer": "10",
-        "number": "10"
-      }
-    },
-    {
       "id": "page-tools-only",
       "type": "assigned_tools_only",
       "page": "workouts"

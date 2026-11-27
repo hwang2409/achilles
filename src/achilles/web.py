@@ -22,6 +22,11 @@ from .pages import CHAT_PURPOSES, PageStore
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
 
+UNSUPPORTED_BLOCK_PAGE = (
+    "this page uses the old block format, which achilles no longer shows. "
+    "ask the agent in page chat to rebuild it as a react page with write_page."
+)
+
 
 def _home() -> Path:
     return Path(os.environ.get("ACHILLES_HOME", Path.home() / ".local/share/achilles"))
@@ -187,6 +192,8 @@ def create_app() -> Starlette:
             row = await anyio.to_thread.run_sync(store.page, key)
         if row is None:
             raise HTTPException(404, "page not found")
+        layout = await anyio.to_thread.run_sync(store.layout, row["id"])
+        code = await anyio.to_thread.run_sync(store.page_code, row["id"])
         return JSONResponse(
             {
                 key: row[key]
@@ -203,9 +210,13 @@ def create_app() -> Starlette:
             }
             | {
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
-                "layout": await anyio.to_thread.run_sync(store.layout, row["id"]),
+                "layout": layout,
                 "create_mode": bool(row["create_mode"]),
-                "code": await anyio.to_thread.run_sync(store.page_code, row["id"]),
+                "code": code,
+                # the web app renders only compiled pages; an old block page is named, never drawn
+                "unsupported_format": UNSUPPORTED_BLOCK_PAGE
+                if layout["blocks"] and not code
+                else None,
             }
         )
 

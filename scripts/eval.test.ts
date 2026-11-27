@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { approvalDecision, classifyTaskSupport, createDecisionQueue, finalAnswer, insertForms, parseHistory, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
+import { approvalDecision, classifyTaskSupport, createDecisionQueue, finalAnswer, parseHistory, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
 import { gradeReference, validateTask, type TaskSetup } from "./eval-grade";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
@@ -270,24 +270,6 @@ test("parseHistory tags each result with the step whose turn made it", () => {
   const rows = [{ role: "user", content: [] }, ...call("t1"), { event: "served_turn_end" }, { role: "user", content: [] }, ...call("t2")];
   const { results } = parseHistory([{ chat: "c", page_id: "p", rows, starts: [{ step: "build", from: 0 }, { step: "add-action", from: 4 }] }]);
   expect(results.map(row => [row.call_id, row.step])).toEqual([["t1", "build"], ["t2", "add-action"]]);
-});
-
-test("insertForms finds the active insert tool behind each form block, in render order", () => {
-  const schema = (field: string) => ({ type: "object", properties: { [field]: { type: "string" } }, required: [field] });
-  const snapshot = {
-    layouts: [
-      { page_id: "p", version: 1, document: { blocks: [] } },
-      { page_id: "p", version: 2, document: { blocks: [{ type: "list", collection: "books" }, { type: "form", tool: "edit_book" }, { type: "form", tool: "add_book", fields: ["title"] }] } },
-    ],
-    tools: [{ id: "t-add", page_id: "p", name: "add_book" }, { id: "t-edit", page_id: "p", name: "edit_book" }],
-    assignments: [{ page_id: "p", tool_id: "t-add", active_version: 2 }, { page_id: "p", tool_id: "t-edit", active_version: 1 }],
-    tool_versions: [
-      { page_id: "p", tool_id: "t-add", version: 1, operation: "insert", collection: "books", input_schema: schema("old") },
-      { page_id: "p", tool_id: "t-add", version: 2, operation: "insert", collection: "books", input_schema: schema("title") },
-      { page_id: "p", tool_id: "t-edit", version: 1, operation: "update", collection: "books", input_schema: schema("title") },
-    ],
-  };
-  expect(insertForms(snapshot, "p")).toEqual([{ index: 1, tool: "add_book", collection: "books", input_schema: schema("title"), fields: ["title"] }]);
 });
 
 test("a decision list answers the n-th request of its tool and approves the rest", () => {

@@ -105,15 +105,6 @@
           }
         ]
       }
-    },
-    {
-      "id": "form-adds",
-      "type": "form_submit",
-      "page": "orders",
-      "value": {
-        "string": "Cara",
-        "integer": "3"
-      }
     }
   ],
   "goal_capabilities": [

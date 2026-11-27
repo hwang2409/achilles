@@ -77,16 +77,6 @@
       }
     },
     {
-      "id": "form-submit",
-      "type": "form_submit",
-      "page": "contacts",
-      "value": {
-        "string": "Form Contact",
-        "integer": "1",
-        "number": "1"
-      }
-    },
-    {
       "id": "page-tools-only",
       "type": "assigned_tools_only",
       "page": "contacts"

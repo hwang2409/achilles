@@ -246,7 +246,7 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     `restart_recovery`, `overwrite_disclosed` (keeping the user's value passes;
     the agent's value passes only if the answer names the user's value).
   - text and browser: `answer_mentions`, `answer_excludes`, `prompt` (a chat's first prompt is
-    `text`), `browser_text`, `form_submit`.
+    `text`), `browser_text`.
 - an `approval` check counts approval requests for a `tool`. give `count` for
   an exact number, or `max` to pass when there is at least one request and at
   most `max` (the agent tried, then stopped instead of looping).
@@ -277,17 +277,6 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   negation ("not 7 contacts" claims 7), and it cannot catch a false claim with
   no excluded value in it ("I added the note"): grade that state with
   `records_exact` and the approval checks.
-- `form_submit` uses the page as a user would. after the agent steps, the
-  harness opens the page in a browser and, for each insert form block in the
-  active layout, fills every required input from the check's `value` map by the
-  input's schema type (`string` is required; `number` and `integer` are
-  optional numeric strings; an enum takes its first option; a checkbox stays
-  off), submits, and waits for the form's success state. it passes when each
-  submit adds exactly one record to the tool's collection, counted in the
-  database before and after the submit. a form that shows "this form needs the
-  chat" fails with the unsupported field name as evidence; a page with no
-  insert form fails. the `value` map is input, not an expectation, so the lint
-  does not look for it in the prompt.
 - optional `requires` / `goal_capabilities`: capabilities that gate `unsupported`
   and the "goal not reachable" label on older revisions.
 

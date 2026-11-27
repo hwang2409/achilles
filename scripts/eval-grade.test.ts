@@ -27,7 +27,7 @@ test("static file failures are harness errors, not agent failures", () => {
 test("status checks match whole normalized tokens and declared synonyms", () => {
   const task = validateTask(readingListTaskJson);
   const storedCheck = task.checks.find(check => check.id === "record")!;
-  const visibleCheck = task.checks.find(check => check.id === "visible-status")!;
+  const visibleCheck = validateTask({ ...readingListTaskJson, checks: [{ id: "visible-status", type: "browser_text", page: "reading", text: "read", synonyms: ["finished", "done", "completed", "have_read"] }] }).checks[0];
   const snapshot = (status: string) => ({
     pages: [{ id: "reading-id", alias: "reading" }],
     tool_versions: [{ page_id: "reading-id", name: "list_books", collection: "books", data_schema: { type: "object", properties: { title: { type: "string" }, status: { type: "string" } } } }],
@@ -612,30 +612,6 @@ test("a denied step accepts only ask-mode prompt steps, and approval max bounds 
     const snapshot = { ...good, approvals: Array.from({ length: count }, () => good.approvals[0]) };
     expect(gradeReference(denied, snapshot).status, `${count} approvals`).toBe(status);
   }
-});
-
-test("form_submit passes on one new record and names the field a chat-only form needs", () => {
-  const check = validateTask(readingListTaskJson).checks.find(item => item.type === "form_submit")!;
-  expect(check.required).toBe(false);
-  const graded = (rows: Array<Record<string, unknown>>) => gradeCheck(check, { pages: [{ id: "reading-id", alias: "reading" }], form_submits: rows.map(row => ({ page_id: "reading-id", tool: "add_book", collection: "books", ...row })) });
-  expect(graded([{ status: 200, new_records: 1 }]).pass).toBe(true);
-  const chatOnly = graded([{ unsupported: "tags" }]);
-  expect(chatOnly.pass).toBe(false);
-  expect(chatOnly.reason).toContain("this form needs the chat");
-  expect(chatOnly.evidence).toMatchObject({ tool: "add_book", field: "tags" });
-  expect(graded([{ status: 200, new_records: 2 }]).reason).toContain("added 2 records");
-  expect(graded([{ status: 200, new_records: 0 }]).pass).toBe(false);
-  expect(graded([{ status: 422, error: "submit failed (422)" }]).pass).toBe(false);
-  expect(graded([]).reason).toBe("the page has no insert form");
-});
-
-test("form_submit needs a value map of input strings", () => {
-  const withValue = (value: unknown) => () => validateTask({ ...readingListTaskJson, checks: [{ id: "form", type: "form_submit", page: "reading", value }] });
-  expect(withValue({ string: "Form Book", integer: "2" })).not.toThrow();
-  expect(withValue(undefined)).toThrow("needs value");
-  expect(withValue({ integer: "2" })).toThrow("string value");
-  expect(withValue({ string: "x", integer: "2.5" })).toThrow("integer string");
-  expect(withValue({ string: "x", date: "2026" })).toThrow("unknown key date");
 });
 
 test("approval_outcomes grades targets, denied retries, and untouched records from the approvals log", () => {

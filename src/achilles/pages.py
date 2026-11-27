@@ -957,7 +957,7 @@ class PageStore:
             return self._inspect_page(db, page_id)
 
     def versions(self, page_id: str) -> dict[str, Any]:
-        """The page's layout and tool versions, newest first, for the user's history list."""
+        """The page's code, layout, and tool versions, newest first, for the user's history list."""
         with self._connect() as db:
             # shortcut: the newest 100 layouts and 100 per tool; page the list if a page outgrows it
             layouts = db.execute(
@@ -987,7 +987,22 @@ class PageStore:
                 "ORDER BY t.name, v.version DESC",
                 (page_id,),
             ).fetchall()
+            code = db.execute(
+                "SELECT c.version, c.created_at, c.version=p.active_code_revision, c.diagnostics "
+                "FROM code_revision c JOIN page p ON p.id=c.page_id WHERE c.page_id=? "
+                "ORDER BY c.version DESC LIMIT 100",
+                (page_id,),
+            ).fetchall()
         return {
+            "code": [
+                {
+                    "version": r[0],
+                    "created_at": r[1],
+                    "active": bool(r[2]),
+                    "failed": r[3] is not None,
+                }
+                for r in code
+            ],
             "layout": [_layout_version_row(row) for row in layouts],
             "tools": [
                 {

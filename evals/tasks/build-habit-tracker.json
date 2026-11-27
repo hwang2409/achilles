@@ -74,16 +74,6 @@
       }
     },
     {
-      "id": "form-submit",
-      "type": "form_submit",
-      "page": "habits",
-      "value": {
-        "string": "Form Habit",
-        "integer": "1",
-        "number": "1"
-      }
-    },
-    {
       "id": "page-tools-only",
       "type": "assigned_tools_only",
       "page": "habits"

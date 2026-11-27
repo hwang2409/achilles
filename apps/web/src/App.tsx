@@ -24,8 +24,6 @@ import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT_LABEL } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { HistoryDialog } from "./page/HistoryDialog";
-import { useRecordWrites } from "./page/RecordForm";
-import { PageView } from "./page/PageView";
 import { PageFrame } from "./page/PageFrame";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
@@ -45,8 +43,6 @@ import "./chat/markdown.css";
 import "./chat/fulcrum-g1.css";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 import "./jumpToLatest.css";
-
-export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 
 export const canWriteForState = (state: ConnectionState) => state.phase === "connected" && state.authority === "controller";
 
@@ -194,11 +190,12 @@ function activeComposerProps(
   return { state: turn === "running" ? "steerable" : "idle", onSubmit, onStop, placeholder };
 }
 
-function PageSurface(props: ComponentProps<typeof PageView> & { page: Page }) {
-  return props.page.code
-    ? <PageFrame pageId={props.pageId} credential={props.credential} revision={props.page.code.version} />
-    : <PageView {...props} />;
+// a page renders only as its compiled react revision; the server names an old block page as unsupported
+function PageSurface({ page, credential }: { page: Page; credential: string }) {
+  if (page.code) return <PageFrame pageId={page.id} credential={credential} revision={page.code.version} />;
+  return <main className="page-content"><p className="page-unsupported">{page.unsupported_format}</p></main>;
 }
+const hasSurface = (page: Page | null | undefined) => !!page?.code || !!page?.unsupported_format;
 
 function connectionFailure(state: ConnectionState): string | null {
   if (state.phase !== "connected" && "lost" in state && state.lost) return "the connection to zeta was lost.";
@@ -230,9 +227,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
   const activePage = ready?.page ?? empty?.page ?? null;
-  const hasPageSurface = !!activePage?.code || (activePage?.layout.blocks.length ?? 0) > 0;
-  const recordWrites = useRecordWrites(activePage?.id ?? "");
-  const previousRecordWrites = useRef(recordWrites);
+  const hasPageSurface = hasSurface(activePage);
   const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
   const activeStore = store ?? emptyStore;
@@ -248,7 +243,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
   } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
-  // a restore from the history list changes the layout or a tool without a chat turn
+  // a restore from the history list changes a tool without a chat turn
   const [restores, setRestores] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyOpener = useRef<HTMLElement | null>(null);
@@ -288,10 +283,10 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       if (item.kind !== "tool") continue;
       const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
       const name = value?.tool_call?.name ?? "";
-      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout", "restore_version", "achilles__restore_version", "write_page", "achilles__write_page"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+      if (value && ["create_page", "achilles__create_page", "restore_version", "achilles__restore_version", "write_page", "achilles__write_page"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
         completedCreatePages.current.add(item.id);
         setPageRefreshNonce((current) => current + 1);
-        if (["update_layout", "achilles__update_layout", "restore_version", "achilles__restore_version"].includes(name)) void active.refreshPage();
+        if (["restore_version", "achilles__restore_version"].includes(name)) void active.refreshPage();
       }
     }
   }), [active.refreshPage, store]);
@@ -301,14 +296,6 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     void active.refreshPage();
   }, [refreshKey]);
   useEffect(() => {
-    // A form insert does not advance refreshKey (no chat turn), so count metrics computed into
-    // the page layout would stay stale; record list/detail blocks already refetch on their own
-    // through useRecordWrites in LayoutBlock, so this only refreshes the page object itself.
-    if (previousRecordWrites.current === recordWrites) return;
-    previousRecordWrites.current = recordWrites;
-    void active.refreshPage();
-  }, [recordWrites]);
-  useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
   useLayoutEffect(() => {
@@ -317,13 +304,6 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     setPageChatFocusRequest(openContinuation ? 1 : 0);
   }, [ready?.sessionId, activePage?.id, ready?.continued, setMobileChatOpen]);
   useModalFocus(pageChatSheetOpen, pageChatSurface, pageChatClose, true);
-  const askPageChat = (draft: string) => {
-    const sessionId = ready?.sessionId ?? (activePage ? `new:${activePage.id}` : null);
-    if (!sessionId) return;
-    if (!draftStore.get(sessionId).trim()) draftStore.set(sessionId, draft);
-    setPageChatFocusRequest((value) => value + 1);
-    if (mobilePageChat) { setMobileChatOpen(true); }
-  };
   useEffect(() => {
     if (!pageChatSheetOpen) {
       if (mobileChatWasOpen.current && mobilePageChat) pageChatButton.current?.focus();
@@ -443,7 +423,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       busy: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
       error: active.approvalChange?.error }} />;
   const content = <>
-    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
+    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
@@ -452,12 +432,12 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
-      : busyPage ? <>{(busyPage.page.code || busyPage.page.layout.blocks.length > 0) && <PageSurface page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
+      : busyPage ? <>{hasSurface(busyPage.page) && <PageSurface page={busyPage.page} credential={busyPage.credential} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         <div className={hasPageSurface ? "page-view docked" : "page-view"}>
-        {hasPageSurface && <PageSurface page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
+        {hasPageSurface && <PageSurface page={activePage} credential={(ready ?? empty)!.credential} />}
         <div className={`page-chat${hasPageSurface ? " page-chat-docked" : ""}${pageChatSheetClosed ? " page-chat-sheet-closed" : ""}`}>
         {hasPageSurface && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>Page chat</span>{state !== "idle" && <span className="page-chat-bar-state">{stateLabel}</span>}<span aria-hidden="true">⌃</span></button>}
         {pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
