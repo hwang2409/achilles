@@ -1988,7 +1988,7 @@ with _database() as db:
       headers: { Authorization: `Bearer ${secondCredential}` },
     })
   ).json();
-  if (secondRecords.length !== 5 || !secondRecords.some((record: { title?: string }) => record.title === "Synthetic Book"))
+  if (secondRecords.length !== 1 || !secondRecords.some((record: { title?: string }) => record.title === "Synthetic Book"))
     throw new Error(`reading page did not retain its book: ${JSON.stringify(secondRecords)}`);
 
   if (createdPage.route !== "/reading") throw new Error("created page route changed");

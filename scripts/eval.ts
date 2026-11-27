@@ -360,7 +360,12 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
     for (const plan of task.page_plan.filter(page => task.checks.some(check => check.type === "browser_text" && check.page === page.alias))) {
       const pageId = pages.get(plan.alias); if (!pageId) continue;
       const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
-      output.push({ page_id: pageId, text: await page.locator("body").innerText({ timeout: 10_000 }) }); await page.close();
+      const frame = page.frameLocator("iframe");
+      for (const check of task.checks.filter(check => check.type === "browser_text" && check.page === plan.alias))
+        await frame.getByText(check.text!, { exact: false }).waitFor({ state: "visible", timeout: 10_000 });
+      const shell = await page.locator("body").innerText({ timeout: 10_000 });
+      const rendered = await frame.locator("body").innerText({ timeout: 10_000 });
+      output.push({ page_id: pageId, text: `${shell}\n${rendered}` }); await page.close();
     }
     return output;
   } finally { await browser.close(); }
@@ -529,7 +534,7 @@ function scriptedProvider() {
       else if (prompt.includes("after reconnect") && turn === 3) toolCalls = [{ function: { name: "achilles__list_notes", arguments: {} } }];
     }
     else if (prompt.includes("inspect this page") && turn === 1) toolCalls = [{ function: { name: "achilles__inspect_page", arguments: {} } }];
-    else if (prompt.includes("/eval-smoke") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: 'export default function Page(){return <main>smoke</main>}', dependencies: {} } } } }];
+    else if (prompt.includes("/eval-smoke") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<main>smoke</main>);', dependencies: {} } } } }];
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
     return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
