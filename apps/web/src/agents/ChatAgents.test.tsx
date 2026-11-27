@@ -1,11 +1,9 @@
 import "../test-dom";
 // @ts-expect-error Bun supplies this module at test time; the web project does not install Bun types.
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
-// the reader asks the hello handshake which methods exist; this test has no handshake
-const connection = await import("../zeta/connection");
-mock.module("../zeta/connection", () => ({ ...connection, supportsRequest: () => true }));
-const { ChatAgents } = await import("./ChatAgents");
+import { ChatAgents } from "./ChatAgents";
+import { createAgentRunsReader } from "./reads";
 const { act, cleanup, render } = await import("@testing-library/react");
 
 afterEach(() => { cleanup(); document.body.replaceChildren(); });
@@ -26,7 +24,7 @@ test("a run that ends after the report rereads once; a failed reread does not re
   const draft = { text: "", pending: false };
   const send = { subscribe: () => () => {}, snapshot: () => draft } as never;
   const ui = render(<ChatAgents client={client} store={store} sessionId="a" title="chat" controls={{} as never} send={send}
-    initialRun="a:1" opener={null} onClose={() => {}} />);
+    initialRun="a:1" opener={null} onClose={() => {}} readRuns={(zeta) => createAgentRunsReader(zeta, () => true)} />);
   try {
     for (let tick = 0; tick < 20; tick++) await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(methods).toEqual(["agent_run_catalog", "agent_run_catalog"]);

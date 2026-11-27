@@ -14,12 +14,12 @@ const idle = () => () => {};
 const none = { refreshing: false } as ReturnType<ReturnType<typeof createAgentRunsReader>["snapshot"]>;
 
 // this chat's child runs: spawn, the run list, and the chosen run's detail with cancel and send. every write targets sessionId.
-export function ChatAgents({ client, store, sessionId, title, controls, send, readOnly, initialRun, opener, onClose }: {
+export function ChatAgents({ client, store, sessionId, title, controls, send, readOnly, initialRun, opener, onClose, readRuns = createAgentRunsReader }: {
   client: ZetaClient | null; store: ReturnType<typeof createRunStore> | null; sessionId: string; title: string; controls: ChildControls; send: ChildSendOwner; readOnly?: string;
-  initialRun?: string; opener: HTMLElement | null; onClose(): void;
+  initialRun?: string; opener: HTMLElement | null; onClose(): void; readRuns?: (client: ZetaClient) => ReturnType<typeof createAgentRunsReader>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const reader = useMemo(() => client ? createAgentRunsReader(client) : undefined, [client]);
+  const reader = useMemo(() => client ? readRuns(client) : undefined, [client]);
   const snapshot = useSyncExternalStore(reader?.subscribe ?? idle, reader?.snapshot ?? (() => none));
   const [chosenRun, choose] = useState(initialRun);
   const refresh = () => void reader?.refresh({ root: sessionId });
