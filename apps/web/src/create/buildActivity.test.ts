@@ -426,6 +426,18 @@ test("a chat-list reload with the same updated_at reads nothing; a new turn read
   expect(zeta.reads().length).toBe(2);
 });
 
+test("a turn that moves state_version but not updated_at reads again and shows the new label", async () => {
+  let reply = done;
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => rows(reply) });
+  const hook = await mount(zeta, [{ ...chat, state_version: 1 }]);
+  expect({ ...rowOf(hook), reads: zeta.reads().length }).toEqual({ label: "done", receipt: null, reads: 1 });
+  // a zeta-started turn (no user send in this tab) fails: updated_at stays, state_version moves
+  reply = [call(), result, { ...end, data: { turn_id: "zeta-turn", reason: "error" } }];
+  hook.rerender({ client: zeta.client, chats: [{ ...chat, state_version: 2 }] });
+  await settle();
+  expect({ ...rowOf(hook), reads: zeta.reads().length }).toEqual({ label: "failed", receipt: null, reads: 2 });
+});
+
 // zeta gives the same session_not_found for an absent id, another project, project versus no project, and a child id.
 const notFound = (data?: object) => Object.assign(Error("the requested session does not exist"), { code: -32602, data });
 test.each([
