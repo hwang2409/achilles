@@ -304,7 +304,6 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     setPageChatFocusRequest(openContinuation ? 1 : 0);
   }, [ready?.sessionId, activePage?.id, ready?.continued, setMobileChatOpen]);
   useModalFocus(pageChatSheetOpen, pageChatSurface, pageChatClose, true);
-
   useEffect(() => {
     if (!pageChatSheetOpen) {
       if (mobileChatWasOpen.current && mobilePageChat) pageChatButton.current?.focus();
