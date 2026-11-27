@@ -100,7 +100,7 @@ export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, 
             {versions.code.length === 0 ? <p className="history-hint">this page has no code yet.</p>
               : <ol>{versions.code.map((row) => <li key={row.version} data-row={`code-${row.version}`}>
                 <span className="history-version">v{row.version}</span>
-                <span className="history-detail">{row.stale ? "not used: the page changed during the build" : row.failed ? "build failed" : ""}</span>
+                <span className="history-detail">{row.stale ? "skipped: the page changed" : row.failed ? "build failed" : ""}</span>
                 <time dateTime={row.created_at}>{when(row.created_at)}</time>
                 {row.active && <span className="history-current">current</span>}
               </li>)}</ol>}
