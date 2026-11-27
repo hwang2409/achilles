@@ -1262,7 +1262,7 @@ const realWait = controlledRetry.wait;
 beforeEach(() => { controlledRetry.wait = async () => {}; });
 afterEach(() => { controlledRetry.wait = realWait; });
 const controlledReason = "this chat is open in another tab. write there, or start a new chat here.";
-const notice = "this chat is open in another tab. you can read it here.";
+const notice = "this chat is open or kept running in another tab. you can read it here.";
 const refusal = { error: { code: -32014, message: "session is controlled by another client", data: { code: "session_controlled", session_id: "session" } } };
 const heldElsewhere = (extra: Options = {}): Options => ({ attached: true, ...extra, rpc: { ...extra.rpc, resume: () => refusal } });
 const pendingApproval = { joined: { messages: [userMessage], status: { state: "tool", session: { session_id: "session" }, pending_approvals: [{ request_id: "waiting", delegated: false, tool_call: { id: "tool", name: "fixture", arguments: {} } }] } } };

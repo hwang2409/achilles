@@ -19,8 +19,8 @@ const ownerOf = (client: object) => {
 
 export async function persistChatState(sessionId: string, lastState: string, fetchFn: typeof fetch = fetch): Promise<boolean> {
   try {
-    await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ last_state: lastState }) });
-    return true;
+    const response = await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ last_state: lastState }) });
+    return response.ok;
   } catch { return false; }
 }
 
@@ -64,11 +64,12 @@ export function subscribeParked(client: object, listener: () => void) {
   return () => { listeners.delete(listener); };
 }
 
-/** Reads zeta's parked list again (oldest first; closing chats are not listed). */
-export async function refreshParked(client: ZetaClient) {
-  const status = await client.request("status", {}) as { parked_sessions?: unknown };
+/** Reads zeta's parked list again (oldest first; closing chats are not listed); returns zeta's attached session id. */
+export async function refreshParked(client: ZetaClient): Promise<string | null> {
+  const status = await client.request("status", {}) as { parked_sessions?: unknown; session?: { session_id?: unknown } | null };
   const rows = Array.isArray(status.parked_sessions) ? status.parked_sessions.map(parseRow).filter((row): row is ParkedRow => row !== null) : [];
   publish(client, rows);
+  return typeof status.session?.session_id === "string" ? status.session.session_id : null;
 }
 
 /**
@@ -106,10 +107,11 @@ export class StopError extends Error {}
 
 /**
  * Stops one of this tab's parked chats. zeta has no stop for a parked chat, so: `resume` it (one's own parked chat never
- * meets parked_limit; the shown chat parks in its place), `abort` it (its turn, approvals and background children; not
- * background tasks), then record it idle. The caller then repeats its swap, which closes the stopped chat.
+ * meets parked_limit; the shown chat parks in its place), then `abort` it (its turn, approvals and background children;
+ * not background tasks). The stopped chat is then zeta's attached session; the caller repeats its swap, which closes it.
+ * Its row keeps its last state: it may still hold work, and the chat list check corrects it once zeta closed it.
  * `bindingOf` gives the chat's page binding, or null when achilles no longer lists the chat. Returns false when the
- * chat had already left (nothing to abort); throws StopError when abort fails.
+ * chat had already left (nothing to abort); throws StopError when abort fails (the parked list is read again first).
  */
 export async function stopParked(client: ZetaClient, sessionId: string, bindingOf: (sessionId: string) => Promise<Binding | null>, current: () => boolean): Promise<boolean> {
   const binding = await bindingOf(sessionId);
@@ -119,44 +121,77 @@ export async function stopParked(client: ZetaClient, sessionId: string, bindingO
   catch (caught) { if (gone(caught)) return false; throw caught; }
   if (!current()) throw aborted();
   try { await client.request("abort", { session_id: sessionId }); }
-  catch (caught) { throw new StopError(caught instanceof Error ? caught.message : String(caught)); }
-  void persistChatState(sessionId, "idle");
-  await refreshParked(client).catch(() => {});
+  catch (caught) {
+    await refreshParked(client).catch(() => null);
+    throw new StopError(caught instanceof Error ? caught.message : String(caught));
+  }
+  await refreshParked(client).catch(() => null);
   return true;
 }
 
-const reclaims = new WeakMap<object, Promise<void>>();
+type Reclaim = { run: Promise<void>; skipped: string | null };
+const reclaims = new WeakMap<object, Reclaim>();
 /**
  * After a reload, a cross-page load or a reconnect, takes this tab's held chats back from zeta's grace (90 s), once per
  * connection: zeta knows no tab, so the tab remembers the ids. Each `resume` (exact id, with the page binding) takes one
  * back and parks the one before it (or closes it when it finished). Parked chats go first, oldest first, and the chat
  * that was shown goes last, so the order is as before; `target`, the chat about to open, is left to the caller.
+ * When a later attach on the connection opens another chat, the first target is no longer the caller's: it is taken
+ * back too, before the later attach goes on (the url is the tab's chat, read at each attach, not once).
  * A chat another client holds (the old socket may not have closed yet) is retried within one shared budget, then
  * dropped; a missing chat or one that is not ours is dropped; resident_limit stops the reclaim.
  */
 export function reclaimHeld(client: ZetaClient, target: string | null, bindingOf: (sessionId: string) => Promise<Binding | null>): Promise<void> {
-  let run = reclaims.get(client);
-  if (!run) reclaims.set(client, run = reclaim(client, target, bindingOf));
-  return run;
+  let reclaim = reclaims.get(client);
+  if (!reclaim) {
+    const held = readHeld();
+    const order = [...new Set([...held.parked, held.attached])].filter((id): id is string => id !== null);
+    reclaims.set(client, reclaim = { run: Promise.resolve(), skipped: target !== null && order.includes(target) ? target : null });
+    reclaim.run = takeBack(client, order.filter((id) => id !== target), bindingOf);
+  } else if (reclaim.skipped !== null && reclaim.skipped !== target) {
+    const skipped = reclaim.skipped;
+    reclaim.skipped = null;
+    reclaim.run = reclaim.run.then(() => takeBack(client, [skipped], bindingOf));
+  }
+  return reclaim.run;
 }
 
-async function reclaim(client: ZetaClient, target: string | null, bindingOf: (sessionId: string) => Promise<Binding | null>) {
-  const held = readHeld();
-  const order = [...new Set([...held.parked, held.attached])].filter((id): id is string => id !== null && id !== target);
+async function takeBack(client: ZetaClient, order: string[], bindingOf: (sessionId: string) => Promise<Binding | null>) {
   if (!order.length) return;
-  let retries = CONTROLLED_RETRIES;
-  for (const sessionId of order) {
-    const binding = await bindingOf(sessionId).catch(() => null);
-    if (!binding) continue;
-    for (;;) {
-      try { await rebindPage(client, sessionId, binding); break; }
-      catch (caught) {
-        if (isResidentLimit(caught)) { await refreshParked(client).catch(() => {}); return; }
-        const controlled = (caught as { data?: { code?: unknown } | null }).data?.code === "session_controlled";
-        if (!controlled || retries-- <= 0) break;
-        await controlledRetry.wait(CONTROLLED_RETRY_MS);
-      }
+  const budget = { retries: CONTROLLED_RETRIES };
+  for (const sessionId of order) if (await resumeHeld(client, sessionId, bindingOf, budget) === "stop") break;
+  await refreshParked(client).catch(() => null);
+}
+
+// one held chat: "ok" taken back, "drop" not ours any more (gone, unlisted, held elsewhere past the budget), "stop" zeta is full
+async function resumeHeld(client: ZetaClient, sessionId: string, bindingOf: (sessionId: string) => Promise<Binding | null>, budget: { retries: number }): Promise<"ok" | "drop" | "stop"> {
+  const binding = await bindingOf(sessionId).catch(() => null);
+  if (!binding) return "drop";
+  for (;;) {
+    try { await rebindPage(client, sessionId, binding); return "ok"; }
+    catch (caught) {
+      if (isResidentLimit(caught)) return "stop";
+      const controlled = (caught as { data?: { code?: unknown } | null }).data?.code === "session_controlled";
+      if (!controlled || budget.retries-- <= 0) return "drop";
+      await controlledRetry.wait(CONTROLLED_RETRY_MS);
     }
   }
-  await refreshParked(client).catch(() => {});
+}
+
+// zeta's live status of a chat, for a sidebar row: "running", "approval" or "idle" (not resident, or failed); null unknown
+const LIVE: Record<string, string> = { running: "running", approval: "approval", idle: "idle", failed: "idle" };
+/**
+ * The sidebar shows a chat's stored last_state, which only the tab that holds the chat writes. A tab that closed (or a
+ * zeta restart) leaves "running" or "needs you" behind. This checks each such row this tab does not hold, once per chat
+ * list load, with a read that attaches nothing (`state_session`; a chat zeta no longer keeps is idle), and stores
+ * zeta's state. Returns how many rows changed.
+ */
+export async function verifyChatStates(client: ZetaClient, chats: readonly { session_id: string; last_state?: string | null }[], held: ReadonlySet<string>, fetchFn: typeof fetch = fetch): Promise<number> {
+  const stale = chats.filter((chat) => (chat.last_state === "running" || chat.last_state === "approval") && !held.has(chat.session_id));
+  const changed = await Promise.all(stale.map(async (chat) => {
+    const read = await client.request("state_session", { session_id: chat.session_id, collection: "attention", limit: 1 }).catch(() => null) as { session?: { status?: unknown } | null } | null;
+    const live = typeof read?.session?.status === "string" ? LIVE[read.session.status] : undefined;
+    return live !== undefined && live !== chat.last_state && await persistChatState(chat.session_id, live, fetchFn);
+  }));
+  return changed.filter(Boolean).length;
 }

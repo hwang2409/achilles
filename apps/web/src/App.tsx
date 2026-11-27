@@ -35,8 +35,8 @@ import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { TOO_MANY_CHATS } from "./zeta/session";
-import { parkedRows, subscribeParked } from "./zeta/parked";
-import { trackQueuedSteer, useActiveChat, type Page, type ParkedChat } from "./useActiveChat";
+import { parkedRows, subscribeParked, verifyChatStates } from "./zeta/parked";
+import { trackQueuedSteer, useActiveChat, type Page, type ParkedChat, type StopState } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
@@ -412,7 +412,8 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const unsentNew = ready ? chatQueues.unsent(`new:${ready.page.id}`).length : 0;
   // a failed create keeps the message typed for it in the page's new-chat box: show it, so the user sees it is safe
   const keptNew = active.creationError && active.creationPageId ? chatQueues.unsent(`new:${active.creationPageId}`) : [];
-  const state = headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent));
+  // a chat other than the one shown runs (no park): the header waits; the parked_limit notice is a choice, not a wait
+  const state = headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy && !active.busy.parked), Boolean(ready?.sent));
   // the chats this tab keeps running in zeta while it shows another one (only a tab that holds chats has them)
   const parked = useSyncExternalStore(useCallback((listener: () => void) => client ? subscribeParked(client, listener) : () => {}, [client]), () => parkedRows(canWrite ? client : null));
   const nav = useAgentNavAdapter({
@@ -422,6 +423,16 @@ export function AgentSurface({ connection, childControls, childSend, client, con
     refreshKey: active.listRefresh, pageRefreshKey: pageRefreshNonce,
   });
   // a page build's running turn reads "building", as in the nav, the switcher, and /create (the open chat is always listed)
+  // rows that say "running" or "needs you" for a chat this tab does not hold (a closed tab, a zeta restart): check them
+  // with zeta once per list load, and store what zeta says (the list then loads again)
+  const listedChats = nav.catalog.chats;
+  const heldIds = [ready?.sessionId, active.stop?.sessionId, ...parked.map((row) => row.session_id)].filter((id): id is string => Boolean(id)).join(" ");
+  useEffect(() => {
+    if (!client || !connected || !canWrite || !listedChats.length) return;
+    let current = true;
+    void verifyChatStates(client, listedChats, new Set(heldIds.split(" "))).then((changed) => { if (current && changed) nav.catalog.reload(); });
+    return () => { current = false; };
+  }, [client, connected, canWrite, listedChats]);
   const building = nav.catalog.chats.some((chat) => chat.session_id === ready?.sessionId && chat.purpose === "page_build");
   const stateLabel = runStateLabel(state, composerActivity.queued, building);
   useEffect(() => {
@@ -472,12 +483,13 @@ export function AgentSurface({ connection, childControls, childSend, client, con
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {ready?.controlledElsewhere && <div className="chat-held-notice" role="status"><p><StableText text={heldText} reserve={Object.values(HELD_TEXT)} /></p><span className="chat-held-actions"><button type="button" className="ui-button" onClick={() => void active.newChat()} disabled={!canWrite}>new chat</button><button type="button" className="ui-button" aria-disabled={retryingHeld || undefined} onClick={() => { if (retryingHeld) return; setRenameRefused(false); setHeldRetry({ sessionId: ready.sessionId, lease: ready.lease }); active.retryAttachment(); }}><StableText text={retryingHeld ? "trying…" : "try again"} reserve={["try again", "trying…"]} /></button></span></div>}
-    {active.busy?.parked ? <ParkedLimitNotice busy={active.busy} parked={active.busy.parked} onOpen={active.selectChat} onStop={active.stopAndSwitch} onStay={() => void active.stay()} canWrite={canWrite} />
+    {active.busy?.parked ? <LimitNotice kind="parked" className="chat-held-notice limit-notice" busy={active.busy} parked={active.busy.parked} stop={active.stop} chats={nav.catalog.chats} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetryStopped={active.retryStopped} onStay={() => void active.stay()} canWrite={canWrite} />
       : active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
-      : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p>{active.state.error === TOO_MANY_CHATS && <div className="full-state-actions"><button className="primary" type="button" onClick={active.retryLimit}>try again</button>{canWrite && parked[0] && <button type="button" onClick={active.stopAndRetryLimit}>stop {quotedTitle(nav.catalog.chats, parked[0].session_id)} and try again</button>}<button type="button" onClick={() => void active.stay()}>stay</button></div>}</div>
+      : active.state.phase === "error" && active.state.error === TOO_MANY_CHATS ? <div className="full-state"><LimitNotice kind="resident" className="limit-state" parked={parked.map((row) => ({ sessionId: row.session_id, chat: nav.catalog.chats.find((chat) => chat.session_id === row.session_id) ?? null, finishing: false }))} stop={active.stop} chats={nav.catalog.chats} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetry={active.retryLimit} onRetryStopped={active.retryStopped} onStay={() => void active.stay()} canWrite={canWrite} /></div>
+      : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
@@ -557,19 +569,32 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
   </>;
 }
 
-const quotedTitle = (chats: readonly Chat[], sessionId: string) => { const chat = chats.find((row) => row.session_id === sessionId); return chat ? `"${titleOf(chat)}"` : "the oldest running chat"; };
-
-// zeta refused to keep one more chat running in this tab (parked_limit): name the chats that hold the slots, and offer
-// to stop the oldest and switch, or to stay on the chat zeta kept attached
-function ParkedLimitNotice({ busy, parked, onOpen, onStop, onStay, canWrite }: { busy: { retry: "attach" | "new"; target?: Chat | null; stopping?: boolean; stillStopping?: string; error?: string }; parked: ParkedChat[]; onOpen: (chat: Chat) => void; onStop: () => void; onStay: () => void; canWrite: boolean }) {
-  const name = (entry: ParkedChat) => entry.chat ? `"${titleOf(entry.chat)}"` : "a chat";
-  const oldest = parked[0];
-  const stuck = busy.stillStopping ? parked.find((entry) => entry.sessionId === busy.stillStopping) : undefined;
-  const target = busy.retry === "new" ? "start a new chat" : busy.target ? `open "${titleOf(busy.target)}"` : "open that chat";
-  const lead = busy.error ? `${busy.error}. ` : stuck ? `${name(stuck)} is still stopping (it has background work that stop does not end). try again in a moment, or stay. ` : "";
-  return <div className="create-mode-alert parked-limit" role="alert">
-    <span>{lead}this tab already keeps {parked.length === 1 ? "1 chat" : `${parked.length} chats`} running: {parked.map((entry, at) => <span key={entry.sessionId}>{at > 0 && ", "}{entry.chat ? <button type="button" className="link-button" onClick={() => onOpen(entry.chat!)}>{name(entry)}</button> : name(entry)}{entry.finishing && " (finishing)"}</span>)}. zeta allows 3 per tab. stop one to {target} here, or stay.</span>
-    <span>{oldest && <button type="button" data-write-surface={WRITE_SURFACE.busyRetry} disabled={!canWrite || busy.stopping} onClick={onStop}>{busy.stopping ? "stopping…" : `stop ${name(oldest)} and switch`}</button>}<button type="button" onClick={onStay}>stay</button></span>
+// zeta refused a swap: this tab keeps 3 chats running (parked_limit), or zeta is full (resident_limit). name the chats
+// that hold the slots, and offer to stop the oldest (zeta's status order) and try the swap again, or to stay. the notice
+// is a choice, not an error; focus moves into it, so the keyboard reaches its buttons next.
+function LimitNotice({ kind, className, busy, parked, stop, chats, onOpen, onStop, onRetry, onRetryStopped, onStay, canWrite }: { kind: "parked" | "resident"; className: string; busy?: { retry: "attach" | "new"; target?: Chat | null }; parked: ParkedChat[]; stop: StopState | null; chats: readonly Chat[]; onOpen: (chat: Chat) => void; onStop: () => void; onRetry?: () => void; onRetryStopped: () => void; onStay: () => void; canWrite: boolean }) {
+  const element = useRef<HTMLDivElement>(null);
+  useEffect(() => { element.current?.focus({ preventScroll: true }); }, []);
+  const chatOf = (sessionId: string) => parked.find((entry) => entry.sessionId === sessionId)?.chat ?? chats.find((chat) => chat.session_id === sessionId) ?? null;
+  const name = (sessionId: string) => { const chat = chatOf(sessionId); return chat ? `"${titleOf(chat)}"` : "a chat"; };
+  const oldest = parked.find((entry) => !entry.finishing);
+  const stuck = stop?.phase === "still_stopping";
+  const busyStop = stop?.phase === "stopping" || stop?.phase === "retrying";
+  const verb = kind === "parked" ? "switch" : "try again";
+  const target = busy?.retry === "new" ? "start a new chat" : busy?.target ? `open "${titleOf(busy.target)}"` : "open that chat";
+  const failed = stop?.phase === "failed" ? `${stop.error}. ` : "";
+  const list = <>{parked.map((entry, at) => <span key={entry.sessionId}>{at > 0 && ", "}{entry.chat ? <button type="button" className="link-button" onClick={() => onOpen(entry.chat!)}>{name(entry.sessionId)}</button> : name(entry.sessionId)}{entry.finishing && " (finishing)"}</span>)}</>;
+  const text = stuck ? <>{name(stop.sessionId)} is still stopping its background work. try again in a moment, or stay.</>
+    : kind === "parked" ? <>{failed}this tab already keeps {parked.length === 1 ? "1 chat" : `${parked.length} chats`} running: {list}. zeta allows 3 per tab. stop one to {target} here, or stay.</>
+    : <>{failed}{TOO_MANY_CHATS}{parked.length > 0 && <> this tab keeps {list} running.</>}</>;
+  return <div ref={element} className={className} role="alert" tabIndex={-1}>
+    <p>{text}</p>
+    <span className="chat-held-actions">
+      {stuck ? <button type="button" className="ui-button" onClick={onRetryStopped}>try again</button>
+        : <>{onRetry && <button type="button" className="ui-button" onClick={onRetry}>try again</button>}
+          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} disabled={busyStop} onClick={onStop}>{busyStop ? "stopping…" : <>stop <span className="limit-title">{name(oldest.sessionId)}</span> and {verb}</>}</button>}</>}
+      <button type="button" className="ui-button" onClick={onStay}>stay</button>
+    </span>
   </div>;
 }
 
@@ -594,7 +619,7 @@ function runStateLabel(state: string, queued: number, building: boolean) {
 }
 
 const HELD_TEXT = {
-  open: "this chat is open in another tab. you can read it here.",
+  open: "this chat is open or kept running in another tab. you can read it here.",
   still: "still open in another tab. you can read it here.",
   rename: "rename this chat in the tab that has it open.",
 };

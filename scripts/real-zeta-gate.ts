@@ -1010,7 +1010,7 @@ with _database() as db:
   await gateWait.playwright(page.locator(".empty-chat"), "waitFor", { timeout: 20_000 });
   if (await page.getByRole("alert").filter({ hasText: /still running|keeps .* running/ }).count()) throw new Error("new chat during an approval wait was refused");
   if (!requests().slice(framesBeforePark).some((frame) => frame.method === "new_session")) throw new Error("new chat during an approval wait sent no new_session");
-  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) === "needs you here", "parked chat row says needs you here");
+  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) === "needs you in this tab", "parked chat row says needs you in this tab");
   await waitFor(async () => Boolean(parkedIn(framesBeforePark)?.some((row) => row.session_id === first && row.pending_approvals > 0)), "status lists the waiting chat as parked");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "park-new-chat-1440x900.png") });
   // the new chat works while the parked chat waits
@@ -1027,7 +1027,7 @@ with _database() as db:
   const reclaimAt = parkReload.findIndex((frame) => frame.method === "resume" && frame.params?.session_id === first);
   const shownAt = parkReload.findIndex((frame) => frame.method === "resume" && frame.params?.session_id === parkB);
   if (reclaimAt < 0 || !parkReload[reclaimAt].params?.mcp_bindings?.length || shownAt < reclaimAt) throw new Error(`reload did not reclaim the parked chat before the shown one: ${reclaimAt} ${shownAt}`);
-  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) === "needs you here", "parked chat row after reload");
+  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) === "needs you in this tab", "parked chat row after reload");
   await waitFor(async () => Boolean(parkedIn(framesBeforeParkReload)?.some((row) => row.session_id === first)), "status lists the reclaimed chat as parked");
   // back to the parked chat: it attaches to its live turn with the same approval; the idle new chat closes, not parks
   const framesBeforeReturn = requests().length;
@@ -1037,7 +1037,7 @@ with _database() as db:
   const returned = returnFrames.find((frame) => frame.method === "resume" && frame.params?.session_id === first);
   const returnedReply = returnFrames.find((frame) => frame.id === returned?.id && (frame.result || frame.error));
   if (returnedReply?.result?.attached !== "live_turn") throw new Error(`return to the parked chat did not attach to its live turn: ${redact(JSON.stringify(returnedReply ?? null))}`);
-  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) !== "needs you here", "returned chat row is no longer marked parked");
+  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) !== "needs you in this tab", "returned chat row is no longer marked parked");
   await waitFor(async () => { const rows = parkedIn(framesBeforeReturn); return rows !== undefined && rows.length === 0; }, "the idle new chat closed instead of parking");
   if ((await page.locator("body").innerText()).includes("parked_session_changed")) throw new Error("a parked_session_changed event reached the page");
   // later steps open home's newest chat: drop the new chat's row

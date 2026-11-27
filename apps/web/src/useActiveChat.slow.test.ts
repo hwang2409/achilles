@@ -770,14 +770,6 @@ test("new chat refused by the parked limit keeps the new chat and never sends it
   await expect(sent!).rejects.toThrow("this tab already keeps the most chats running");
   expect(harness.active.state.phase).toBe("empty");
   expect(harness.active.busy).toMatchObject({ retry: "new", parked: [{ sessionId: "p1" }, { sessionId: "p2" }, { sessionId: "p3" }] });
-  // "stop and switch" when zeta still counts the oldest chat (here achilles no longer lists it, so nothing is aborted):
-  // the repeated swap is refused again, the notice says that chat is still stopping, and nothing retries by itself
-  const refused = requests.filter((method) => method === "new_session").length;
-  await act(async () => { harness.active.stopAndSwitch(); });
-  await flushUntil(() => harness.active.busy?.stillStopping !== undefined);
-  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
-  expect(harness.active.busy).toMatchObject({ retry: "new", stillStopping: "p1" });
-  expect(requests.filter((method) => method === "new_session")).toHaveLength(refused + 1);
   expect(delivered).toEqual([]);
 });
 
@@ -1389,3 +1381,244 @@ test.each([
   expect(users.map((item) => item?.type === "user" && item.event.type === "user_message" ? `${item.event.mode}:${item.event.delivery_status ?? "ok"}:${item.event.delivery_reason ?? ""}` : "")).toEqual([row.sends && !row.error ? "send:ok:" : `steer:dropped:${row.bubbleReason ?? (row.error === TURN_ENDED ? "turn_end" : row.reason)}`]);
 });
 const TURN_ENDED = "the turn ended before zeta read it.";
+
+// "stop the oldest parked chat and try again": one owner (stopAndRetry) for both refusals of a new chat, parked_limit
+// (this tab keeps 3 chats running) and resident_limit (zeta is full). After the stop, the stopped chat is zeta's
+// attached session, not a parked one; a refused retry while zeta still has it says "still stopping" and never offers
+// to stop a second chat.
+type StopRow = {
+  name: string;
+  // the answer to the repeated new_session: "ok", or a refusal; `attached`: zeta keeps the stopped chat attached;
+  // `listed`: the refusal (parked_limit) or status (resident_limit) lists it
+  retry?: "ok" | { attached?: boolean; listed?: boolean };
+  fail?: "resume" | "abort";
+  move?: "away" | "double";
+  outcome: "switched" | "still_stopping" | "refused_other" | "stop_failed" | "none";
+};
+const stopRows: StopRow[] = [
+  { name: "the retry switches", retry: "ok", outcome: "switched" },
+  { name: "the stopped chat is still attached", retry: { attached: true }, outcome: "still_stopping" },
+  { name: "the stopped chat is still listed", retry: { listed: true }, outcome: "still_stopping" },
+  { name: "other chats hold the slots", retry: {}, outcome: "refused_other" },
+  { name: "the stop fails at resume", fail: "resume", outcome: "stop_failed" },
+  { name: "the stop fails at abort", fail: "abort", outcome: "stop_failed" },
+  { name: "the user opens another chat mid-stop", move: "away", outcome: "none" },
+  { name: "a double click", retry: { attached: true }, move: "double", outcome: "still_stopping" },
+];
+const stopCases = (["parked_limit", "resident_limit"] as const).flatMap((limit) => stopRows.map((row) => ({ ...row, limit })));
+
+test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name", async (row) => {
+  const location = { pathname: "/", search: "?chat=chat", hash: "", href: "http://achilles.test/?chat=chat", origin: "http://achilles.test", assign() {} };
+  const go = (path: string) => { const url = new URL(path, location.href); Object.assign(location, { pathname: url.pathname, search: url.search, hash: url.hash, href: url.href }); };
+  const listed = ["chat", "p1", "p2", "p3", "other", "fresh"].map((id) => ({ ...chat, session_id: id, title: id, page_route: "/", last_state: id.startsWith("p") ? "running" : "idle" }));
+  setGlobals({
+    localStorage: new MemoryStorage(), location,
+    history: { state: null, pushState(_state: unknown, _title: string, path: string) { go(path); }, replaceState(_state: unknown, _title: string, path: string) { go(path); } },
+    addEventListener() {}, removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
+      if (url === "/api/pages/home/session") return Response.json({ session_id: "fresh" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: listed, next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  // zeta: "chat" attached, p1..p3 parked (oldest first). a resume takes a chat and parks the attached one
+  const zeta = { attached: "chat", parked: ["p1", "p2", "p3"], newSessions: 0 };
+  const calls: string[] = [];
+  const midStop = deferred<void>();
+  const refusal = (parkedIds: string[]) => row.limit === "parked_limit"
+    ? Object.assign(new Error("parked limit"), { code: -32004, data: { reason: "parked_limit", parked: parkedIds } })
+    : Object.assign(new Error("resident limit"), { code: -32004, data: { reason: "resident_limit" } });
+  const client = {
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "session_park"],
+    request: async (method: string, params?: { session_id?: string }) => {
+      calls.push(params?.session_id ? `${method} ${params.session_id}` : method);
+      if (method === "status") return { session: { session_id: zeta.attached }, state: "idle", parked_sessions: zeta.parked.map((id) => ({ session_id: id, state: "running", pending_approvals: 0 })) };
+      if (method === "resume") {
+        const id = params!.session_id!;
+        if (id === "p1" && row.move === "away") await midStop.promise;
+        if (id === "p1" && row.fail === "resume") throw new Error("zeta is restarting");
+        if (id !== zeta.attached) { zeta.parked = [...zeta.parked.filter((other) => other !== id), zeta.attached]; zeta.attached = id; }
+        return { session: { name: null } };
+      }
+      if (method === "abort") { if (row.fail === "abort") throw new Error("abort failed"); return {}; }
+      if (method === "new_session") {
+        zeta.newSessions += 1;
+        // the first new chat is refused (the tab keeps 3 chats running, or zeta is full); the retry answers per row
+        if (zeta.newSessions === 1) throw refusal(zeta.parked);
+        const answer = row.retry ?? {};
+        if (answer === "ok") { zeta.parked = zeta.parked.filter((id) => id !== zeta.attached); zeta.attached = "fresh"; return { session: { session_id: "fresh" } }; }
+        // after the stop zeta has p1 attached and p2, p3, chat parked. attached: p1 still holds work, so zeta keeps it
+        // attached; listed: it parked again; neither: p1 closed, and "other" (another tab's chat... here a new
+        // parked one) holds the slot
+        if (answer.listed) { zeta.parked = ["p1", "p2", "p3"]; zeta.attached = "chat"; }
+        else if (!answer.attached) { zeta.parked = ["p2", "p3", "other"]; zeta.attached = "chat"; }
+        throw refusal(zeta.parked);
+      }
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = () => { active = useActiveChat(client as never, true, clock as never, true); return null; };
+  const settle = async () => { for (let flush = 0; flush < 30; flush += 1) await act(async () => {}); };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => active.state.phase === "ready");
+  await act(async () => { await active.newChat(); });
+  await settle();
+  if (row.limit === "parked_limit") expect(active.busy?.parked?.map((entry) => entry.sessionId)).toEqual(["p1", "p2", "p3"]);
+  else expect(active.state).toMatchObject({ phase: "error", error: TOO_MANY_CHATS });
+  calls.splice(0);
+
+  await act(async () => { void active.stopAndRetry(); if (row.move === "double") void active.stopAndRetry(); });
+  if (row.move === "away") {
+    expect(active.stop).toMatchObject({ sessionId: "p1", phase: "stopping" });
+    await act(async () => { active.selectChat(listed.find((entry) => entry.session_id === "other")!); });
+    midStop.resolve();
+  }
+  await settle();
+  clock.advance(5_000);
+  await settle();
+
+  const sent = (method: string) => calls.filter((call) => call.startsWith(method));
+  expect(sent("resume p1"), "the oldest parked chat (zeta's order) is resumed once").toHaveLength(1);
+  expect(sent("abort"), "one chat is aborted at most").toEqual(row.fail === "resume" || row.move === "away" ? [] : ["abort p1"]);
+  expect(sent("new_session"), "the refused new chat is repeated once, after the stop").toHaveLength(row.fail || row.move === "away" ? 0 : 1);
+  switch (row.outcome) {
+    case "switched":
+      expect(active.stop).toBeNull();
+      expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
+      break;
+    case "still_stopping":
+      expect(active.stop, "the stopped chat is named as still stopping").toEqual({ sessionId: "p1", phase: "still_stopping" });
+      break;
+    case "refused_other":
+      expect(active.stop).toBeNull();
+      if (row.limit === "parked_limit") expect(active.busy?.parked?.map((entry) => entry.sessionId)).not.toContain("p1");
+      break;
+    case "stop_failed":
+      expect(active.stop).toMatchObject({ sessionId: "p1", phase: "failed" });
+      expect((active.stop as { error: string }).error).toContain(row.fail === "resume" ? "zeta is restarting" : "abort failed");
+      // a failed abort left p1 attached and "chat" parked: the list is read again
+      if (row.fail === "abort") expect(calls.at(-1)).toBe("status");
+      break;
+    case "none":
+      expect(active.stop).toBeNull();
+      break;
+  }
+  if (row.outcome === "still_stopping") {
+    // "try again" stays a retry of that stop: refused again, it still names p1 and never aborts a second chat
+    calls.splice(0);
+    await act(async () => { active.retryStopped(); });
+    await settle();
+    expect(sent("abort")).toEqual([]);
+    expect(sent("new_session")).toHaveLength(1);
+    expect(active.stop).toEqual({ sessionId: "p1", phase: "still_stopping" });
+  }
+});
+
+// the notice and the stop both follow zeta's status order (oldest first), not the refusal's list, which has no set order
+test("the parked_limit notice and its stop take the oldest chat from status, not from the refusal's list", async () => {
+  const location = { pathname: "/", search: "?chat=chat", hash: "", href: "http://achilles.test/?chat=chat", origin: "http://achilles.test", assign() {} };
+  const go = (path: string) => { const url = new URL(path, location.href); Object.assign(location, { pathname: url.pathname, search: url.search, hash: url.hash, href: url.href }); };
+  setGlobals({
+    localStorage: new MemoryStorage(), location,
+    history: { state: null, pushState(_state: unknown, _title: string, path: string) { go(path); }, replaceState(_state: unknown, _title: string, path: string) { go(path); } },
+    addEventListener() {}, removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: ["chat", "p1", "p2", "p3"].map((id) => ({ ...chat, session_id: id, title: id })), next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const calls: string[] = [];
+  const client = {
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "session_park"],
+    request: async (method: string, params?: { session_id?: string }) => {
+      calls.push(params?.session_id ? `${method} ${params.session_id}` : method);
+      if (method === "status") return { session: { session_id: "chat" }, state: "idle", parked_sessions: ["p2", "p3", "p1"].map((id) => ({ session_id: id, state: "running", pending_approvals: 0 })) };
+      if (method === "new_session") throw Object.assign(new Error("parked limit"), { code: -32004, data: { reason: "parked_limit", parked: ["p1", "p2", "p3"] } });
+      if (method === "resume") return { session: { name: null } };
+      if (method === "abort") throw new Error("abort failed");
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = () => { active = useActiveChat(client as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => active.state.phase === "ready");
+  await act(async () => { await active.newChat(); });
+  await flushUntil(() => Boolean(active.busy?.parked));
+  expect(active.busy?.parked?.map((entry) => entry.sessionId)).toEqual(["p2", "p3", "p1"]);
+  calls.splice(0);
+  await act(async () => { await active.stopAndRetry(); });
+  expect(calls.filter((call) => call.startsWith("resume")), "the stop took the oldest chat in status order").toEqual(["resume p2"]);
+});
+
+// a refused switch to another chat keeps the shown chat (header, transcript, composer) under the notice, and the url
+// goes back to the chat zeta kept attached
+test("a switch refused by the parked limit keeps the shown chat and its url", async () => {
+  const location = { pathname: "/", search: "?chat=chat", hash: "", href: "http://achilles.test/?chat=chat", origin: "http://achilles.test", assign() {} };
+  const go = (path: string) => { const url = new URL(path, location.href); Object.assign(location, { pathname: url.pathname, search: url.search, hash: url.hash, href: url.href }); };
+  const listed = ["chat", "p1", "p2", "p3", "idle"].map((id) => ({ ...chat, session_id: id, title: id, page_route: "/" }));
+  setGlobals({
+    localStorage: new MemoryStorage(), location,
+    history: { state: null, pushState(_state: unknown, _title: string, path: string) { go(path); }, replaceState(_state: unknown, _title: string, path: string) { go(path); } },
+    addEventListener() {}, removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: listed, next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const client = {
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "session_park"],
+    request: async (method: string, params?: { session_id?: string }) => {
+      if (method === "status") return { session: { session_id: "chat" }, state: "running", parked_sessions: ["p1", "p2", "p3"].map((id) => ({ session_id: id, state: "running", pending_approvals: 0 })) };
+      if (method === "resume" && params?.session_id === "idle") throw Object.assign(new Error("parked limit"), { code: -32004, data: { reason: "parked_limit", parked: ["p1", "p2", "p3"] } });
+      if (method === "resume") return { session: { name: null } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "running", pending_approvals: [] } };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const phases: string[] = [];
+  const Harness = () => { active = useActiveChat(client as never, true, clock as never, true); phases.push(active.state.phase === "ready" ? `ready ${active.state.sessionId}` : active.state.phase); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => active.state.phase === "ready");
+  phases.splice(0);
+  await act(async () => { active.selectChat(listed.find((entry) => entry.session_id === "idle")!); });
+  for (let flush = 0; flush < 10; flush += 1) { await act(async () => {}); clock.advance(1_000); }
+  await flushUntil(() => Boolean(active.busy?.parked));
+  for (let flush = 0; flush < 10; flush += 1) await act(async () => {});
+  expect([...new Set(phases)], "the shown chat was replaced while the switch was refused").toEqual(["ready chat"]);
+  expect(active.busy).toMatchObject({ retry: "attach", target: { session_id: "idle" } });
+  expect(location.search, "the url names the refused chat").toBe("?chat=chat");
+  expect(active.selectedId).toBe("chat");
+});

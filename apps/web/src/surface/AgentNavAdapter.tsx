@@ -310,9 +310,10 @@ function ChatRow({ chat, build, parked, onScreen, current, active, index, query,
   // a chat this tab keeps running reads its live state, not the last one written
   const state = chat.purpose === "page_build" ? buildTone(build) : parked ? (parked.pending_approvals > 0 ? "approval" : "running") : chat.last_state;
   const shown = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
-  const label = parked && shown ? `${shown} here` : shown;
   const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
-  const meta = label && <span className="chat-row-meta" title={parked ? "running in this tab. closing this tab stops it after about 90 s" : undefined}>{label}</span>;
+  // a chat this tab keeps running gets a short mark (the tooltip says what it means), so a long title keeps its room
+  const here = parked ? state === "approval" ? "waiting for you in this tab" : "running in this tab" : null;
+  const meta = shown && <span className="chat-row-meta" data-here={here ? "" : undefined} title={here ? `${here}. closing this tab stops it after about 90 s` : undefined}>{shown}{here && <span className="visually-hidden"> in this tab</span>}</span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div ref={seen} id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>

@@ -530,7 +530,7 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
   } finally { await Promise.all(tabs.map((tab) => tab.close())); }
 }
 
-const SAME_CHAT_NOTICE = "this chat is open in another tab. you can read it here.";
+const SAME_CHAT_NOTICE = "this chat is open or kept running in another tab. you can read it here.";
 
 /**
  * gate step 2: tab C opens the chat tab A controls. zeta refuses C's `resume` (session_controlled) and C reads the chat

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Transport } from "@fulcrum/zeta";
-import { holdAttached, parkedRows, readHeld, reclaimHeld, refreshParked, stopParked, StopError, subscribeParked, takeParkedEvent } from "./parked";
+import { holdAttached, parkedRows, readHeld, reclaimHeld, refreshParked, stopParked, StopError, subscribeParked, takeParkedEvent, verifyChatStates } from "./parked";
 import { controlledRetry } from "./session";
 import { teeRunEnds } from "./turnEnd";
 
@@ -79,7 +79,8 @@ describe("stopParked", () => {
     const { sent, client } = zeta();
     expect(await stopParked(client as never, "a", async () => binding, () => true)).toBe(true);
     expect(sent).toEqual(["resume a", "abort a", "status"]);
-    expect(patches).toEqual(['/api/chats/a {"last_state":"idle"}']);
+    // the row keeps its state: the chat may still hold work, and the chat list check corrects it once zeta closed it
+    expect(patches).toEqual([]);
   });
 
   test.each([
@@ -109,7 +110,8 @@ describe("stopParked", () => {
     const caught = await stopParked(client as never, "a", async () => binding, () => true).catch((error: unknown) => error);
     expect(caught).toBeInstanceOf(StopError);
     expect((caught as Error).message).toBe("abort failed");
-    expect(sent).toEqual(["resume a", "abort a"]);
+    // zeta now has the chat attached and the shown one parked: the list is read again
+    expect(sent).toEqual(["resume a", "abort a", "status"]);
     expect(patches).toEqual([]);
   });
 
@@ -183,5 +185,43 @@ describe("reclaimHeld", () => {
     const { sent, client } = zeta({ p1: [refusal({ reason: "resident_limit" }, -32004)] });
     await reclaimHeld(client as never, null, async () => binding);
     expect(sent).toEqual(["resume p1", "status"]);
+  });
+
+  // the url is the tab's chat, read at each attach: the first attach's target (left to it) is taken back when a later
+  // attach on the connection opens another chat before the first one resumed it
+  test("a later attach with another target takes back the first target too", async () => {
+    hold("shown", ["p1"]);
+    const { sent, client } = zeta();
+    const first = reclaimHeld(client as never, "shown", async () => binding);
+    const later = reclaimHeld(client as never, "other", async () => binding);
+    await Promise.all([first, later]);
+    await reclaimHeld(client as never, "other", async () => binding);
+    expect(sent).toEqual(["resume p1", "status", "resume shown", "status"]);
+  });
+});
+
+describe("verifyChatStates", () => {
+  // zeta's live status per chat; a read of a chat zeta does not know fails
+  const zeta = (live: Record<string, string>) => {
+    const reads: string[] = [];
+    return { reads, client: { request: async (method: string, params: { session_id: string; collection: string }) => {
+      expect(method).toBe("state_session");
+      reads.push(params.session_id);
+      if (!(params.session_id in live)) throw Object.assign(new Error("resource not found"), { code: -32602, data: { code: "session_not_found" } });
+      return { session: { session_id: params.session_id, status: live[params.session_id] }, collection: params.collection, items: [], next_cursor: null };
+    } } };
+  };
+
+  test("a running or waiting row this tab does not hold is checked once and gets zeta's state", async () => {
+    const { reads, client } = zeta({ closed: "idle", failed: "failed", still: "running", waits: "approval", nowRuns: "running" });
+    const chats = [
+      { session_id: "closed", last_state: "running" }, { session_id: "failed", last_state: "approval" }, { session_id: "still", last_state: "running" },
+      { session_id: "waits", last_state: "approval" }, { session_id: "nowRuns", last_state: "approval" }, { session_id: "idle", last_state: "idle" },
+      { session_id: "held", last_state: "running" }, { session_id: "unknown", last_state: "running" },
+    ];
+    expect(await verifyChatStates(client as never, chats, new Set(["held"]))).toBe(3);
+    // idle rows and the chats this tab holds are not read
+    expect(reads.sort()).toEqual(["closed", "failed", "nowRuns", "still", "unknown", "waits"]);
+    expect(patches.sort()).toEqual(['/api/chats/closed {"last_state":"idle"}', '/api/chats/failed {"last_state":"idle"}', '/api/chats/nowRuns {"last_state":"running"}']);
   });
 });
