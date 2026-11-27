@@ -26,7 +26,7 @@ type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "f
 /** Which library_read_v1 methods this zeta advertised; both false means the older status snapshot. */
 export type LibraryReads = { catalog: boolean; read: boolean };
 /** Present only when this zeta grants library_write_v1. `allowed: false`: this tab controls zeta, but zeta did not list
- * this kind's write method. `feedback`: the last take-control refusal, held by the router so it survives a remount. */
+ * this kind's write method. `feedback`: the last take-control refusal; the observer banner shows it, and the buttons point to it. */
 export type LibraryWrite = {
   controller: boolean; allowed: boolean; takeControl: () => Promise<string | null>; feedback: string | null;
   /** In-memory drafts held by the router, keyed `<kind>/new`, so a remount after a socket drop restores the form. */
@@ -269,7 +269,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
           </ul></Field> : null}
         </dl>
         {reads.catalog && reads.read ? <LibraryText key={rowKey(selected)} client={client} method={methods.read} row={selected} noun={noun}
-          edit={write && { allowed: write.allowed, taking, feedback: controlFeedback, start: (opened) => startEdit(selected, opened) }}
+          edit={write && { allowed: write.allowed, controller: write.controller, taking, feedback: controlFeedback, start: (opened) => startEdit(selected, opened) }}
           onGone={() => {
             focusNew.current = new Set();
             setSelection(null);
@@ -292,11 +292,11 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
         <div className="library-snapshot">
           <span data-live={reads.catalog || undefined}>{reads.catalog ? "Effective scope" : "Session snapshot may be stale"}</span>
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
-          {write && !creating && !editing && <button type="button" className="library-new ui-button" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
+          {write && !creating && !editing && <button type="button" className="library-new ui-button" data-write-surface="library.create" aria-disabled={taking || !write.allowed || !write.controller}
             ref={newButton}
-            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
+            aria-describedby={controlDescription(write.allowed, controlFeedback)} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
-        {!creating && !editing && (controlFeedback || (write && !write.allowed)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
+        {!creating && !editing && write && !write.allowed && <p id="library-control-feedback" role="status" className="library-control">{REFUSED_NOTICE}</p>}
       </div>
       {saved && <div role="status" className="library-saved">
         <p>{savedNotice(saved.name, saved.where)}</p>
@@ -407,7 +407,7 @@ function SkippedFiles({ skipped }: { skipped: Skipped }) {
  * The selected row's untrusted text. Rendered with `key={rowKey(row)}`, so a new selection is a new instance:
  * a late read for the old row lands on an unmounted instance and never shows. Unmounting also aborts the request.
  */
-type EditControl = { allowed: boolean; taking: boolean; feedback: string | null; start: (opened: { revision: string; document: string }) => void };
+type EditControl = { allowed: boolean; controller: boolean; taking: boolean; feedback: string | null; start: (opened: { revision: string; document: string }) => void };
 function LibraryText({ client, method, row, noun, edit, onGone }: { client: ZetaClient; method: string; row: CatalogRow; noun: string; edit: EditControl | null; onGone: () => void }) {
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -473,8 +473,8 @@ function EditEntry({ edit, row, body }: { edit: EditControl; row: CatalogRow; bo
   if (why || !body.editable) return <p className="library-edit-why">{why}</p>;
   const opened = body.editable;
   return <div className="library-text-actions">
-    <button type="button" data-write-surface="library.edit" aria-disabled={edit.taking || !edit.allowed}
-      aria-describedby={edit.feedback || !edit.allowed ? "library-control-feedback" : undefined} onClick={() => edit.start(opened)}>{edit.taking ? "taking control…" : "edit"}</button>
+    <button type="button" data-write-surface="library.edit" aria-disabled={edit.taking || !edit.allowed || !edit.controller}
+      aria-describedby={controlDescription(edit.allowed, edit.feedback)} onClick={() => edit.start(opened)}>{edit.taking ? "taking control…" : "edit"}</button>
   </div>;
 }
 
@@ -500,3 +500,7 @@ function Metadata({ row }: { row: CatalogRow }) {
     <Field label="max turns">{row.maxTurns ?? "not specified"}</Field>
   </>;
 }
+
+// a write the build does not allow says so under the bar; a refused take control says so in the observer banner.
+const controlDescription = (allowed: boolean, feedback: string | null) =>
+  !allowed ? "library-control-feedback" : feedback ? "take-control-feedback" : undefined;

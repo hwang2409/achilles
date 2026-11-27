@@ -3347,7 +3347,8 @@ with _database() as db:
   console.log("cap step: five catalog tabs next to the chat tab all control zeta");
   const capFillers: Array<{ client: ReturnType<typeof createClient>; sessionId: string }> = [];
   for (let opened = 0; ; opened++) {
-    if (opened > 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
+    // the chat tab holds one of the sixteen slots, so fillers alone can be at most fifteen
+    if (opened >= 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
     // the same handoff the browser reads, so the raw controllers reach the zeta serve the tabs use.
     const discovery = await fetch(discoveryUrl).then((response) => response.json()) as { url: string; controller_token: string };
     const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
@@ -3362,7 +3363,8 @@ with _database() as db:
     if (!created.session?.session_id) { filler.close(); throw new Error("a cap filler new_session returned no session id"); }
     capFillers.push({ client: filler, sessionId: created.session.session_id });
   }
-  if (!capFillers.length) throw new Error("no session-holding controller connected before the cap step");
+  // only the chat tab holds a session here, so the cap of sixteen leaves exactly fifteen filler slots
+  if (capFillers.length !== 15) throw new Error(`expected 15 cap fillers next to the chat tab, got ${capFillers.length}`);
   console.log(`cap step: ${capFillers.length} session-holding controllers filled zeta next to the chat tab`);
   const observerPage = await browser.newPage();
   const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId, mcpTestSurfaceId, ...mcpOAuthSurfaceIds, ...agentWriteSurfaceIds]);

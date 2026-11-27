@@ -439,6 +439,14 @@ function mcpAdd(): Row {
     const start = roles.length;
     const url = location.href;
     await click(select(app, tag("mcp.add")));
+    if (authority === "observer") {
+      // an observer takes control before the form opens; zeta is still full, so the banner says so and no form opens
+      expect(await app.findByText(/^zeta is still full at .+\.$/)).toBeTruthy();
+      expect(roles.slice(start)).toEqual(["controller"]);
+      expect(app.queryByRole("textbox", { name: "connection name" })).toBeNull();
+      expect(writes).toEqual([]);
+      return;
+    }
     await change(app.getByRole("textbox", { name: "connection name" }), "fixture-user");
     const command = app.getByLabelText("local command") as HTMLInputElement;
     await change(command, mcpAddCanary);
@@ -454,15 +462,9 @@ function mcpAdd(): Row {
     expect(command.value).toBe("");
     expect(location.href).toBe(url);
     expect(JSON.stringify([localStorage, sessionStorage])).not.toContain(mcpAddCanary);
-    if (authority === "observer") {
-      expect(app.getByRole("alert").textContent).toContain("too many tabs control zeta");
-      expect(roles.slice(start)).toEqual(["controller"]);
-      expect(writes).toEqual([]);
-    } else {
-      expect(app.getByText(/new sessions use this configuration/)).toBeTruthy();
-      expect(roles.slice(start)).toEqual([]);
-      expect(writes).toEqual([method]);
-    }
+    expect(app.getByText(/new sessions use this configuration/)).toBeTruthy();
+    expect(roles.slice(start)).toEqual([]);
+    expect(writes).toEqual([method]);
   } };
 }
 
@@ -978,6 +980,26 @@ test("+ new skill on an observer tab takes control and opens the editor in one c
     for (let turn = 0; turn < 20 && app.container.querySelector(".observer-banner"); turn++) await act(async () => {});
     expect(app.container.querySelector(".observer-banner"), "take control did not succeed").toBeNull();
     expect(app.container.querySelector(".library-editor"), "the editor did not open after take control").not.toBeNull();
+  });
+});
+
+test("an observer on /connections that takes control from the banner reads again and drops the observer note", async () => {
+  // zeta refuses observer reads (-32003); a module that does not read again on the new client keeps the observer note
+  const freed = { current: false };
+  const roles: string[] = [];
+  const list = { revision: "a".repeat(64), data: { items: [{ name: "fixture-user", scope: "user", enabled: true,
+    trusted: true, status: "configured", auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } }] } };
+  await withApp("observer", { path: "/connections", freed, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: ["mcp_server_list"] } } }),
+    mcp_server_list: () => roles.at(-1) === "observer" ? { error: { code: -32003, message: "observer" } } : { result: list },
+  } }, async (app) => {
+    expect(await app.findByText("this tab cannot read this while zeta is full.")).toBeTruthy();
+    freed.current = true;
+    await click(app.getByRole("button", { name: "take control" }));
+    for (let turn = 0; turn < 40 && !app.container.textContent?.includes("fixture-user"); turn++) await act(async () => {});
+    expect(app.container.querySelector(".observer-banner"), "take control did not succeed").toBeNull();
+    expect(app.queryByText(/cannot read this/), "the observer note stayed after take control").toBeNull();
+    expect(app.container.textContent, "the connection rows did not load after take control").toContain("fixture-user");
   });
 });
 

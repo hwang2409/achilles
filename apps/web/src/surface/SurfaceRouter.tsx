@@ -44,8 +44,10 @@ export function SurfaceRouter() {
   const connectionStatus = { connected: phase === "connected", label: connectionLabels[phase] ?? "zeta is disconnected" };
   const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const controller = connectionState.phase === "connected" && connectionState.authority === "controller";
-  // The library's take-control reason and drafts live here: a socket replace unmounts the library module, not the router.
-  const [libraryControl, setLibraryControl] = useState<string | null>(null);
+  // the last take-control refusal shows in the banner, whichever button asked; the router holds it so a remount keeps it.
+  const [controlFeedback, setControlFeedback] = useState<string | null>(null);
+  useEffect(() => { if (controller) setControlFeedback(null); }, [controller]);
+  // the library drafts live here: a socket replace unmounts the library module, not the router.
   const [libraryDrafts] = useState(() => new Map<string, CreateDraft>());
   const [libraryEdits] = useState(() => new Map<LibraryKind, EditDraft>());
   // reveals a dropped socket cut short: the drop unmounts the projects module, and the reveal says why on remount.
@@ -62,10 +64,10 @@ export function SurfaceRouter() {
       && connection.state.authority === "controller" ? connection.client : null,
   }));
   const [liveClient] = useState(() => () => connection.client);
-  const takeLibraryControl = async () => {
-    setLibraryControl(null);
+  const takeControl = async () => {
+    setControlFeedback(null);
     const reason = await connection.takeControl();
-    setLibraryControl(reason);
+    setControlFeedback(reason);
     return reason;
   };
   const continuing = useRef(false);
@@ -87,7 +89,7 @@ export function SurfaceRouter() {
       continuing.current = false;
     }
   };
-  const observerBanner = observer && <ObserverBanner connection={connection} />;
+  const observerBanner = observer && <ObserverBanner takeControl={takeControl} feedback={controlFeedback} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!catalog) {
     return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
@@ -101,14 +103,14 @@ export function SurfaceRouter() {
       openTelemetrySettings={supportsFeature(client, HOME_SETTINGS_FEATURE) ? () => location.assign(surfaceHref("/settings") + "#telemetry") : undefined} />
       : route.id === "projects" ? <ProjectsModule client={client} actions={memoryActions} control={{ observer: !controller, withControl: (read) => connection.withControl(read), dropped: projectsDropped }} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
-        write={libraryWrite(client, route.id, controller, takeLibraryControl, controller ? null : libraryControl, libraryDrafts, libraryEdits, libraryWriter)} />) : <ModuleFrame title={route.label}>
+        write={libraryWrite(client, route.id, controller, takeControl, controller ? null : controlFeedback, libraryDrafts, libraryEdits, libraryWriter)} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
   } else if (route.id === "agents") {
     content = <AgentsModule client={client} connecting={connecting} retry={() => connection.retryNow()} />;
   } else if (route.id === "connections") {
-    content = <McpModule client={client} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
+    content = <McpModule client={client} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} controller={controller} takeControl={takeControl} />;
   } else if (route.id === "settings") {
     content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
   } else if (route.id === "accounts") {
@@ -152,15 +154,13 @@ function CatalogShell({ renderShell, route, connectionStatus, banner, children, 
 }
 
 // shown only when zeta refused this tab a control slot (too many controlling tabs, or a client in the other mode).
-function ObserverBanner({ connection }: { connection: Connection }) {
+function ObserverBanner({ takeControl, feedback }: { takeControl: () => Promise<string | null>; feedback: string | null }) {
   const [working, setWorking] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
   // aria-disabled, not disabled: a disabled button drops focus to <body> during the attempt.
-  const takeControl = async () => {
-    setWorking(true); setFeedback(null);
-    const reason = await connection.takeControl();
+  const take = async () => {
+    setWorking(true);
+    await takeControl();
     setWorking(false);
-    setFeedback(reason);
   };
   return <aside className="observer-banner" aria-label="observer mode">
     <p>
@@ -169,6 +169,6 @@ function ObserverBanner({ connection }: { connection: Connection }) {
       {/* the next line of the text, so it sits right under it, not under the taller button */}
       <span id="take-control-feedback" role="status">{feedback}</span>
     </p>
-    <div className="observer-action"><button type="button" className="primary" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
+    <div className="observer-action"><button type="button" className="primary" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void take(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
   </aside>;
 }

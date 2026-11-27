@@ -1296,9 +1296,7 @@ test("try again on the too-many-chats screen makes the new chat again, never the
   expect(active.state).toMatchObject({ phase: "error", error: TOO_MANY_CHATS });
   full = false;
   calls.splice(0);
-  // the screen's "try again" (on older builds it was wired to retryAttachment)
-  const tryAgain = (active as { retryLimit?: () => void }).retryLimit ?? active.retryAttachment;
-  await act(async () => { tryAgain(); });
+  await act(async () => { active.retryLimit(); });
   for (let flush = 0; flush < 40 && active.state.phase !== "ready"; flush += 1) await act(async () => {});
   expect(calls.filter((call) => call.startsWith("resume ") && call !== "resume fresh"), "try again resumed an older chat").toEqual([]);
   expect(calls.filter((call) => call === "new_session"), "try again did not retry the new chat").toHaveLength(1);

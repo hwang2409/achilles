@@ -72,8 +72,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 #take-control-feedback:empty { position: absolute; }
 .observer-banner button { flex: 0 0 auto; min-height: 40px; padding: 0 12px; }
 .observer-banner button[aria-disabled="true"] { cursor: wait; opacity: .65; }
-/* an observer's create buttons look disabled; a click still tries to take control once */
-:root:has(.observer-banner) .module-frame :is([data-write-surface="mcp.add"], [data-write-surface="library.create"], [data-write-surface="library.edit"]) { opacity: .65; }
+/* an observer's create buttons look disabled and a click still tries to take control once; refresh can only fail there */
+:root:has(.observer-banner) .module-frame :is([data-write-surface="mcp.add"], [data-write-surface="library.create"], [data-write-surface="library.edit"], .library-snapshot > button) { cursor: default; opacity: .65; }
 fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .approval-control { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .approval-control button { min-height: 40px; padding: 0 12px; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }

@@ -20,13 +20,15 @@ const detailOf = (path: string) => {
   catch { return null; }
 };
 
-export function McpModule({ client, owner, pathname, connecting, retryConnection }: {
+export function McpModule({ client, owner, pathname, connecting, retryConnection, controller, takeControl }: {
   client: ZetaClient | null; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
+  controller: boolean; takeControl: () => Promise<string | null>;
 }) {
   const { reads } = owner;
   const snapshot = useSyncExternalStore(reads.subscribe, reads.snapshot);
   const [path, setPath] = useState(pathname);
   const [adding, setAdding] = useState(false);
+  const [taking, setTaking] = useState(false);
   const [scope, setScope] = useState<McpScope>(() => detailOf(pathname)?.scope ?? "effective");
   const [retry, setRetry] = useState(0);
   const [reading, setReading] = useState(false);
@@ -97,8 +99,18 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
   const failure = (failure: Failure, project: boolean) => <FailedRead key={`${scope}:${failure.reason}`} failure={failure}
     project={project} retry={retryRead} reading={reading} offline={offline} />;
 
-  const openAdd = () => setAdding(true);
-  return <ModuleFrame title="Connections" actions={snapshot && !adding && <button type="button" className="ui-button" data-write-surface={WRITE_SURFACE.mcpAdd} disabled={!supported} onClick={openAdd}>Add connection</button>}>
+  // an observer tab (zeta was full) takes control first, so the add runs with write authority; a refusal shows in the banner.
+  const openAdd = () => {
+    if (taking) return;
+    if (controller) return setAdding(true);
+    setTaking(true);
+    void takeControl().then((reason) => {
+      setTaking(false);
+      if (!reason) setAdding(true);
+    });
+  };
+  return <ModuleFrame title="Connections" actions={snapshot && !adding && <button type="button" className="ui-button" data-write-surface={WRITE_SURFACE.mcpAdd}
+    disabled={!supported} aria-disabled={taking || !controller} onClick={openAdd}>{taking ? "taking control…" : "Add connection"}</button>}>
     <div className="mcp-place">
       {client && !supported ? <ModuleState kind="unsupported" title="needs a newer zeta" detail="update zeta to manage MCP connections here" />
         : offline && !retained ? connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
