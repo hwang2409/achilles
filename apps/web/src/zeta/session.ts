@@ -23,7 +23,7 @@ export class ChatBusyError extends Error {
 }
 
 /** zeta refuses `resume` and `new_session` (-32004, `data.reason: "resident_limit"`) while it holds all the open chats it allows. */
-export const TOO_MANY_CHATS = "zeta has too many open chats. a closed tab keeps its chat open for about 90 s, so wait a minute or close a chat tab, then try again.";
+export const TOO_MANY_CHATS = "zeta has too many open chats. a closed tab keeps its chat open for about 90 s, and chats kept running in a tab count too, so wait a minute or close a chat tab, then try again.";
 export class TooManyChatsError extends Error {
   constructor() { super(TOO_MANY_CHATS); }
 }
@@ -31,6 +31,21 @@ export const isResidentLimit = (caught: unknown) => {
   const error = caught as { code?: unknown; data?: { reason?: unknown } | null } | null;
   return error?.code === -32004 && error.data?.reason === "resident_limit";
 };
+
+/** zeta refuses a swap that would park one more busy chat (-32004, `data.reason: "parked_limit"`): this tab already keeps
+ * `parked` running (the parked and closing chats, in no set order). */
+export class ParkedLimitError extends Error {
+  constructor(readonly parked: string[]) { super("this tab already keeps the most chats running that zeta allows"); }
+}
+/** The ParkedLimitError for a parked_limit refusal, else null. `data.parked` is outside input: only string ids are kept. */
+export const parkedLimit = (caught: unknown) => {
+  const error = caught as { code?: unknown; data?: { reason?: unknown; parked?: unknown } | null } | null;
+  if (error?.code !== -32004 || error.data?.reason !== "parked_limit") return null;
+  const parked = error.data.parked;
+  return new ParkedLimitError(Array.isArray(parked) ? parked.filter((id): id is string => typeof id === "string") : []);
+};
+/** A swap refusal as the error achilles shows: too many chats, too many parked chats, or `caught` unchanged. */
+export const swapRefusal = (caught: unknown) => isResidentLimit(caught) ? new TooManyChatsError() : parkedLimit(caught) ?? caught;
 
 type SessionSettings = { model: string; approval_mode?: string | null };
 type ApprovalModeResult = { approvalMode?: string | null; model: string; pending: boolean };
@@ -87,7 +102,8 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
       const { code: reason, session_id: refusedId } = (caught as { data?: { code?: string; session_id?: string } }).data ?? {};
       if (reason === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
       if (reason === "session_owned") throw new Error(sessionOwned);
-      if (isResidentLimit(caught)) throw new TooManyChatsError();
+      const refusal = swapRefusal(caught);
+      if (refusal !== caught) throw refusal;
       if (reason === "session_controlled") {
         if (refusedId !== id || ++controlledRetries > retries) throw new SessionControlledError(id);
         await controlledRetry.wait(CONTROLLED_RETRY_MS);

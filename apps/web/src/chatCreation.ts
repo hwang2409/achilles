@@ -1,7 +1,7 @@
 import type { ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./surface/AgentNavAdapter";
 import { chatQueues } from "./composer/chatQueues";
-import { applyApprovalMode, ChatBusyError, isResidentLimit, pageBinding, runningSession, TooManyChatsError } from "./zeta/session";
+import { applyApprovalMode, pageBinding, swapRefusal } from "./zeta/session";
 
 const STORAGE_KEY = "achilles-pending-chats";
 const MODE_STORAGE_KEY = "achilles-pending-create-modes";
@@ -129,11 +129,8 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     const operation = (async () => {
       let record = existing;
       if (!record) {
-        // zeta refuses new_session while any turn runs, and the client repeats a refused one 3 times (fulcrum retryBusy):
-        // read status first, so a click during a turn sends no new_session and its refusal is never repeated
-        const busy = await step(() => runningSession(input.client));
-        if (busy) throw new ChatBusyError(busy);
-        const result = await step(() => input.client.request("new_session", pageBinding(input.credential, input.cwd)).catch((caught) => { throw isResidentLimit(caught) ? new TooManyChatsError() : caught; })) as { session?: { session_id?: string } };
+        // with session_park, zeta keeps this tab's busy chat running (parked) and starts the new one
+        const result = await step(() => input.client.request("new_session", pageBinding(input.credential, input.cwd)).catch((caught) => { throw swapRefusal(caught); })) as { session?: { session_id?: string } };
         const sessionId = result.session?.session_id;
         if (!sessionId) throw new Error("zeta did not return a session id");
         live();

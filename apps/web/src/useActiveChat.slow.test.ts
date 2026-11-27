@@ -389,6 +389,8 @@ type Row = {
 };
 type TurnZeta = ReturnType<typeof turnZeta>;
 const TURN_RUNNING_ERROR = () => Object.assign(new Error("a turn is already running"), { code: -32004 });
+// zeta parks this tab's busy chat on a swap (session_park), but refuses a 4th: the tab already keeps 3 chats running
+const PARKED_LIMIT_ERROR = () => Object.assign(new Error("parked limit"), { code: -32004, data: { reason: "parked_limit", parked: ["p1", "p2", "p3"] } });
 
 function turnZeta(row: Row) {
   const state = { phase: row.phase, mode: "allow", sets: 0, refused: 0, refuseNext: 0, beforeJoin: null as null | (() => void) };
@@ -708,9 +710,10 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
   }
 });
 
-// zeta refuses new_session (-32004) while another chat's turn runs. the text typed after "new chat" was written for a new
-// chat: it must never reach the running chat, whatever zeta allows.
-test("new chat while another chat's turn runs keeps the new chat and never sends its text to the running chat", async () => {
+// with session_park, new chat during a turn parks the running chat, but zeta refuses (-32004 parked_limit) when this tab
+// already keeps 3 chats running. the text typed after "new chat" was written for a new chat: it must never reach the
+// running chat, whatever zeta allows.
+test("new chat refused by the parked limit keeps the new chat and never sends its text to the running chat", async () => {
   const delivered: { method: string; session: unknown }[] = [];
   const requests: string[] = [];
   setGlobals({
@@ -732,7 +735,7 @@ test("new chat while another chat's turn runs keeps the new chat and never sends
     features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "turn_reconnect"],
     request: async (method: string, params?: { session_id?: string }) => {
       requests.push(method);
-      if (method === "new_session") throw TURN_RUNNING_ERROR();
+      if (method === "new_session") throw PARKED_LIMIT_ERROR();
       if (method === "resume") return { session: { name: null } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "running", pending_approvals: [] } };
@@ -755,17 +758,25 @@ test("new chat while another chat's turn runs keeps the new chat and never sends
   for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
   clock.advance(5_000);
   for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
-  // zeta refuses it during a turn and the client repeats a refused one, so achilles asks status first and sends none
-  expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
+  // no status pre-check: zeta decides whether the running chat parks
+  expect(requests.filter((method) => method === "new_session"), "new_session not sent while a turn runs").toHaveLength(1);
   // the composer steers when the shown chat runs (App: `turn === "running"`), so send the way it would
   const steer = harness.active.state.phase === "ready";
   let sent: Promise<void> | null = null;
   await act(async () => { sent = harness.active.send("second story", { steer }, () => {}); await sent.catch(() => {}); });
   expect(delivered, "text written for the new chat reached the running chat").toEqual([]);
-  expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
-  await expect(sent!).rejects.toThrow("this tab's chat is still running");
+  await expect(sent!).rejects.toThrow("this tab already keeps the most chats running");
   expect(harness.active.state.phase).toBe("empty");
-  expect(harness.active.busy).toMatchObject({ sessionId: "chat", retry: "new" });
+  expect(harness.active.busy).toMatchObject({ retry: "new", parked: [{ sessionId: "p1" }, { sessionId: "p2" }, { sessionId: "p3" }] });
+  // "stop and switch" when zeta still counts the oldest chat (here achilles no longer lists it, so nothing is aborted):
+  // the repeated swap is refused again, the notice says that chat is still stopping, and nothing retries by itself
+  const refused = requests.filter((method) => method === "new_session").length;
+  await act(async () => { harness.active.stopAndSwitch(); });
+  await flushUntil(() => harness.active.busy?.stillStopping !== undefined);
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  expect(harness.active.busy).toMatchObject({ retry: "new", stillStopping: "p1" });
+  expect(requests.filter((method) => method === "new_session")).toHaveLength(refused + 1);
+  expect(delivered).toEqual([]);
 });
 
 // unsent rows across a page load, through the page: chatQueues keeps every chat's rows (the new-chat box's too) in browser
@@ -773,7 +784,7 @@ test("new chat while another chat's turn runs keeps the new chat and never sends
 // never twice, never merged into a box
 type UnsentRow = {
   name: string;
-  // "refused": Enter in the new-chat box while another chat's turn runs; "failed": the first send to the created chat fails
+  // "refused": Enter in the new-chat box while this tab keeps 3 chats running (parked_limit); "failed": the first send to the created chat fails
   start: "refused" | "failed";
   // "failed": the user types this into the created chat's box before the reload
   box?: string;
@@ -816,7 +827,7 @@ test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
     request: async (method: string, params?: { session_id?: string; text?: string }) => {
       requests.push(method);
       if (method === "new_session") {
-        if (running) throw TURN_RUNNING_ERROR();
+        if (running) throw PARKED_LIMIT_ERROR();
         created += 1; listed.push(`s${created}`);
         return { session: { session_id: `s${created}` } };
       }
@@ -869,26 +880,26 @@ test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
       const box = composer("new:home");
       box.edit(UNSENT_TEXT);
       await act(async () => { await box.submit(); });
-      expect(box.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("this tab's chat is still running") }]);
+      expect(box.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("this tab already keeps") }]);
       expect(draftStore.get("new:home")).toBe("");
       await load();
       // the page opens its newest chat (the running one): the row was written for a new chat, so it is not there
       expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
       expect(rowsOf(composer("chat"))).toEqual([]);
       expect(sendsOfText(), "text written for the new chat reached the running chat").toEqual([]);
-      expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
+      expect(created, "a chat was made while zeta refused").toBe(0);
       // the turn ends; the notice's "open" shows the new-chat box with the row, still unsent, and makes no chat
       running = false;
       await act(async () => { harness.active.openNewChat(); });
-      expect(requests.filter((method) => method === "new_session"), "open made a chat").toHaveLength(0);
+      expect(created, "open made a chat").toBe(0);
       await flushUntil(() => harness.active.state.phase === "empty");
       const box2 = composer("new:home");
-      expect(box2.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("this tab's chat is still running") }]);
+      expect(box2.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("this tab already keeps") }]);
       expect(sendsOfText()).toEqual([]);
       // retry makes the chat the text was written for, and sends it there once
       await act(async () => { await box2.retry(box2.getModel().queue[0]!.id); });
       await flushUntil(() => harness.active.state.phase === "ready" && harness.active.state.sessionId === "s1");
-      expect(requests.filter((method) => method === "new_session")).toHaveLength(1);
+      expect(created).toBe(1);
       expect(sendsOfText(), "sent other than once, to the new chat").toEqual([{ method: "send", session: "s1", text: UNSENT_TEXT }]);
       // zeta took it: a later page load shows it nowhere and sends nothing
       await load();

@@ -9,7 +9,7 @@ import { getSettings, SETTINGS_KEY, updateSettings } from "./settings";
 import { READ_ONLY_REASON, WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
 import { controlledRetry } from "./zeta/session";
 
-const { fireEvent, render } = await import("@testing-library/react");
+const { fireEvent, render, waitFor } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
@@ -715,17 +715,24 @@ const rows: Record<WriteSurfaceId, Row> = {
   } },
   "create.retry": creationAction("retry"),
   "create.discard": creationAction("discard"),
-  "busy.retry": { kind: "visible", absent: true, options: { rpc: { status: (_params, requests) => ({ result: requests.filter((request) => request === "status").length <= 2 ? { state: "running", session: { session_id: "other" } } : { state: "idle" } }) } }, check: async (app, authority, writes) => {
+  // this tab already keeps a chat running and zeta refuses to park one more: "stop ... and switch" stops it, then retries
+  "busy.retry": { kind: "visible", absent: true, options: { extraChat: { ...chat, session_id: "parked", title: "Parked chat" }, rpc: {
+    new_session: (_params, requests) => requests.includes("abort") ? undefined as never : { error: { code: -32004, message: "parked limit", data: { reason: "parked_limit", parked: ["parked"] } } },
+    status: () => ({ result: { session: { session_id: "session" }, state: "idle", parked_sessions: [{ session_id: "parked", state: "running", pending_approvals: 0 }] } }),
+  } }, check: async (app, authority, writes) => {
     await click(select(app, tag("shell.new-chat")));
-    const control = app.container.querySelector<HTMLElement>(tag("busy.retry"));
     if (authority === "observer") {
-      expect(Boolean(control)).toBe(false);
+      expect(Boolean(app.container.querySelector(tag("busy.retry")))).toBe(false);
       await keydown(select(app, '[data-part="composer"]'), "Enter");
     } else {
-      expect(Boolean(control) && !disabled(control!)).toBe(true);
+      const control = await waitFor(() => select(app, tag("busy.retry")), { timeout: 4000 });
+      expect(control.textContent).toBe('stop "Parked chat" and switch');
+      expect(disabled(control)).toBe(false);
       const before = writes.length;
-      await click(control!);
-      didWrite(writes.slice(before), "new_session");
+      await click(control);
+      await waitFor(() => didWrite(writes.slice(before), "new_session"));
+      // the stopped chat first (resume, abort), then the refused swap again; the new chat's own resume follows
+      expect(writes.slice(before).filter((write) => ["resume", "abort", "new_session"].includes(write)).slice(0, 3)).toEqual(["resume", "abort", "new_session"]);
     }
   } },
   "approval.approve": approval("approve"),
