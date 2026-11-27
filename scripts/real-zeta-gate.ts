@@ -3247,8 +3247,10 @@ with _database() as db:
   const alternateTitle = await alternate.locator(".page-chat-choice-title").innerText();
   await s2Shot(page, "switcher-1440");
   await alternate.click();
-  const alternateId = new URL(page.url()).searchParams.get("chat");
-  if (!alternateId || alternateId === controllerChat) throw new Error("page chat switcher did not select the other page chat");
+  // the url names the other chat once the switch lands (a refused switch never changes it)
+  const urlChat = () => new URL(page.url()).searchParams.get("chat");
+  await waitFor(async () => Boolean(urlChat()) && urlChat() !== controllerChat, "page chat switcher selected the other page chat");
+  const alternateId = urlChat()!;
   await assertCurrentChat(alternateId);
   if (await dockHead(page).locator("strong").textContent() !== alternateTitle) throw new Error("dock title disagreed with selected catalog row");
   await page.goto(`${origin}/reading?chat=${controllerChat}&theme=${encodeURIComponent(theme)}`);
