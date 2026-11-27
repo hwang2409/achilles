@@ -181,7 +181,7 @@ def build_mcp(store: PageStore):
         tools: list[Tool] = [
             Tool(
                 name="write_page",
-                description="rewrite this page: write and compile React/TypeScript that mounts into #root; writes are immediate and audited. "  # noqa: E501
+                description="write and compile React/TypeScript that mounts into #root; writes are immediate and audited. "  # noqa: E501
                 + PAGE_RECORDS_API,
                 inputSchema={
                     "type": "object",
@@ -203,8 +203,9 @@ def build_mcp(store: PageStore):
                     f"this chat is on the page at route {page['route']!r} (title {page['title']!r}); "  # noqa: E501
                     f"create mode is currently {create_status}"
                     + (
-                        "; this chat can rewrite this page with write_page and restore its code. "
-                        if can_edit
+                        "; this chat can still rewrite this page with write_page and restore its "
+                        "code; creating pages and tools needs create mode. "
+                        if can_edit and not page["create_mode"]
                         else ". "
                     )
                     + "Inspect the active React package, code revision history, record counts, "
