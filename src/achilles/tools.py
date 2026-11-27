@@ -18,7 +18,6 @@ BUILTIN_TOOL_NAMES = (
     "inspect_page",
     "create_page",
     "create_tool",
-    "update_layout",
     "restore_version",
 )
 _RESERVED_NAMES = BUILTIN_TOOL_NAMES

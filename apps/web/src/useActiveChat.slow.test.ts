@@ -320,7 +320,7 @@ test("a page refresh keeps the header create mode while the tool refresh still f
   expect(harness.state.serverCreateMode).toBe(true); // the server stored create mode before zeta's refresh failed
   expect(harness.active.state).toMatchObject({ page: { create_mode: false } });
 
-  await act(async () => { await harness.active.refreshPage(); }); // a form write, a finished turn, or update_layout
+  await act(async () => { await harness.active.refreshPage(); }); // a form write, a finished turn, or a compiled page change
   expect(harness.active.toggleBlocked).toBe(true);
   expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "fresh", page: { create_mode: false } });
 });

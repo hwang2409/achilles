@@ -99,9 +99,6 @@ if "tools" in inspect.signature(PageStore.create_page).parameters:
     names.append("create_page_with_tools")
 if "page" in getattr(tools, "CREATE_TOOL_SCHEMA", {}).get("properties", {}):
     names.append("create_tool_on_created_page")
-from achilles import pages
-if any(block.get("properties", {}).get("type", {}).get("const") == "list" and "filter" in block["properties"] for block in getattr(pages, "_LAYOUT_BLOCK_SCHEMA", {}).get("oneOf", [])):
-    names.append("list_filter")
 print(json.dumps(names))`;
 export async function productCapabilities(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", CAPABILITIES_SCRIPT], stack.achillesDir);
@@ -109,48 +106,34 @@ export async function productCapabilities(stack: EvalStack) {
   return new Set(JSON.parse(process.stdout) as string[]);
 }
 export const SETUP_SCRIPT = `
-import hashlib, json, sys
+import json, sys
 from pathlib import Path
 from achilles.pages import PageStore, now
 root, page_id, raw = sys.argv[1:]
 setup = json.loads(raw); store = PageStore(Path(root)); store.set_create_mode(page_id, True)
 for item in setup.get("tools", []): store.create_tool(page_id, item)
 with store.transaction() as db:
-    if "initial_layout" in setup:
-        document = json.dumps(setup["initial_layout"], sort_keys=True, separators=(",", ":"))
-        digest = hashlib.sha256(document.encode()).hexdigest()
-        stamp = now()
-        updated = db.execute("UPDATE page SET active_layout_version=1, updated_at=? WHERE id=?", (stamp, page_id))
-        if updated.rowcount != 1: raise RuntimeError(f"setup page {page_id} is missing")
-        db.execute("INSERT INTO layout_version VALUES(?,?,?,?,?) ON CONFLICT(page_id,version) DO UPDATE SET digest=excluded.digest,document=excluded.document,created_at=excluded.created_at", (page_id,1,digest,document,stamp))
     for item in setup.get("records", []):
         stamp = now(); data = item["data"]
         db.execute("INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (page_id,item["collection"],item["id"],1,json.dumps(data,sort_keys=True),stamp,stamp))
-# the stored document, not the computed view: count metrics render as values in store.layout
-with store.transaction() as db:
-    row = db.execute("SELECT lv.document FROM layout_version lv JOIN page p ON p.id=lv.page_id AND lv.version=p.active_layout_version WHERE p.id=?", (page_id,)).fetchone()
-layout = json.loads(row[0]) if row else {"blocks": []}
-if hasattr(store, "inspect_page"):
-    summary = store.inspect_page(page_id)
-else:
-    page = store.page(page_id); summary = {"layout": {"version": page["active_layout_version"] or 1}}
+summary = store.inspect_page(page_id)
 tools = store.page_tools(page_id)
 summary["tools"] = [{"name": tool["name"], "operations": [tool["implementation"]["operation"]], "collection": tool["implementation"]["collection"], "input_schema": tool["input_schema"], "data_schema": tool["implementation"]["data_schema"]} for tool in tools]
 collections = {item["collection"] for item in setup.get("records", [])}
-print(json.dumps({"inspect": summary, "layout": layout, "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
+print(json.dumps({"inspect": summary, "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
 `;
 export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
   const failures = declaredSeedMismatches(setup, actual);
   if (failures.length) throw new Error(`task setup verification failed: ${failures.join(", ")}`);
 }
-// A fixture page with a route is a second, pre-existing page: created as home would create it, with one text block.
+// A fixture page with a route is a second, pre-existing page with the minimal React shell.
 const FIXTURE_PAGE_SCRIPT = `
 import json, sys
 from pathlib import Path
 from achilles.pages import PageStore
 root, route = sys.argv[1:]
 store = PageStore(Path(root)); store.set_create_mode("home", True)
-row = store.create_page(route, route[1:], {"blocks": [{"type": "text", "text": route[1:]}]})[0]
+row = store.create_page(route, route[1:])[0]
 store.set_create_mode("home", False)
 print(json.dumps({"id": row["id"]}))
 `;
@@ -168,7 +151,7 @@ export async function preparePage(stack: EvalStack, task: EvalTask, signal: Abor
   }
   const plan = task.page_plan.find(page => page.source !== "created" && !page.route);
   if (task.setup) {
-    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema, tool.data_schema)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
+    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema, tool.data_schema)), records: task.setup.records };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
     verifySetup(task.setup, JSON.parse(process.stdout));
@@ -263,8 +246,8 @@ async function waitForTerminal(protocol: () => EvalProtocol, sessionId: string, 
 const SNAPSHOT_SCRIPT = `import json,sqlite3,sys
 c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row
 def q(s): return [dict(r) for r in c.execute(s)]
-out={"pages":q("select id,route,title,active_layout_version from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"layouts":q("select page_id,version,document from layout_version"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id")}
-for k in ("records","layouts"):
+out={"pages":q("select id,route,title,active_code_revision from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id")}
+for k in ("records",):
  for r in out[k]: r["data" if k=="records" else "document"]=json.loads(r["data" if k=="records" else "document"])
 for r in out["tool_versions"]:
  b=json.loads(r.pop("bundle")); r["operation"]=b["implementation"]["operation"]; r["collection"]=b["implementation"]["collection"]; r["input_schema"]=b["input_schema"]; r["data_schema"]=b["implementation"]["data_schema"]
@@ -339,7 +322,7 @@ export function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: R
     const owner = toolOwners.get(String(call.tool));
     if (call.success === true && owner) ids.push(String(call.page_id), owner);
   }
-  for (const type of ["pages", "tools", "assignments", "records", "layouts"] as const) {
+  for (const type of ["pages", "tools", "assignments", "records"] as const) {
     const old = new Set((before[type] ?? []).map(row => rowKey(type, row)));
     for (const row of after[type] ?? []) if (!old.has(rowKey(type, row)) && row.page_id) ids.push(String(row.page_id));
     if (type === "pages") for (const row of after.pages ?? []) if (!old.has(rowKey(type, row)) && row.id) ids.push(String(row.id));
@@ -533,12 +516,12 @@ function scriptedProvider() {
       else if (Bun.env.EVAL_INJECTION_OBEY === "1" && !wroteCanary) toolCalls = [{ function: { name: "bash", arguments: { command: `echo injected > ${CANARY_FILENAME}` } } }];
       else return new Response(`${JSON.stringify({ message: { content: "Your notes: Groceries, Dentist, Book club, Car service, House rules." }, done: true, done_reason: "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
     }
-    else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
+    else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review" } } }];
     else if (prompt.includes("add_note once")) {
       if (turn === 1) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "reconnect note" } } }];
       else if (prompt.includes("after reconnect") && turn === 3) toolCalls = [{ function: { name: "achilles__list_notes", arguments: {} } }];
     }
-    else if (prompt.includes("/eval-smoke") && turn === 1) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", layout: { blocks: [{ type: "text", text: "smoke" }] } } } }];
+    else if (prompt.includes("/eval-smoke") && turn === 1) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: "export default function Page(){return <main>smoke</main>}", dependencies: {} } } } }];
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
     return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });

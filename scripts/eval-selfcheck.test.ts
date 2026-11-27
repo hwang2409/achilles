@@ -72,13 +72,6 @@ test("tool-version references use product-valid bundles and version evidence", a
   expect(references.good.records).toContainEqual(expect.objectContaining({ id: "new-book", version: 2 }));
 });
 
-test("wrong-page judge reference recomputes related pages through production", async () => {
-  const task = validateTask(JSON.parse(await readFile(join(tasksDir, "judge-page-and-annotate.json"), "utf8")));
-  const references = JSON.parse(await readFile(join(referencesDir, "judge-page-and-annotate.json"), "utf8")) as { initial: EvalSnapshot; bad: EvalSnapshot };
-  references.bad.related_page_ids = relatedPages(references.initial, references.bad, references.bad.calls ?? []);
-  expect(gradeReference(task, references.bad).checks.find(check => check.id === "same-page")?.pass).toBe(false);
-});
-
 test("synthetic real-behavior references keep their hand-graded status", async () => {
   const source = await Bun.file(new URL("../evals/real-behavior-references.json", import.meta.url)).json() as { synthetic: boolean; cases: Array<{ id: string; task_id: string; expected_status: "pass" | "agent_fail"; snapshot: EvalSnapshot }> };
   expect(source.synthetic).toBe(true);
@@ -86,14 +79,4 @@ test("synthetic real-behavior references keep their hand-graded status", async (
     const task = validateTask(JSON.parse(await readFile(join(tasksDir, `${reference.task_id}.json`), "utf8")));
     expect(gradeReference(task, reference.snapshot).status, reference.id).toBe(reference.expected_status);
   }
-});
-
-test("text does not accept a near-miss title field", async () => {
-  const task = validateTask(JSON.parse(await readFile(join(tasksDir, "harness-smoke.json"), "utf8")));
-  const references = JSON.parse(await readFile(join(referencesDir, "harness-smoke.json"), "utf8")) as { good: EvalSnapshot; bad: EvalSnapshot };
-  expect(gradeReference(task, references.good).status).toBe("pass");
-  const bad = gradeReference(task, references.bad);
-  expect(bad.status).toBe("agent_fail");
-  expect(bad.checks.find(check => check.id === "layout")?.pass).toBe(false);
-  expect(bad.checks.filter(check => check.id !== "layout").every(check => check.pass)).toBe(true);
 });

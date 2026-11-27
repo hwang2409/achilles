@@ -79,19 +79,7 @@
           "archived": false
         }
       }
-    ],
-    "initial_layout": {
-      "blocks": [
-        {
-          "type": "text",
-          "text": "Notes"
-        },
-        {
-          "type": "list",
-          "collection": "notes"
-        }
-      ]
-    }
+    ]
   },
   "checks": [
     {
@@ -142,13 +130,6 @@
       "id": "no-new-page",
       "type": "no_new_page",
       "page": "notes"
-    },
-    {
-      "id": "layout-kept",
-      "type": "count",
-      "page": "notes",
-      "name": "layouts",
-      "count": 1
     },
     {
       "id": "summary-names-a-note",

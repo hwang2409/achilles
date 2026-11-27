@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 
 import achilles.web as web
 from achilles.mcp_server import _remove_connection
-from achilles.pages import STALE_BUILD, PageStore
+from achilles.pages import PageStore
 from achilles.tools import bundle_digest, validate_bundle
 
 
@@ -565,7 +565,7 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     assert home.stat().st_mode & 0o777 == 0o700
     assert (home / "achilles.sqlite3").stat().st_mode & 0o777 == 0o600
     with sqlite3.connect(home / "achilles.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
     for sidecar in (home / "achilles.sqlite3-wal", home / "achilles.sqlite3-shm"):
         if sidecar.exists():
             assert sidecar.stat().st_mode & 0o777 == 0o600
@@ -873,9 +873,13 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
     store.create_tool("home", bundle)
     store.create_tool("home", bundle)
     store.set_create_mode("home", True)
-    other = store.create_page("/other", "other", {"blocks": [{"type": "text", "text": "x"}]})
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("other", "/other", "other", "2025-01-01", "2025-01-01"),
+        )
     home_token = store.ensure_credential("home")
-    other_token = store.ensure_credential(other[0]["id"])
+    other_token = store.ensure_credential("other")
     client = TestClient(web.create_app())
     path = "/api/pages/home/tools/annotate_trace/rollback"
     headers = {"authorization": f"Bearer {other_token}", "origin": "http://testserver"}
@@ -1212,7 +1216,7 @@ def test_stopped_zeta_names_the_command_for_this_achilles(
     assert response.json()["start"] == (start and start.format(path=path))
 
 
-def test_chat_list_shows_a_chat_only_after_its_first_message(tmp_path: Path) -> None:
+def test_chat_list_includes_a_chat_only_after_its_first_message(tmp_path: Path) -> None:
     client = chat_client()
     client.post("/api/pages/home/chats", json={"session_id": "sent"})
     first = client.patch("/api/chats/sent", json={"first_message": "  about birds  "}).json()
@@ -1305,53 +1309,7 @@ def test_chats_from_a_database_without_the_sent_marker_stay_listed(tmp_path: Pat
         "untitled": (True, None, None),
     }
     with sqlite3.connect(home / "achilles.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
-
-
-def test_layout_restore_is_page_bound_guarded_and_audited(tmp_path: Path) -> None:
-    store = PageStore(tmp_path / "achilles")
-    store.set_create_mode("home", True)
-    page = store.create_page("/notes", "notes", {"blocks": [{"type": "text", "text": "one"}]})
-    page_id = page[0]["id"]
-    store.set_create_mode(page_id, True)
-    store.update_layout(page_id, {"blocks": [{"type": "text", "text": "two"}]}, 1)
-    own = {"authorization": f"Bearer {store.ensure_credential(page_id)}"}
-    other = {"authorization": f"Bearer {store.ensure_credential('home')}"}
-    client = chat_client()
-    restore = f"/api/pages/{page_id}/layout/restore"
-
-    assert client.get(f"/api/pages/{page_id}/versions", headers=other).status_code == 403
-    refused = client.post(restore, headers=other, json={"version": 1, "expected_version": 2})
-    assert refused.status_code == 403
-    stale = client.post(restore, headers=own, json={"version": 1, "expected_version": 1})
-    assert stale.status_code == 409
-    assert stale.json()["error"]["code"] == "conflict"
-    assert store.layout(page_id)["blocks"][0]["text"] == "two"
-
-    restored = client.post(restore, headers=own, json={"version": 1, "expected_version": 2})
-    assert restored.json() == {"version": 3, "restored_from": 1}
-    assert store.layout(page_id)["blocks"][0]["text"] == "one"
-    history = client.get(f"/api/pages/{page_id}/versions", headers=own).json()
-    rows = [
-        (row["version"], row["active"], row["action"], row["restored_from"])
-        for row in history["layout"]
-    ]
-    assert rows == [
-        (3, True, "restore_layout", 1),
-        (2, False, "update_layout", None),
-        (1, False, "create_page", None),
-    ]
-    with store._connect() as db:
-        actions = [
-            row[0] for row in db.execute("SELECT action FROM audit WHERE page_id=?", (page_id,))
-        ]
-    assert actions[-1] == "restore_layout"
-
-    store.set_create_mode(page_id, False)
-    off = client.post(restore, headers=own, json={"version": 2, "expected_version": 3})
-    assert off.status_code == 403
-    assert off.json()["error"]["code"] == "forbidden"
-    assert store.layout(page_id)["blocks"][0]["text"] == "one"
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 def test_versions_lists_tool_versions_with_the_active_one(tmp_path: Path) -> None:
@@ -1418,46 +1376,3 @@ def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: P
     assert artifact.headers["access-control-allow-origin"] == "*"
     assert bootstrap.headers["access-control-allow-origin"] == "*"
     assert "window.achilles" in bootstrap.text
-
-
-def test_block_page_is_named_unsupported_and_code_page_is_not(tmp_path: Path) -> None:
-    root = tmp_path / "achilles"
-    store = PageStore(root)
-    with store.transaction() as db:
-        db.execute(
-            "INSERT INTO layout_version VALUES('home',1,'old',?,'2025-01-01')",
-            (json.dumps({"blocks": [{"type": "text", "text": "old"}]}),),
-        )
-        db.execute("UPDATE page SET active_layout_version=1 WHERE id='home'")
-    with chat_client() as client:
-        block_page = client.get("/api/pages/home").json()
-        assert block_page["code"] is None
-        assert block_page["unsupported_format"] == web.UNSUPPORTED_BLOCK_PAGE
-        with store.transaction() as db:
-            db.execute(
-                "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
-                "artifact_size,diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                ("home", 1, "source", "{}", "b" * 64, 16, None, None, "2025-01-02"),
-            )
-            for version, diagnostics in (
-                (2, "compile error"),
-                (3, f"{STALE_BUILD} 1, but revision 2 is now active"),
-            ):
-                db.execute(
-                    "INSERT INTO code_revision(page_id,version,source,dependencies,"
-                    "diagnostics,created_at) VALUES(?,?,?,?,?,?)",
-                    ("home", version, "source", "{}", diagnostics, "2025-01-03"),
-                )
-            db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
-        code_page = client.get("/api/pages/home").json()
-        history = client.get(
-            "/api/pages/home/versions",
-            headers={"authorization": f"Bearer {store.ensure_credential('home')}"},
-        ).json()
-    assert code_page["code"]["version"] == 1
-    assert code_page["unsupported_format"] is None
-    assert history["code"] == [
-        {"version": 3, "created_at": "2025-01-03", "active": False, "failed": False, "stale": True},
-        {"version": 2, "created_at": "2025-01-03", "active": False, "failed": True, "stale": False},
-        {"version": 1, "created_at": "2025-01-02", "active": True, "failed": False, "stale": False},
-    ]

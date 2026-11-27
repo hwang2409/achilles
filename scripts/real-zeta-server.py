@@ -302,32 +302,14 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                     {
                         "route": "/reading",
                         "title": "reading list",
-                        "layout": {
-                            "blocks": [
-                                {"type": "text", "text": "reading list layout"},
-                                {"type": "form", "title": "add book", "tool": "add_book"},
-                                {
-                                    "type": "metric",
-                                    "label": "review status",
-                                    "value": "waiting on an intentionally long legal and "
-                                    "editorial review",
-                                },
-                                {
-                                    "type": "metric",
-                                    "label": "reading",
-                                    "collection": "books",
-                                    "count": True,
-                                    "where": {"field": "status", "equals": "reading"},
-                                },
-                                {"type": "list", "title": "books", "collection": "books"},
-                                {
-                                    "type": "detail",
-                                    "title": "selected reading book",
-                                    "collection": "books",
-                                    "fields": ["title"],
-                                    "filter": {"field": "status", "equals": "reading"},
-                                },
-                            ]
+                        "package": {
+                            "source": (
+                                'import { createRoot } from "react-dom/client"; '
+                                "function Page(){return <main><h1>reading list</h1>"
+                                "<p>manage books from page chat</p></main>} "
+                                'createRoot(document.getElementById("root")!).render(<Page />);'
+                            ),
+                            "dependencies": {},
                         },
                         "tools": [
                             book_tool("add_book", "insert", "add a book"),
@@ -368,100 +350,6 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             ]
         ),
         ScriptedTurn(content=[TextContent("book added")]),
-        ScriptedTurn(
-            tool_calls=[
-                ToolCall(
-                    "update-reading-layout",
-                    "achilles__update_layout",
-                    {
-                        "layout": {
-                            "blocks": [
-                                {"type": "text", "text": "layout updated without reload"},
-                                {
-                                    "type": "metric",
-                                    "label": "all books",
-                                    "collection": "books",
-                                    "count": True,
-                                },
-                                {
-                                    "type": "metric",
-                                    "label": "review status",
-                                    "value": "waiting on an intentionally long legal and "
-                                    "editorial review",
-                                },
-                                {
-                                    "type": "metric",
-                                    "label": "reading",
-                                    "collection": "books",
-                                    "count": True,
-                                    "where": {"field": "status", "equals": "reading"},
-                                },
-                                {"type": "list", "title": "books", "collection": "books"},
-                                {
-                                    "type": "detail",
-                                    "title": "selected reading book",
-                                    "collection": "books",
-                                    "fields": ["title"],
-                                    "filter": {"field": "status", "equals": "reading"},
-                                },
-                                {"type": "form", "title": "edit book", "tool": "update_book"},
-                            ]
-                        },
-                        "expected_version": 2,
-                    },
-                ),
-                ToolCall(
-                    "list-books-summary",
-                    "achilles__list_books",
-                    {"search": "synthetic-" + "x" * 9_000},
-                ),
-            ]
-        ),
-        ScriptedTurn(content=[TextContent("layout updated")]),
-        ScriptedTurn(
-            tool_calls=[
-                ToolCall(
-                    "stale-reading-layout",
-                    "achilles__update_layout",
-                    {"layout": {"blocks": []}, "expected_version": 2},
-                )
-            ]
-        ),
-        ScriptedTurn(
-            content=[
-                TextContent(
-                    "layout version conflict: inspect the page and retry with its current version."
-                )
-            ]
-        ),
-        ScriptedTurn(
-            tool_calls=[
-                ToolCall(
-                    "invalid-metric-layout",
-                    "achilles__update_layout",
-                    {
-                        "layout": {
-                            "blocks": [
-                                {
-                                    "type": "metric",
-                                    "label": "invalid",
-                                    "collection": "books",
-                                    "count": "yes",
-                                }
-                            ]
-                        },
-                        "expected_version": 3,
-                    },
-                )
-            ]
-        ),
-        ScriptedTurn(
-            content=[
-                TextContent(
-                    "metric update rejected: /layout/blocks/0 must match one valid schema variant."
-                )
-            ]
-        ),
         ScriptedTurn(
             tool_calls=[
                 ToolCall(

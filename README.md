@@ -18,15 +18,15 @@ set `ACHILLES_APPROVAL=ask` to require approval for tool calls.
 
 create-mode pages can use `inspect_page` for themselves and pages they created with `create_page`; older pages can inspect only themselves.
 
-## metric blocks
+## pages
 
-use `{"type":"metric","label":"books","collection":"books","count":true}` to count every record in a collection. add `"where":{"field":"status","equals":"reading"}` to count exact JSON scalar matches. equality keeps JSON types separate, except integer and decimal forms of the same number are equal. `"equals":null` counts records where the field is missing or is explicitly JSON null.
+pages are React/TypeScript packages compiled by achilles. `create_page` accepts source and npm dependencies, or creates a minimal React shell when the package is omitted. `write_page` appends a compiled revision, and `restore_version` restores code or a data tool by appending another revision so history is never rewritten.
 
 ## eval harness
 
 see [EVALS.md](EVALS.md) for how to run one task or the suite, read the report, and add a task.
 
-run the scripted harness with `make eval TASK=harness-smoke`. the current suite covers `agent-data-access`, `create-and-use-tool-same-chat`, `harness-smoke`, `judge-page-and-annotate`, and `second-chat-tools`. use `N=2` for repeats and `MODEL=provider/model` to override the settings-resolved model. `make eval-stack` starts a retained private stack for a ux test; it prints the local achilles url, model, tool policy, and retained state path. the stack uses `--tools 'achilles__*,mcp_discover'` and never forwards api-key environment variables.
+run one scripted task with `make eval TASK=record-crud`. the suite covers page data, concurrent edits, approvals, reconnects, restarts, and multi-chat behavior. use `N=2` for repeats and `MODEL=provider/model` to override the settings-resolved model. `make eval-stack` starts a retained private stack for a ux test; it prints the local achilles url, model, tool policy, and retained state path. the stack uses `--tools 'achilles__*,mcp_discover'` and never forwards api-key environment variables.
 
 use `make stop` to stop only processes started by `make dev`.
 

@@ -1337,7 +1337,7 @@ with _database() as db:
     );
   for (const [index, { path }] of surfaceRoutes.entries()) {
     const refused = await homeMcp(100 + index, "tools/call", {
-      name: "create_page", arguments: { route: path, title: "reserved route probe", layout: { blocks: [] } },
+      name: "create_page", arguments: { route: path, title: "reserved route probe", package: { source: "export default function Page(){return <main />}", dependencies: {} } },
     });
     if (!refused.result?.isError || (await fetch(`${origin}/api/pages${path}`)).status !== 404)
       throw new Error(`create_page did not refuse reserved route ${path}`);
@@ -1345,7 +1345,6 @@ with _database() as db:
   const createApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "create_page" });
   const createApprovalBefore = await createApproval.count();
   const createRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
-  const pageRequestsBeforeCreate = pageIndexRequests.length;
   const annotationComplete = page.getByText("annotation complete", { exact: true });
   const annotationCompleteBefore = await annotationComplete.count();
   await field.fill("create page");
@@ -1358,8 +1357,6 @@ with _database() as db:
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
   await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
-  if (pageIndexRequests.length - pageRequestsBeforeCreate !== 1)
-    throw new Error(`create_page made ${pageIndexRequests.length - pageRequestsBeforeCreate} /api/pages refetches, expected 1`);
   await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
   const pageSection = page.locator('.page-list[data-list-state="ready"]');
   await gateWait.playwright(pageSection, "waitFor");
@@ -1391,8 +1388,8 @@ with _database() as db:
   const sessionsBeforeReading = zetaSessionCount();
   await readingLink.click({ timeout: 20_000 });
   await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === "/reading", { timeout: 20_000 });
-  // an agent-created block page shows only the unsupported-format notice: no block renderer exists
-  await gateWait.playwright(page.locator(".page-unsupported", { hasText: "old block format" }), "waitFor", { state: "visible", timeout: 20_000 }).catch(async (error) => {
+  // an agent-created page renders only its compiled React package
+  await gateWait.playwright(page.locator(".page-frame"), "waitFor", { state: "visible", timeout: 20_000 }).catch(async (error) => {
     throw new Error(`${error}\ncreated page notice did not appear before chat creation: ${redact(await page.locator("body").innerText())}; errors=${redact(errors.join(" | "))}; console=${redact(consoleErrors.join(" | "))}`);
   });
   if ((await page.getByText("loading chat…", { exact: true }).count()) || await chatCount() !== chatsBeforeReading || zetaSessionCount() !== sessionsBeforeReading)
@@ -1576,7 +1573,6 @@ with _database() as db:
   if (
     homeInspect.result?.isError ||
     homeInspectValue.route !== "/reading" ||
-    homeInspectValue.layout_version !== 1 ||
     homeInspectValue.tools?.[0]?.name !== "add_book" ||
     JSON.stringify(homeInspectValue).includes("credentials") ||
     JSON.stringify(homeInspectValue).includes(achillesHome)
@@ -1599,30 +1595,6 @@ with _database() as db:
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   await clickCreateMode(false);
   await waitCreateMode(true);
-  const readingPageCredential = (await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()).trim();
-  secrets.push(readingPageCredential);
-  await homeMcp(29, "initialize", {
-    protocolVersion: "2025-03-26",
-    capabilities: {},
-    clientInfo: { name: "block-state-gate", version: "1" },
-  }, readingPageCredential);
-  const updateLayoutSchema = await homeMcp(30, "tools/list", {}, readingPageCredential);
-  const updateLayoutTool = updateLayoutSchema.result?.tools?.find((tool: { name: string }) => tool.name === "update_layout") as { inputSchema?: { properties?: Record<string, { type?: string }>; required?: string[] } } | undefined;
-  const updateLayoutProperties = updateLayoutTool?.inputSchema?.properties;
-  if (
-    !updateLayoutTool ||
-    updateLayoutProperties?.layout?.type !== "object" ||
-    updateLayoutProperties.expected_version?.type !== "integer" ||
-    JSON.stringify(Object.keys(updateLayoutProperties).sort()) !== JSON.stringify(["expected_version", "layout"]) ||
-    JSON.stringify([...updateLayoutTool.inputSchema.required ?? []].sort()) !== JSON.stringify(["expected_version", "layout"])
-  ) throw new Error(`reading page exposed an unexpected update_layout schema: ${JSON.stringify(updateLayoutSchema)}`);
-  const dLayout = structuredClone(homeInspectValue.layout) as { blocks: Array<Record<string, unknown>> };
-  dLayout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
-  const updatedD = await homeMcp(31, "tools/call", { name: "update_layout", arguments: { layout: dLayout, expected_version: homeInspectValue.layout_version } }, readingPageCredential);
-  if (updatedD.result?.isError) throw new Error(`real D update_layout failed: ${JSON.stringify(updatedD)}`);
-  // D temporarily enables create mode to publish the real layout update. restore it before the later gate journey even when screenshots are disabled.
-  await clickCreateMode(true);
-  await waitCreateMode(false);
 
   await page.setViewportSize({ width: 1440, height: 1400 });
   const desktopViewport = page.viewportSize();
@@ -1635,7 +1607,7 @@ with _database() as db:
         const rect = element.getBoundingClientRect();
         return { visibility: style.visibility, transform: style.transform, display: style.display, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height } };
       };
-      const target = document.querySelector<HTMLElement>(".page-unsupported");
+      const target = document.querySelector<HTMLElement>(".page-frame");
       const targetBox = target?.getBoundingClientRect();
       const point = targetBox ? { x: (Math.max(0, targetBox.left) + Math.min(innerWidth, targetBox.right)) / 2, y: (Math.max(0, targetBox.top) + Math.min(innerHeight, targetBox.bottom)) / 2 } : null;
       const hit = point ? document.elementFromPoint(point.x, point.y) : null;
@@ -1664,7 +1636,7 @@ with _database() as db:
     if (!frame.target || !frame.targetHit || frame.overlayCoversTarget || frame.scroll.window !== 0 || frame.scroll.content !== 0)
       throw new Error(`closed frame target is not visible and unobscured: ${JSON.stringify(frame)}`);
   };
-  await capturePageState("page-chat-closed", page.locator(".page-unsupported"), 844, 900, async (viewport) => {
+  await capturePageState("page-chat-closed", page.locator(".page-frame"), 844, 900, async (viewport) => {
     if (viewport === "390px") {
       await assertClosedFrame(viewport);
       return;
@@ -1692,7 +1664,7 @@ with _database() as db:
   if (await pageChatBar.getAttribute("aria-expanded") !== "false") throw new Error(`page chat was not closed after matrix: ${JSON.stringify(await pageChatLayout())}`);
   const closedGeometry = await page.evaluate(() => {
     const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
-    const action = document.querySelector<HTMLElement>(".page-unsupported")?.getBoundingClientRect();
+    const action = document.querySelector<HTMLElement>(".page-frame")?.getBoundingClientRect();
     return { barBottom: bar?.bottom ?? 0, barHeight: bar?.height ?? 0, actionBottom: action?.bottom ?? 0, viewport: innerHeight };
   });
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
@@ -1739,7 +1711,7 @@ with _database() as db:
       throw new Error("390px page chat tab focus escaped the modal sheet");
   }
   await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations().map((animation) => animation.finished)));
-  const backgroundControl = page.locator(".page-unsupported").first();
+  const backgroundControl = page.locator(".page-frame").first();
   const backgroundControlBox = await backgroundControl.boundingBox();
   if (!backgroundControlBox) throw new Error("background chat control was not measurable behind page chat sheet");
   // wait for the sheet's own transition, not an arbitrary delay: a click during the
@@ -1754,7 +1726,7 @@ with _database() as db:
     return {
       error: null,
       point,
-      hit: hit ? { tag: hit.tagName, id: hit.id, className: hit.className, backdrop: hit.matches(".page-chat-backdrop"), backgroundControl: Boolean(hit.closest(".page-unsupported")) } : null,
+      hit: hit ? { tag: hit.tagName, id: hit.id, className: hit.className, backdrop: hit.matches(".page-chat-backdrop"), backgroundControl: Boolean(hit.closest(".page-frame")) } : null,
       dialog: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, modal: dialog.matches(":modal") },
       surface: surface ? { left: surface.left, top: surface.top, right: surface.right, bottom: surface.bottom } : null,
       animations,
@@ -1844,238 +1816,23 @@ with _database() as db:
     await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()
   ).trim();
   secrets.push(readingCredential);
-  await mcp(readingCredential, 1, "initialize", {
-    protocolVersion: "2025-03-26",
-    capabilities: {},
-    clientInfo: { name: "metric-validation-gate", version: "1" },
-  });
-  await mcp(readingCredential, 2, "tools/list", {});
-  const invalidMetricCall = await mcp(readingCredential, 3, "tools/call", {
-    name: "update_layout",
+  const codeWrite = await mcp(readingCredential, 201, "tools/call", {
+    name: "write_page",
     arguments: {
-      layout: {
-        blocks: [
-          { type: "metric", label: "invalid", collection: "books", count: "yes" },
-        ],
-      },
-      expected_version: 1,
+      source: 'import { createRoot } from "react-dom/client"; function Page(){return <main>revision two</main>} createRoot(document.getElementById("root")!).render(<Page />);',
+      dependencies: {},
+      expected_revision: 1,
     },
   });
-  const invalidMetricError = JSON.parse(
-    invalidMetricCall.result?.content?.[0]?.text ?? "{}",
-  );
-  if (
-    !invalidMetricCall.result?.isError ||
-    JSON.stringify(invalidMetricError) !==
-      JSON.stringify({
-        code: "invalid_input",
-        expected: "one valid schema variant",
-        path: "/layout/blocks/0",
-      })
-  )
-    throw new Error(
-      `invalid metric did not return the safe error document: ${JSON.stringify(invalidMetricCall.result)}`,
-    );
-
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-failed-1440.png"), fullPage: true });
-
-  const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
-  const updateLayoutApprovalBefore = await updateLayoutApproval.count();
-  await field.fill("layout updated without reload");
-  await field.press("Enter");
-  await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
-  await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  const seedSummary = Bun.spawn(["uv", "run", "python", "-c", `import json, sqlite3, datetime; from achilles.web import _database; db=_database(); now=datetime.datetime.now(datetime.timezone.utc).isoformat(); db.executemany("INSERT INTO page_record(page_id,collection,record_id,version,revision,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", [(${JSON.stringify(createdPage.id)}, "books", f"summary-{i}", 1, 1, json.dumps({"title": f"Summary Book {i}", "status": "done"}), now, now) for i in range(1, 5)]); db.commit(); db.close()`], { env });
-  if (await seedSummary.exited !== 0) throw new Error("could not seed summary records");
-  const listSummaryApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "list_books" });
-  await gateWait.playwright(listSummaryApproval, "waitFor", { timeout: 20000 });
-  await listSummaryApproval.getByRole("button", { name: "approve", exact: true }).click();
-  const toolRow = page.locator('[data-part="tool"]', { hasText: "list_books" }).last();
-  await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
-  const expandSummaryTool = async () => {
-    if (await toolRow.getAttribute("open") === null) await toolRow.locator('[data-part="tool-header"]').click();
-  };
-  if ((await toolRow.getAttribute("open")) !== null || await toolRow.locator('[data-part="tool-body"]').count()) throw new Error("tool details must start collapsed and unmounted");
-  await expandSummaryTool();
-  const summaryBody = toolRow.locator('[data-part="tool-summary-preview"]');
-  await gateWait.playwright(summaryBody.getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
-  await gateWait.playwright(summaryBody.getByText("+ 2 more", { exact: true }), "waitFor", { timeout: 20000 });
-  if (screenshotDir) {
-    for (const width of [390, 1280, 1440, 1920]) {
-      if (width === 390) {
-        await page.reload();
-        await setupMobileSheet(page, 900, "button");
-      } else await page.setViewportSize({ width, height: 900 });
-      await expandSummaryTool();
-      await page.screenshot({ path: join(screenshotDir, `tool-summary-${width}.png`), fullPage: true });
-    }
-    await page.setViewportSize({ width: 1440, height: 900 });
-  }
-  if ((await toolRow.locator('[data-part="tool-raw"] pre').count()) !== 0 && (await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes('"Summary Book 1"'))
-    throw new Error("raw list result was visible before opening raw");
-  if (process.env.ONLY_TOOL_SUMMARY) {
-    await page.reload();
-    await setupMobileSheet(page, 900, "button");
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
-    await expandSummaryTool();
-    await gateWait.playwright(page.locator('[data-part="tool"]', { hasText: "list_books" }).last().locator('[data-part="tool-summary-preview"]').getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
-  }
-  await toolRow.locator('[data-part="tool-raw"] summary').click();
-  await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
-  if (!(await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes("arguments truncated by zeta"))
-    throw new Error("raw disclosure hid zeta's argument truncation marker");
-  const owningVirtualRow = toolRow.locator('xpath=ancestor::*[@data-virtual-id][1]');
-  const nextTranscriptRow = owningVirtualRow.locator('xpath=following-sibling::*[@data-virtual-id][1]');
-  const rawGeometry = async () => {
-    const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
-    const rowBox = await toolRow.boundingBox();
-    const nextBox = await nextTranscriptRow.boundingBox();
-    const nextText = (await nextTranscriptRow.innerText().catch(() => "")).slice(0, 160);
-    const virtualDebug = await page.locator('[data-part="virtual-debug"]').allTextContents();
-    const timeline = page.locator('[data-part="timeline"]');
-    const virtualDimensions = await timeline.evaluate((node) => ({
-      virtual: node.getAttribute("data-virtual"),
-      styleHeight: (node as HTMLElement).style.height,
-      clientHeight: (node as HTMLElement).clientHeight,
-      scrollHeight: (node as HTMLElement).scrollHeight,
-      childCount: node.children.length,
-      rows: [...node.children].map((row) => ({ id: row.getAttribute("data-virtual-id"), index: row.getAttribute("data-virtual-index"), top: (row as HTMLElement).offsetTop, height: (row as HTMLElement).offsetHeight })).slice(-8),
-    })).catch(() => null);
-    return { rawBox, rowBox, nextBox, nextId: await nextTranscriptRow.getAttribute("data-virtual-id"), nextText, virtualDebug, virtualDimensions };
-  };
-  try {
-    await waitFor(async () => {
-      const { rawBox, nextBox, nextText } = await rawGeometry();
-      return Boolean(rawBox && nextBox && nextText.includes("layout updated") && nextBox.y >= rawBox.y + rawBox.height);
-    }, "raw disclosure remeasured before next transcript row");
-  } catch (error) {
-    throw new Error(`${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(await rawGeometry())}`);
-  }
-  const geometry = await rawGeometry();
-  const { rawBox, rowBox, nextBox } = geometry;
-  if (!rawBox || !rowBox || !nextBox || !geometry.nextText.includes("layout updated") || nextBox.y < rawBox.y + rawBox.height)
-    throw new Error(`raw disclosure overlaps next transcript row: ${JSON.stringify(geometry)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
-  const outerSummary = toolRow.locator('[data-part="tool-header"]');
-  await outerSummary.click();
-  await waitFor(async () => {
-    const collapsed = await rawGeometry();
-    const header = await outerSummary.boundingBox();
-    return Boolean(header && collapsed.rowBox && collapsed.nextBox && !(await owningVirtualRow.evaluate((row) => (row as HTMLElement).style.minHeight)) && collapsed.rowBox.height <= header.height + 4 && collapsed.nextBox.y - (collapsed.rowBox.y + collapsed.rowBox.height) <= 32);
-  }, "outer tool collapse releases the raw disclosure space");
-  await outerSummary.click();
-  if (process.env.ONLY_TOOL_SUMMARY) {
-    const rawSummary = toolRow.locator('[data-part="tool-raw"] summary');
-    await rawSummary.click();
-    await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre'), "waitFor", { state: "detached", timeout: 20000 });
-    const closedGeometry = await owningVirtualRow.evaluate((row) => ({ minHeight: (row as HTMLElement).style.minHeight, height: row.getBoundingClientRect().height }));
-    const closedNext = await nextTranscriptRow.boundingBox();
-    if (closedGeometry.minHeight || !closedNext) throw new Error(`raw close left owned virtual height: ${JSON.stringify({ closedGeometry, closedNext })}`);
-    await rawSummary.click();
-    await waitFor(async () => {
-      await rawGeometry();
-      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-      const settled = await rawGeometry();
-      return Boolean(settled.rawBox && settled.nextBox && settled.nextText.includes("layout updated") && settled.nextBox.y >= settled.rawBox.y + settled.rawBox.height);
-    }, "raw disclosure reopened after cleanup");
-    const reopened = await rawGeometry();
-    if (!reopened.rawBox || !reopened.nextBox || reopened.nextBox.y < reopened.rawBox.y + reopened.rawBox.height)
-      throw new Error(`raw disclosure failed after reopen: ${JSON.stringify(reopened)}`);
-    console.log(`isolated raw close cleanup passed: ${JSON.stringify({ closedGeometry, closedNext, reopened })}`);
-    process.exit(0);
-  }
-  const updateLayoutResult = async () => (JSON.parse(await Bun.file(control).text()).tool_results ?? []).find((result: { call_id: string }) => result.call_id === "update-reading-layout");
-  await waitFor(async () => Boolean(await updateLayoutResult()), "update_layout tool result");
-  if ((await updateLayoutResult()).is_error) throw new Error(`update_layout tool result failed: ${JSON.stringify(await updateLayoutResult())}`);
-  // a block layout update is stored but never drawn: the page keeps its one unsupported-format notice
-  await waitFor(async () => (await page.locator(".page-unsupported").count()) === 1 && (await page.locator(".page-content").count()) === 1, "block page notice after update_layout");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
-
-  const staleLayoutApprovalBefore = await updateLayoutApproval.count();
-  await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_turn_barrier ?? null) === "held", "held final layout response");
-  await field.fill("repeat that layout update with the old version");
-  await field.press("Enter");
-  await waitFor(async () => requests().some((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version"), "late steer request");
-  const lateSteerIndex = requests().findIndex((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
-  const lateSteer = requests()[lateSteerIndex];
-  if (lateSteerIndex < 0 || !lateSteer?.params?.delivery_id) throw new Error("late steer did not include a delivery id");
-  await waitFor(async () => requests().some((frame) => frame.id === lateSteer.id && frame.result?.accepted === true), "accepted late steer response");
-  const lateControl = JSON.parse(await Bun.file(control).text());
-  await writeControl(control, { ...lateControl, release_late_turn_barrier: true });
-  await waitFor(async () => requests().slice(lateSteerIndex + 1).some((frame) => frame.method === "event" && frame.params?.event === "turn_end"), "turn end after accepted late steer");
-  // zeta starts the next turn with the steer the finished turn did not read
-  const lateStatuses = () => {
-    const frames = requests();
-    const ids = new Set(frames.filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id).map((frame) => frame.id));
-    return frames.filter((frame) => frame.method === undefined && ids.has(frame.id) && frame.result?.status).map((frame) => frame.result.status);
-  };
-  await waitFor(async () => lateStatuses().at(-1) === "delivered", "delivered late steer delivery status");
-  if (lateStatuses().includes("dropped")) throw new Error(`late steer was dropped: ${JSON.stringify(lateStatuses())}`);
-  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 19, "next turn carrying the late steer");
-  const afterLateSteer = JSON.parse(await Bun.file(control).text());
-  const lateMessages = afterLateSteer.user_messages?.filter((text: string) => text === "repeat that layout update with the old version").length;
-  if (lateMessages !== 1)
-    throw new Error(`the next turn did not carry the late steer exactly once: ${JSON.stringify(afterLateSteer.user_messages)}`);
-  await waitFor(async () => await field.inputValue() === "", "draft clear after delivered late steer");
-  const lateSteerRequests = requests().filter((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
-  const lateSendRequests = requests().filter((frame) => frame.method === "send" && frame.params?.text === "repeat that layout update with the old version");
-  if (lateSteerRequests.length !== 1 || lateSendRequests.length !== 0)
-    throw new Error(`achilles sent the late steer ${lateSteerRequests.length} times and resent it ${lateSendRequests.length} times`);
-  if (await page.getByRole("button", { name: "dismiss delivery warning", exact: true }).count()) throw new Error("delivered late steer showed a delivery warning");
-  await waitFor(async () => (await updateLayoutApproval.count()) > staleLayoutApprovalBefore, "stale layout approval");
-  await updateLayoutApproval.nth(staleLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  await gateWait.playwright(page.getByText("layout version conflict: inspect the page and retry with its current version.", { exact: true }), "waitFor", { timeout: 20000 });
-  const afterStaleLayout = JSON.parse(await Bun.file(control).text());
-  const staleLayoutResult = afterStaleLayout.tool_results?.find((result: { call_id: string }) => result.call_id === "stale-reading-layout");
-  if (!staleLayoutResult?.is_error)
-    throw new Error(`stale update_layout did not return a tool error: ${JSON.stringify(afterStaleLayout.tool_results)}`);
-  console.log("stale chat update_layout showed a readable version conflict");
-
-  const storedReadingLayout = async () => {
-    const response = await fetch(`${origin}/api/pages/${createdPage.id}`, {
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!response.ok) throw new Error(`reading page fetch failed: ${response.status}`);
-    const stored = await response.json();
-    if (!Array.isArray(stored.layout?.blocks)) throw new Error("reading page layout was missing blocks");
-    return {
-      version: stored.active_layout_version,
-      blocks: stored.layout.blocks,
-    };
-  };
-  const layoutBeforeInvalidMetric = await storedReadingLayout();
-  const invalidLayoutApprovalBefore = await updateLayoutApproval.count();
-  await field.fill("replace the page with an invalid metric");
-  await field.press("Enter");
-  await waitFor(
-    async () => (await updateLayoutApproval.count()) > invalidLayoutApprovalBefore,
-    "invalid metric layout approval",
-  );
-  await updateLayoutApproval
-    .nth(invalidLayoutApprovalBefore)
-    .getByRole("button", { name: "approve", exact: true })
-    .click();
-  await gateWait.playwright(page
-    .getByText(
-      "metric update rejected: /layout/blocks/0 must match one valid schema variant.",
-      { exact: true },
-    ), "waitFor", { timeout: 20000 });
-  const afterInvalidMetric = JSON.parse(await Bun.file(control).text());
-  const invalidMetricResult = afterInvalidMetric.tool_results?.find(
-    (result: { call_id: string }) => result.call_id === "invalid-metric-layout",
-  );
-  if (!invalidMetricResult?.is_error)
-    throw new Error(
-      `invalid metric update_layout did not return a tool error: ${JSON.stringify(afterInvalidMetric.tool_results)}`,
-    );
-  const layoutAfterInvalidMetric = await storedReadingLayout();
-  if (
-    layoutAfterInvalidMetric.version !== layoutBeforeInvalidMetric.version
-    || JSON.stringify(layoutAfterInvalidMetric.blocks) !== JSON.stringify(layoutBeforeInvalidMetric.blocks)
-  )
-    throw new Error(`invalid metric update changed the stored page layout: before=${JSON.stringify(layoutBeforeInvalidMetric)} after=${JSON.stringify(layoutAfterInvalidMetric)}`);
-  console.log("invalid metric chat update showed a readable error and kept the stored layout");
+  if (codeWrite.result?.isError || JSON.parse(codeWrite.result?.content?.[0]?.text ?? "{}").revision !== 2)
+    throw new Error(`code write before restore failed: ${JSON.stringify(codeWrite)}`);
+  const codeRestore = await mcp(readingCredential, 202, "tools/call", {
+    name: "restore_version",
+    arguments: { kind: "code", version: 1, expected_version: 2 },
+  });
+  const restoredCode = JSON.parse(codeRestore.result?.content?.[0]?.text ?? "{}");
+  if (codeRestore.result?.isError || restoredCode.revision !== 3 || restoredCode.restored_from !== 1)
+    throw new Error(`code restore failed: ${JSON.stringify(codeRestore)}`);
 
   const readingModeOffResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await clickCreateMode(true);
@@ -2287,16 +2044,16 @@ with _database() as db:
     throw new Error("rollback did not change the live generated schema");
   const allowPage = await homeMcp(15, "tools/call", {
     name: "create_page",
-    arguments: { route: "/allow", title: "allow mode", layout: { blocks: [] } },
+    arguments: { route: "/allow", title: "allow mode", package: { source: "export default function Page(){return <main />}", dependencies: {} } },
   });
   if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
     throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
   await page.setViewportSize({ width: 390, height: 760 });
   await page.goto(`${origin}/allow`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
-  const blocklessChat = page.locator(".page-chat");
-  const blocklessComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
-  const blocklessLayout = await page.evaluate(() => {
+  const shellChat = page.locator(".page-chat");
+  const shellComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
+  const shellGeometry = await page.evaluate(() => {
     const chat = document.querySelector<HTMLElement>(".page-chat");
     const transcript = chat?.querySelector<HTMLElement>(".transcript");
     const composer = document.querySelector<HTMLElement>('[data-part="composer"]');
@@ -2308,9 +2065,9 @@ with _database() as db:
       dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
     };
   });
-  if (!blocklessChat.count() || blocklessLayout.chatClass.includes("page-chat-docked") || blocklessLayout.transcriptHeight <= 0 || !blocklessLayout.composerVisible || blocklessLayout.barCount !== 0 || blocklessLayout.dialogCount !== 0 || !(await blocklessComposer.isVisible()) || await blocklessComposer.isDisabled())
-    throw new Error(`390px blockless page chat gained sheet semantics or lost its layout: ${JSON.stringify(blocklessLayout)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "blockless-chat-390x760.png"), fullPage: true });
+  if (!shellChat.count() || shellGeometry.chatClass.includes("page-chat-docked") || shellGeometry.transcriptHeight <= 0 || !shellGeometry.composerVisible || shellGeometry.barCount !== 0 || shellGeometry.dialogCount !== 0 || !(await shellComposer.isVisible()) || await shellComposer.isDisabled())
+    throw new Error(`390px page chat gained sheet semantics or lost its geometry: ${JSON.stringify(shellGeometry)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-390x760.png"), fullPage: true });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
@@ -2329,7 +2086,7 @@ with _database() as db:
     arguments: {
       route: "/late",
       title: "late",
-      layout: { blocks: [{ type: "text", text: "late" }] },
+      package: { source: "export default function Page(){return <main>late</main>}", dependencies: {} },
     },
   });
   if (!late.result?.isError || (await fetch(`${origin}/api/pages/late`)).status !== 404) throw new Error("late create_page call mutated state");
@@ -2342,11 +2099,7 @@ with _database() as db:
   await page.goto(`${origin}/reading`); await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
-  await waitFor(async () => {
-    reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
-    return reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list")
-      && (await page.locator("body").innerText()).includes("Synthetic Book");
-  }, "reading page inserted book render");
+  await gateWait.playwright(page.locator(".page-frame"), "waitFor", { state: "visible", timeout: 20_000 });
   const homeOpened = await newestChatId("home");
   if (!homeOpened) throw new Error("no listed home chat before achilles restart");
   const homeIdleWrite = gateWait.playwright(page, "waitForResponse", (response) => {
@@ -2426,9 +2179,9 @@ with _database() as db:
   if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after the achilles restart");
   mcpSessions.delete(credential);
   await mcp(credential, 3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
-  const invalid = await mcp(credential, 5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
-  if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
-  const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
+  const invalid = await mcp(credential, 5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", package: { source: "", dependencies: {} } } });
+  if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid page package published");
+  const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", package: { source: "export default function Page(){return <main>cross</main>}", dependencies: {} } } });
   if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
   console.log("reconnect refresh asserted: achilles restarted mid-session; create mode and the next turn used the refreshed catalog without restarting zeta");
 
