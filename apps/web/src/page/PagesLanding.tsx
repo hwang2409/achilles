@@ -32,8 +32,8 @@ export function PagesLanding({ catalog: { items, next, loading, error }, reload,
           {next && <button type="button" className="pages-more" aria-disabled={loading} onClick={(event) => { if (!loading) void more(event.currentTarget); }}>
             {loading ? "reading pages…" : "show more pages"}
           </button>}
-          <p className="pages-hint">to add a page, describe it on <a href={surfaceHref("/create")}>Create</a>.</p>
         </section>}
+      {!!items?.length && <p className="pages-hint">to add a page, describe it on <a href={surfaceHref("/create")}>Create</a>.</p>}
     </div>
   </ModuleFrame>;
 }
