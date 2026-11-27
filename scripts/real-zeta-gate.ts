@@ -12,6 +12,7 @@ import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
 import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
+import { gateParkedChats, parkArtifacts } from "./gate-park";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
@@ -580,6 +581,22 @@ with _database() as db:
   const agentChats = (await chatIds()).filter((id) => !chatsBefore.has(id));
   const dropAgentChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...agentChats], env);
   if (!(await waitForExit(dropAgentChats, 10_000)) || dropAgentChats.exitCode !== 0) throw new Error(`agent chat cleanup exited ${dropAgentChats.exitCode}`);
+  // session_park limits on a zeta whose turns stay busy until the gate releases them
+  const parkHome = join(temp, "park-zeta");
+  const parkDiscovery = join(parkHome, "park-ws.json");
+  await mkdir(parkHome, { mode: 0o700 });
+  await Bun.write(join(parkHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
+  const parkServer = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/park-server.py")], {
+    ...env, ZETA_HOME: parkHome, ZETA_ACCOUNT_HOME: parkHome, ZETA_PROOF_DISCOVERY: parkDiscovery, ZETA_PARK_RELEASE: join(parkHome, "release"),
+  });
+  await waitFor(async () => await Bun.file(parkDiscovery).exists(), "park zeta discovery");
+  const parkZeta = await readDiscovery(parkDiscovery);
+  const chatsBeforePark = new Set(await chatIds());
+  await gateParkedChats(browser, origin, { ...parkZeta, url: `ws://127.0.0.1:${parkZeta.port}` }, join(parkHome, "release"), waitFor, screenshotDir);
+  await stop(parkServer);
+  const parkChats = (await chatIds()).filter((id) => !chatsBeforePark.has(id));
+  const dropParkChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...parkChats], env);
+  if (!(await waitForExit(dropParkChats, 10_000)) || dropParkChats.exitCode !== 0) throw new Error(`park chat cleanup exited ${dropParkChats.exitCode}`);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -983,33 +1000,50 @@ with _database() as db:
   const reloadAttach = reloadFrames.slice(reloadFrames.indexOf(reloadResume) + 1).find((frame) => frame.id === reloadResume.id && (frame.result || frame.error));
   if (reloadAttach?.result?.attached !== "live_turn") throw new Error(`reload resume did not attach to the live turn: ${redact(JSON.stringify(reloadAttach?.error ?? reloadAttach?.result ?? null))}`);
   if (await page.getByText("a turn is already running").count()) throw new Error("reload during approval showed the busy error");
-  // "new chat" while this turn waits keeps the new chat's box and says why no chat was created; nothing typed there may
-  // reach the waiting chat. "open it" goes back to the waiting chat and its approval.
+  // session_park: "new chat" while this chat waits for approval parks it (zeta keeps its turn and approval) and opens a
+  // new chat at once; the waiting chat's sidebar row says it runs in this tab.
+  type ParkedRowFrame = { session_id: string; pending_approvals: number };
+  const parkedIn = (since: number) => requests().slice(since).filter((frame) => Array.isArray(frame.result?.parked_sessions)).at(-1)?.result.parked_sessions as ParkedRowFrame[] | undefined;
+  const parkedRow = page.locator(`a[data-chat-id="${first}"] .chat-row-meta`);
+  const framesBeforePark = requests().length;
   await page.getByRole("button", { name: "new chat" }).first().click();
-  const busyNotice = page.getByRole("alert").filter({ hasText: "is still running, so zeta cannot start a new chat yet" });
-  await gateWait.playwright(busyNotice, "waitFor", { timeout: 20_000 });
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "busy-new-chat-1440x900.png") });
-  // Enter there is refused and keeps a failed row. A reload opens the waiting chat (the newest), so a notice says the
-  // row waits for a new chat; "open" shows it in the new-chat box again without making a chat. It is never sent.
-  const unsentText = "unsent while the other chat waits";
-  await field.fill(unsentText);
+  await gateWait.playwright(page.locator(".empty-chat"), "waitFor", { timeout: 20_000 });
+  if (await page.getByRole("alert").filter({ hasText: /still running|keeps .* running/ }).count()) throw new Error("new chat during an approval wait was refused");
+  if (!requests().slice(framesBeforePark).some((frame) => frame.method === "new_session")) throw new Error("new chat during an approval wait sent no new_session");
+  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) === "needs you · this tab", "parked chat row says needs you · this tab");
+  await waitFor(async () => Boolean(parkedIn(framesBeforePark)?.some((row) => row.session_id === first && row.pending_approvals > 0)), "status lists the waiting chat as parked");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "park-new-chat-1440x900.png") });
+  // the new chat works while the parked chat waits
+  await field.fill("park chat b");
   await field.press("Enter");
-  const unsentRow = page.locator('[data-part="composer-queued"][data-failed]').filter({ hasText: unsentText });
-  await gateWait.playwright(unsentRow, "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page.getByText("park b ready", { exact: true }), "waitFor", { timeout: 20_000 });
+  const parkB = new URL(page.url()).searchParams.get("chat");
+  if (!parkB || parkB === first) throw new Error("the new chat is not named in the url");
+  // a reload takes the parked chat back from zeta's grace (resume with its page binding) before it opens the shown chat
+  const framesBeforeParkReload = requests().length;
   await gateWait.playwright(page, "reload");
-  const unsentNotice = page.getByRole("status").filter({ hasText: "1 unsent message for a new chat" });
-  await gateWait.playwright(unsentNotice, "waitFor", { timeout: 20_000 }).catch(async (error) => { throw new Error(`${error}\nno unsent notice after reload body=${redact(await page.locator("body").innerText())}`); });
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "unsent-new-chat-notice-1440x900.png") });
-  const framesBeforeOpen = requests().length;
-  await unsentNotice.getByRole("button", { name: "open", exact: true }).click();
-  await gateWait.playwright(unsentRow, "waitFor", { timeout: 20_000 });
-  if (requests().slice(framesBeforeOpen).some((frame) => frame.method === "new_session")) throw new Error("open of the unsent notice made a chat");
-  if (requests().some((frame) => (frame.method === "send" || frame.method === "steer") && frame.params?.text === unsentText)) throw new Error("text written for a new chat was sent");
-  await unsentRow.getByRole("button", { name: /^cancel message/ }).click();
-  await gateWait.playwright(unsentRow, "waitFor", { state: "detached", timeout: 20_000 });
-  // a reload opens the page's newest chat again: the waiting one, with its approval
-  await gateWait.playwright(page, "reload");
-  await waitFor(async () => (await approval.count()) > approvalBefore && await homeSessionId() === first, "pending approval after a busy new chat");
+  await gateWait.playwright(page.getByText("park b ready", { exact: true }), "waitFor", { timeout: 20_000 });
+  const parkReload = requests().slice(framesBeforeParkReload);
+  const reclaimAt = parkReload.findIndex((frame) => frame.method === "resume" && frame.params?.session_id === first);
+  const shownAt = parkReload.findIndex((frame) => frame.method === "resume" && frame.params?.session_id === parkB);
+  if (reclaimAt < 0 || !parkReload[reclaimAt].params?.mcp_bindings?.length || shownAt < reclaimAt) throw new Error(`reload did not reclaim the parked chat before the shown one: ${reclaimAt} ${shownAt}`);
+  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) === "needs you · this tab", "parked chat row after reload");
+  await waitFor(async () => Boolean(parkedIn(framesBeforeParkReload)?.some((row) => row.session_id === first)), "status lists the reclaimed chat as parked");
+  // back to the parked chat: it attaches to its live turn with the same approval; the idle new chat closes, not parks
+  const framesBeforeReturn = requests().length;
+  await page.locator(`a[data-chat-id="${first}"]`).click();
+  await waitFor(async () => (await approval.count()) > approvalBefore, "pending approval after returning to the parked chat");
+  const returnFrames = requests().slice(framesBeforeReturn);
+  const returned = returnFrames.find((frame) => frame.method === "resume" && frame.params?.session_id === first);
+  const returnedReply = returnFrames.find((frame) => frame.id === returned?.id && (frame.result || frame.error));
+  if (returnedReply?.result?.attached !== "live_turn") throw new Error(`return to the parked chat did not attach to its live turn: ${redact(JSON.stringify(returnedReply ?? null))}`);
+  await waitFor(async () => (await parkedRow.textContent().catch(() => null)) !== "needs you · this tab", "returned chat row is no longer marked parked");
+  await waitFor(async () => { const rows = parkedIn(framesBeforeReturn); return rows !== undefined && rows.length === 0; }, "the idle new chat closed instead of parking");
+  if ((await page.locator("body").innerText()).includes("parked_session_changed")) throw new Error("a parked_session_changed event reached the page");
+  // later steps open home's newest chat: drop the new chat's row
+  const dropParkB = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.execute('DELETE FROM chat WHERE session_id=?', (sys.argv[1],)); db.commit(); db.close()", parkB], env);
+  if (!(await waitForExit(dropParkB, 10_000)) || dropParkB.exitCode !== 0) throw new Error(`park chat cleanup exited ${dropParkB.exitCode}`);
+  console.log("session_park: new chat parks the waiting chat, reload reclaims it, return attaches its live turn and approval");
   const approvalComplete = page.getByText("approval complete", { exact: true });
   const approvalCompleteBefore = await approvalComplete.count();
   const paginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:03}', f'older chat {i:02}', f'2020-01-01T{i // 60:02}:{i % 60:02}:00Z') for i in range(105)]); db.commit(); db.close()"], env);
@@ -3672,7 +3706,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts, ...parkArtifacts, "park-new-chat-1440x900.png"],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
