@@ -67,3 +67,23 @@ test("switching to another page at the same revision drops the old page's error 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("a failed records call replies ok:false with {detail}, so the page's promise rejects", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("record not found", { status: 404, headers: { "content-type": "text/plain" } })) as typeof fetch;
+  const view = render(createElement(PageFrame, { pageId: "home", credential: "c", revision: 1 }));
+  try {
+    const frame = view.container.querySelector("iframe")!;
+    const replies: unknown[] = [];
+    const page = { postMessage: (reply: unknown) => replies.push(reply) } as unknown as Window;
+    Object.defineProperty(frame, "contentWindow", { value: page });
+    await act(async () => {
+      dispatchEvent(new MessageEvent("message", { origin: "null", source: page, data: { pageId: "home", revision: 1, requestId: "7", method: "delete", collection: "notes", id: "gone" } }));
+    });
+    await waitFor(() => expect(replies).toEqual([{ requestId: "7", ok: false, result: { detail: "record not found" } }]), { timeout: 1000 });
+    expect(view.container.querySelector(".page-error")).toBeNull();
+  } finally {
+    view.unmount();
+    globalThis.fetch = originalFetch;
+  }
+});

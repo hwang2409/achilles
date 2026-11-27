@@ -188,7 +188,7 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
       this send: `dropped`, `evicted_delivered`, `evicted_queued`,
       `evicted_unknown`, `closed_before_send`, or `closed_after_send`.
   - `reconnect`: drop the zeta connection and resume the chat's session.
-  - `user_write`: a user edits a record through the page form. the step names
+  - `user_write`: a user edits a record. the step names
     a `tool` (an `update` tool) and its `arguments` (a `record_id` and the
     changed fields, no `revision`). the harness reads the record's current
     revision, posts the tool invoke with the page credential, and records the

@@ -1474,10 +1474,11 @@ def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: P
             "/api/pages/home/frame-bootstrap.js?revision=1", headers={"origin": "null"}
         )
 
-    assert (
-        "sandbox allow-scripts allow-forms allow-downloads"
-        in frame.headers["content-security-policy"]
-    )
+    csp = frame.headers["content-security-policy"]
+    assert "sandbox allow-scripts allow-forms allow-downloads allow-modals" in csp
+    assert "style-src 'self' https: 'unsafe-inline'" in csp
+    assert "img-src 'self' https: data: blob:" in csp
+    assert "font-src 'self' https: data: blob:" in csp
     assert "<script>" not in frame.text
     assert "crossorigin='anonymous'" in frame.text
     assert artifact.headers["access-control-allow-origin"] == "*"
@@ -1536,6 +1537,17 @@ def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) ->
     assert client.delete(path, headers=own).status_code == 200
     assert client.get("/api/pages/home/records/books", headers=own).json() == []
     assert client.delete(path, headers=own).status_code == 404
+
+
+def test_a_duplicate_record_id_insert_is_a_409(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = TestClient(web.create_app(), raise_server_exceptions=False)
+    url = "/api/pages/home/records/books"
+    assert client.post(url, headers=own, json={"record_id": "r1"}).status_code == 200
+    duplicate = client.post(url, headers=own, json={"record_id": "r1", "title": "again"})
+    assert duplicate.status_code == 409, duplicate.text
+    assert client.get(url, headers=own).json() == [{"record_id": "r1", "revision": 1}]
 
 
 def test_non_utf8_body_is_a_400_not_a_500(tmp_path: Path) -> None:

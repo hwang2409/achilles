@@ -60,6 +60,24 @@ for (let i = 0; i < pixels.data.length; i++)
   pixels.data[i] = i % 4 === 3 ? 255 : Math.random() * 256;
 canvas.getContext("2d").putImageData(pixels, 0, 0);
 """
+# an LLM page styles itself with a <style> element and shows a data: image
+STYLED = """
+const style = document.createElement("style");
+style.textContent = "h1 { color: rgb(1, 2, 3); }";
+document.head.append(style);
+const image = new Image();
+image.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+document.getElementById("root").append(image);
+await image.decode().catch(() => {});
+const h1 = document.createElement("h1");
+document.body.append(h1);
+h1.textContent = "color " + getComputedStyle(h1).color + " image " + image.naturalWidth;
+"""
+CONFIRM_DELETE = """
+const confirmed = confirm("delete stretch?");
+document.getElementById("root").textContent = "confirmed " + confirmed;
+if (confirmed) await window.achilles.records.delete("items", "r1").catch(() => {});
+"""
 HUNG = "document.getElementById('root').textContent = 'spin'; for (;;) {}"
 
 
@@ -164,6 +182,25 @@ def test_render_reports_errors_with_context_and_blocks_writes(served, tmp_path) 
         "insert items: writes are blocked during render_page; nothing was saved"
     ]
     assert _record_count(store) == 0
+
+
+def test_inline_styles_and_data_images_render(served, tmp_path) -> None:
+    store = _home_with_code(tmp_path / "achilles", STYLED)
+    token = store.ensure_credential("home")
+    with served(web.create_app()) as port:
+        result = render_page(f"http://127.0.0.1:{port}", "home", token)
+    assert "color rgb(1, 2, 3) image 1" in result["text"], result
+    assert result["console_errors"] == [] and result["failed_requests"] == [], result
+
+
+def test_confirm_is_accepted_and_reported_so_a_render_never_hangs(served, tmp_path) -> None:
+    store = _home_with_code(tmp_path / "achilles", CONFIRM_DELETE)
+    token = store.ensure_credential("home")
+    with served(web.create_app()) as port:
+        result = render_page(f"http://127.0.0.1:{port}", "home", token)
+    assert result["ready"] is True and "confirmed true" in result["text"], result
+    assert result["dialogs"] == ["confirm: delete stretch?"]
+    assert result["bridge_calls"] == ["delete items"]
 
 
 def test_polling_page_times_out_with_a_fallback_screenshot(served, tmp_path) -> None:

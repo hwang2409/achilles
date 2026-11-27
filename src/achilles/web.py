@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import shlex
+import sqlite3
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -238,8 +239,10 @@ def create_app() -> Starlette:
             headers={
                 "content-security-policy": (
                     "default-src 'self' https:; script-src 'self' https:; "
+                    "style-src 'self' https: 'unsafe-inline'; "
+                    "img-src 'self' https: data: blob:; font-src 'self' https: data: blob:; "
                     "connect-src https: http:; frame-ancestors 'self'; "
-                    "sandbox allow-scripts allow-forms allow-downloads"
+                    "sandbox allow-scripts allow-forms allow-downloads allow-modals"
                 ),
                 "cache-control": "no-store",
             },
@@ -528,9 +531,13 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         collection = request.path_params["collection"]
         if request.method == "POST":
             body = await json_object(request)
-            return JSONResponse(
-                await anyio.to_thread.run_sync(store.insert_record, page_id, collection, body)
-            )
+            try:
+                inserted = await anyio.to_thread.run_sync(
+                    store.insert_record, page_id, collection, body
+                )
+            except sqlite3.IntegrityError as exc:
+                raise HTTPException(409, "a record with this record_id already exists") from exc
+            return JSONResponse(inserted)
         field = request.query_params.get("field")
         raw_equals = request.query_params.get("equals")
         raw_limit = request.query_params.get("limit", "100")
