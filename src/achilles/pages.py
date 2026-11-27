@@ -152,6 +152,11 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
         code.pop("revisions", None)
     result["truncated"] = True
     encoded = json.dumps(result, sort_keys=True, separators=(",", ":"))
+    candidate = result.get("candidate")
+    # escaped non-ascii diagnostics can take up to 12 bytes per character
+    while len(encoded.encode()) > INSPECT_MAX_BYTES and candidate and candidate["diagnostics"]:
+        candidate["diagnostics"] = candidate["diagnostics"][: len(candidate["diagnostics"]) // 2]
+        encoded = json.dumps(result, sort_keys=True, separators=(",", ":"))
     if len(encoded.encode()) > INSPECT_MAX_BYTES:
         raise ValidationError("", f"inspectable page <= {INSPECT_MAX_BYTES} bytes", "too_large")
     return result, encoded
@@ -1399,10 +1404,11 @@ class PageStore:
         """Replace each old_string exactly once in one page file, then build it like write_page;
         nothing is written unless every edit matches."""
         with self._connect() as db:
-            row = self._newest_code(db, page_id)
+            # active first: a write committing between the reads then fails as a conflict
             active = db.execute(
                 "SELECT COALESCE(active_code_revision, 0) FROM page WHERE id=?", (page_id,)
             ).fetchone()
+            row = self._newest_code(db, page_id)
         if row is None:
             raise ValidationError("/path", "a page with code", "not_found", _NO_CODE_HINT)
         if row["version"] != expected_revision:
