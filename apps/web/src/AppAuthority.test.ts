@@ -6,7 +6,7 @@ import type { RenderResult } from "@testing-library/react";
 import { isMac } from "./keyboard";
 import { draftStore } from "./draftStore";
 import { getSettings, SETTINGS_KEY, updateSettings } from "./settings";
-import { WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
+import { READ_ONLY_REASON, WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
 
 const { fireEvent, render } = await import("@testing-library/react");
 
@@ -137,7 +137,7 @@ const sessionDetail = (metadata: object = {}): Options => ({
   rpc: { status: () => ({ result: { session: null, state: "idle" } }), list_sessions: () => ({ result: { sessions: [{ session_id: "session", name: "Fixture session", project_id: "other-project", parent_session_id: null, in_use: false, ...metadata }], next_offset: null } }) },
 });
 
-type Row = { kind: "visible" | "command" | "passive" | "local-only"; absent?: true; options?: Options; check: (app: RenderResult, authority: Authority, writes: string[], requests: string[]) => Promise<void> };
+type Row = { kind: "visible" | "command" | "passive" | "local-only"; absent?: true; options?: Options; check: (app: RenderResult, authority: Authority, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void> };
 const tag = (id: WriteSurfaceId) => `[data-write-surface="${id}"]`;
 const disabled = (element: HTMLElement) => element.matches(":disabled") || element.getAttribute("aria-disabled") === "true";
 const didWrite = (writes: string[], prefix: string) => expect(writes.some((write) => write.startsWith(prefix)), `${prefix}; got ${JSON.stringify(writes)}`).toBe(true);
@@ -595,28 +595,120 @@ test.each(["start", "logout"] as const)("OAuth %s refuses a review that went sta
   await withApp("controller", row.options ?? {}, (app, writes, requests) => row.check(app, "controller", writes, requests));
 });
 
-// /agents is read-only: a catalog tab is its own zeta controller with no session, so it cannot act on a chat's children.
-// the controls stay registered for the chat tab, which gets them in a later slice.
-function agentReadOnly(id: "agents.spawn" | "agents.cancel" | "agents.send"): Row {
-  return { kind: "visible", options: { path: "/agents/session/fixture-run", rpc: {
-    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: ["agent_run_catalog"] } } }),
-    agent_run_catalog: () => ({ result: { revision: "1", data: { items: [{ session_id: "session", run_id: "fixture-run", parent_run_id: null,
-      agent_type: "fixture-profile", description: "fixture task", status: "idle", accepts_follow_ups: true, turns_used: 1,
-      tool_count: 0, current_step: "waiting", started_at: "2026-01-01", finished_at: null, elapsed_seconds: 1 }] } } }),
-  } }, check: async (app, _authority, writes) => {
-    await app.findByRole("heading", { name: /fixture task/ });
-    expect(app.getByText("control a chat's agents from its tab.")).toBeTruthy();
-    expect(app.container.querySelector(tag(id))).toBeNull();
-    expect(writes).toEqual([]);
+const agentRun = (fields: object) => ({ session_id: "session", run_id: "fixture-run", parent_run_id: null, agent_type: "fixture-profile",
+  description: "fixture task", turns_used: 1, tool_count: 0, started_at: "2026-01-01", finished_at: null, elapsed_seconds: 1, ...fields });
+// the chat tab's agents dialog: every agent write targets the chat on screen ("session").
+const agentOptions = (methods: string[], status: string, rpc: Options["rpc"] = {}, roles?: string[]): Options => ({ attached: true, roles, rpc: {
+  hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+    requests: ["agent_run_catalog", ...(params.role === "controller" ? methods : [])] } } }),
+  agent_run_catalog: () => ({ result: { revision: "1", data: { items: [agentRun({ status, accepts_follow_ups: status === "idle", current_step: status })] } } }),
+  ...rpc,
+} });
+const openAgents = async (app: RenderResult, run?: string) => {
+  await click(await app.findByRole("button", { name: "Agents" }));
+  if (run) await click(await app.findByRole("button", { name: run }));
+};
+
+function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
+  const spawning = id === "agents.spawn";
+  const method = spawning ? "child_run_spawn" : "child_run_cancel";
+  const roles: string[] = [];
+  return { kind: "visible", options: agentOptions([method], "running", {
+    status: () => ({ result: { state: "idle", session: { session_id: "session", cwd: "/fixture",
+      agent_catalog: [{ name: "fixture-profile", description: "fixture profile", tools: [] }] } } }),
+    [method]: (params) => {
+      expect(params).toEqual(spawning ? { session_id: "session", agent_type: "fixture-profile", task: "reviewed task", background: true }
+        : { session_id: "session", run_id: "fixture-run", reason: "user_cancelled" });
+      return { result: { data: { accepted: true, run_id: spawning ? "new-fixture-run" : "fixture-run", state: "cancelling" } } };
+    },
+  }, roles), check: async (app, authority, writes, _requests, emit) => {
+    if (spawning) await openAgents(app);
+    else {
+      // the transcript's sub-agent row opens the dialog on its run
+      await act(async () => { emit({ jsonrpc: "2.0", method: "event", params: { event: "child_idle", session_id: "session", data: { child_instance_id: "fixture-run", description: "fixture task" } } }); });
+      await click(select(app, 'button[data-part="sub-agent"]'));
+    }
+    const before = roles.length;
+    const written = writes.length;
+    expect(roles.at(-1)).toBe(authority);
+    if (authority === "observer") {
+      // a read-only tab shows the control disabled with the read-only reason and writes nothing
+      const control = spawning ? app.getByRole("button", { name: "+ spawn agent" }) : await app.findByRole("button", { name: "cancel run" });
+      expect(disabled(control)).toBe(true);
+      expect(app.getAllByText(READ_ONLY_REASON).length).toBeGreaterThan(0);
+      expect(writes.slice(written)).toEqual([]);
+      return;
+    }
+    if (spawning) {
+      await click(app.getByRole("button", { name: "+ spawn agent" }));
+      await app.findByRole("option", { name: "fixture-profile" });
+      await change(app.getByRole("combobox", { name: "profile" }), "fixture-profile");
+      await change(app.getByRole("textbox", { name: "task" }), "reviewed task");
+      await act(async () => { fireEvent.submit((select(app, tag(id)) as HTMLButtonElement).form!); });
+    } else await click(await app.findByRole("button", { name: "cancel run" }));
+    expect(roles).toHaveLength(before);
+    expect(writes.slice(written)).toEqual([]);
+    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    expect(confirm.disabled).toBe(true);
+    if (spawning) await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
+    else await change(app.getByRole("textbox", { name: /type fixture-profile · ture-run to confirm/ }), "fixture-profile · ture-run");
+    expect(confirm.disabled).toBe(false);
+    await act(async () => { fireEvent.submit(confirm.form!); });
+    expect(await app.findByText(spawning ? /spawned fixture-profile:/ : /cancellation requested\./)).toBeTruthy();
+    expect(writes.slice(written)).toEqual([method]);
+    expect(roles.slice(before)).toEqual([]);
   } };
 }
+
+test("spawn from a chat refuses a parent that is not the chat on screen", async () => {
+  await withApp("controller", agentOptions(["child_run_spawn"], "running", {
+    status: () => ({ result: { state: "idle", session: { session_id: "other", cwd: "/fixture", agent_catalog: [{ name: "fixture-profile", tools: [] }] } } }),
+  }), async (app, writes) => {
+    await openAgents(app);
+    await click(app.getByRole("button", { name: "+ spawn agent" }));
+    expect(await app.findByText("this chat is not attached in this tab. reload the chat, then try again.")).toBeTruthy();
+    expect(app.queryByRole("option", { name: "fixture-profile" })).toBeNull();
+    expect(writes.filter((write) => write.startsWith("child_run"))).toEqual([]);
+  });
+});
+
+test("/agents is read-only: no agent write surface, and a run says where to control it", async () => {
+  await withApp("controller", { ...agentOptions(["child_run_spawn", "child_run_cancel", "child_run_send"], "idle"), attached: false, path: "/agents/session/fixture-run" }, async (app) => {
+    await app.findByRole("heading", { name: /fixture task/ });
+    expect(app.getByRole("link", { name: "its chat" }).getAttribute("href")).toContain("chat=session");
+    expect(app.container.querySelector('[data-write-surface^="agents."]')).toBeNull();
+  });
+});
 
 const rows: Record<WriteSurfaceId, Row> = {
   "accounts.login": browserLogin(false),
   "accounts.login-cancel": browserLogin(true),
-  "agents.spawn": agentReadOnly("agents.spawn"),
-  "agents.cancel": agentReadOnly("agents.cancel"),
-  "agents.send": agentReadOnly("agents.send"),
+  "agents.spawn": agentControl("agents.spawn"),
+  "agents.cancel": agentControl("agents.cancel"),
+  "agents.send": { kind: "visible", options: agentOptions(["child_run_send"], "idle", {
+    child_run_send: (params) => {
+      expect(params).toEqual({ session_id: "session", run_id: "fixture-run", text: "fixture follow-up" });
+      return { result: { accepted: true, run_id: "fixture-run" } };
+    },
+  }), check: async (app, authority, writes) => {
+    await openAgents(app, "fixture-profile fixture task idle");
+    const written = writes.length;
+    const field = await app.findByRole("textbox", { name: "message fixture-profile" }) as HTMLTextAreaElement;
+    const control = select(app, tag("agents.send"));
+    expect(control.textContent).toBe("send to fixture-profile");
+    expect(disabled(control)).toBe(true);
+    await change(field, "fixture follow-up");
+    expect(disabled(control)).toBe(authority === "observer");
+    expect(writes.slice(written)).toEqual([]);
+    if (authority === "observer") {
+      expect(app.getAllByText(READ_ONLY_REASON).length).toBeGreaterThan(0);
+    } else {
+      await click(control);
+      expect(await app.findByText("message accepted by zeta.")).toBeTruthy();
+      didWrite(writes, "child_run_send");
+      expect((app.getByRole("textbox", { name: "message fixture-profile" }) as HTMLTextAreaElement).value).toBe("");
+    }
+  } },
   "create.retry": creationAction("retry"),
   "create.discard": creationAction("discard"),
   "busy.retry": { kind: "visible", absent: true, options: { rpc: { status: (_params, requests) => ({ result: requests.filter((request) => request === "status").length <= 2 ? { state: "running", session: { session_id: "other" } } : { state: "idle" } }) } }, check: async (app, authority, writes) => {
@@ -865,7 +957,7 @@ test.each(WRITE_SURFACES)("public authority: $id", async ({ id, visibility }) =>
   const row = rows[id]!;
   expect(row.kind === "local-only" ? "visible" : row.kind).toBe(visibility);
   for (const authority of ["observer", "controller"] as const) {
-    await withApp(authority, row.options ?? {}, (app, writes, requests) => row.check(app, authority, writes, requests));
+    await withApp(authority, row.options ?? {}, (app, writes, requests, emit) => row.check(app, authority, writes, requests, emit));
   }
 });
 

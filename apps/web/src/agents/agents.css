@@ -49,6 +49,8 @@
 .agents-run-head dt, .agents-activity small { color: var(--fulcrum-muted); font-size: inherit; }
 .agents-run-head dd { margin: 0; font-variant-numeric: tabular-nums; }
 .agents-run-head dd a { text-decoration: underline; }
+.agents-note { margin: 0; padding: var(--g1-space-2) var(--g1-page-gutter); }
+.agents-note a { text-decoration: underline; }
 .agents-activity { border-top: 1px solid var(--fulcrum-border); }
 .agents-activity h3 { margin: 0; font-size: 1em; }
 .agents-activity small { font-weight: 400; margin-inline-start: 8px; }
@@ -84,7 +86,7 @@
 }
 
 .agents-spawn, .agents-cancel, .agents-cancel-activity { padding-inline: var(--g1-page-gutter); }
-.agents-spawn { padding-block: var(--g1-space-2); border-bottom: 1px solid var(--fulcrum-border); overflow: auto; max-block-size: 45dvh; }
+.agents-spawn { padding-block: var(--g1-space-2); border-bottom: 1px solid var(--fulcrum-border); }
 .agents-cancel { display: flex; flex-wrap: wrap; align-items: center; gap: var(--g1-space-2); padding-block: var(--g1-space-2); }
 .agents-spawn small, .agents-cancel small { color: var(--fulcrum-muted); overflow-wrap: anywhere; }
 .agents-spawn > small { margin-inline-start: var(--g1-space-2); }
@@ -101,3 +103,11 @@
 .agents-frame select { padding-inline-end: 32px; }
 /* refresh is a quiet text action, as on Sessions and Library */
 .agents-frame .agents-catalog .agents-filters button { border-color: transparent; }
+.chat-agents-runs { margin: 0; padding: 0; list-style: none; }
+.chat-agents-runs .agents-row { width: 100%; border-block-start: 0; border-inline-end: 0; color: inherit; background: none; font: inherit; text-align: start; }
+.chat-agents-runs .agents-row[aria-current="true"] { border-inline-start-color: var(--g1-selection); background: var(--g1-selected); }
+.chat-agents .agents-detail { display: block; overflow: visible; }
+/* the titlebar stays on screen while the dialog scrolls; its actions wrap under the title when narrow */
+.chat-agents .settings-titlebar { position: sticky; top: 0; z-index: 1; flex-wrap: wrap; gap: 0 8px; background: var(--g1-bg); }
+.chat-agents .settings-titlebar > div:last-child { margin-inline-start: auto; }
+@media (max-width: 420px) { .chat-agents .agents-run-head dl > div { grid-template-columns: minmax(0, 1fr); gap: 0; } }

@@ -50,7 +50,7 @@ async function deadline<T>(name: string, promise: Promise<T>) {
 test.each([
   ["spawn success", spawn, { reply: accepted("new-fixture-run") }, "committed", "spawned fixture", 1, 1, 1],
   ["cancel focuses one child", cancel, {}, "committed", "cancellation requested", 1, 1, 1],
-  ["already terminal", cancel, { reply: accepted(row.runId, "completed") }, "committed", "already completed", 1, 1, 1],
+  ["already terminal", cancel, { reply: accepted(row.runId, "completed") }, "committed", "already done", 1, 1, 1],
   ["wrong cancel receipt id", cancel, { reply: accepted("other", "cancelling") }, "unknown", "", 1, 1, 0],
   ["observer refused", cancel, { refused: true }, "failed", "fixture observer refusal", 1, 0, 0],
   ["parent mid-turn", spawn, { state: "running" }, "failed", "zeta is busy", 1, 0, 0],

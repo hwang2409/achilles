@@ -7,6 +7,8 @@ import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { useMemoryActions } from "../projects/MemoryActions";
 import { ProjectsModule } from "../projects/ProjectsModule";
+import { createChildControls } from "../agents/childControls";
+import { createChildSendOwner } from "../agents/childSend";
 import { AgentsModule } from "../agents/AgentsModule";
 import { SessionsModule } from "../sessions/SessionsModule";
 import { continuationHref, mappingFailed } from "../sessions/continueChat";
@@ -58,6 +60,9 @@ export function SurfaceRouter() {
   });
   // the one library writer: a save and its outcome outlive the remount; it settles reads on the current client.
   const [libraryWriter] = useState(() => createLibraryWriter(undefined, () => connection.client));
+  // the chat tab's agent controls: owners outlive a socket replace.
+  const [childControls] = useState(() => createChildControls(connection));
+  const [childSend] = useState(() => createChildSendOwner(connection));
   const [mcpOwner] = useState(() => createMcpOwner({
     live: () => connection.client,
     acquire: async () => await connection.takeControl() === null && connection.state.phase === "connected"
@@ -92,7 +97,7 @@ export function SurfaceRouter() {
   const observerBanner = observer && <ObserverBanner takeControl={takeControl} feedback={controlFeedback} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!catalog) {
-    return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
+    return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} childControls={childControls} childSend={childSend} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
       current={route ?? chatsRoute} homeAlias={chatsRoute.path} connectionStatus={connectionStatus} /></AccountSwitchProvider>;
   }
   if (!route) return null;

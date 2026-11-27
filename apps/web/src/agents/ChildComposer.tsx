@@ -5,8 +5,8 @@ import { supportsFeature } from "../zeta/connection";
 import type { ChildSendOwner } from "./childSend";
 import { readAttachedRoot, rowKey, type AgentRun } from "./reads";
 
-export function ChildComposer({ client, row, owner, reportedAt, refreshing, refresh }: {
-  client: ZetaClient | null; row: AgentRun; owner: ChildSendOwner; reportedAt: number; refreshing: boolean; refresh(): void;
+export function ChildComposer({ client, row, owner, readOnly, reportedAt, refreshing, refresh }: {
+  client: ZetaClient | null; row: AgentRun; owner: ChildSendOwner; readOnly?: string; reportedAt: number; refreshing: boolean; refresh(): void;
 }) {
   const { sessionId, runId, agentType } = row;
   const sendable = client && supportsFeature(client, "child_runs") && agentType && row.acceptsFollowUps &&
@@ -31,9 +31,9 @@ export function ChildComposer({ client, row, owner, reportedAt, refreshing, refr
     <textarea aria-label={`message ${agentType}`} placeholder={`message ${agentType}`} value={text} rows={2} readOnly={pending}
       onChange={(event) => owner.edit(id, event.target.value)} />
     <div className="agents-composer-actions">
-      <span role="status">{pending ? "sending…" : outcome?.message ?? "zeta queues the message for the child’s next safe point."}</span>
+      <span role="status">{pending ? "sending…" : readOnly ?? outcome?.message ?? "zeta queues the message for the child’s next safe point."}</span>
       {blocked && <button type="button" disabled={refreshing} onClick={refresh}>refresh run</button>}
-      <button type="button" data-write-surface={WRITE_SURFACE.agentsSend} disabled={!text.trim() || pending || blocked}
+      <button type="button" data-write-surface={WRITE_SURFACE.agentsSend} disabled={!text.trim() || pending || blocked || !!readOnly}
         onClick={() => void owner.send({ sessionId, runId }, reportedAt)}>{label}</button>
     </div>
   </div>;
