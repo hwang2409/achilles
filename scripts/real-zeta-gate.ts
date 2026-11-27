@@ -1593,8 +1593,6 @@ with _database() as db:
     `raw capture: arguments truncated by zeta marker asserted in the rendered disclosure`,
   ].join("\n") + "\n");
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
-  await clickCreateMode(false);
-  await waitCreateMode(true);
 
   await page.setViewportSize({ width: 1440, height: 1400 });
   const desktopViewport = page.viewportSize();
