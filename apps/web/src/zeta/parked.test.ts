@@ -45,7 +45,7 @@ describe("parked owner", () => {
     expect(notified).toBe(4);
     // only a change of the shown state writes the chat's last_state, for every tab's sidebar; a chat joining the parked
     // list ran no new turn, so it keeps its place in the list (ux m-6: a stopped chat parked again jumped to the top)
-    expect(patches).toEqual(['/api/chats/c {"last_state":"running","keep_order":true}', '/api/chats/a {"last_state":"approval"}', '/api/chats/b {"last_state":"idle"}']);
+    expect(patches).toEqual(['/api/chats/c {"last_state":"running"}', '/api/chats/a {"last_state":"approval"}', '/api/chats/b {"last_state":"idle"}']);
     // parked and idle: zeta keeps it for its work (a background agent), so the row reads running, never blank
     takeParkedEvent(client, event("a", { state: "idle", pending_approvals: 0 }));
     expect(patches.at(-1)).toBe('/api/chats/a {"last_state":"running"}');

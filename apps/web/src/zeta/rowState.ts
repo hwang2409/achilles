@@ -47,11 +47,11 @@ export function subscribeRowWrites(listener: () => void) {
 /**
  * Stores a row's state. `expected` (the row as read) makes it a compare-and-set: a tab that does not hold the chat never
  * overwrites a newer state of the tab that does (achilles answers the row as it is, and nothing changes; the list
- * loads again either way). `keepOrder`: a state re-report, not a new turn, so the row keeps its place in the list.
+ * loads again either way).
  */
-export async function writeRowState(sessionId: string, state: RowState | null, { expected, keepOrder }: { expected?: { last_state: RowState | null; updated_at: string }; keepOrder?: true } = {}, fetchFn: typeof fetch = fetch): Promise<boolean> {
+export async function writeRowState(sessionId: string, state: RowState | null, { expected }: { expected?: { last_state: RowState | null; updated_at: string } } = {}, fetchFn: typeof fetch = fetch): Promise<boolean> {
   if (state === null) return false;
-  const body = { last_state: state, ...(expected ? { expected_last_state: expected.last_state, expected_updated_at: expected.updated_at } : {}), ...(keepOrder ? { keep_order: true } : {}) };
+  const body = { last_state: state, ...(expected ? { expected_last_state: expected.last_state, expected_updated_at: expected.updated_at } : {}) };
   try {
     const response = await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!response.ok) return false;

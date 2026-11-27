@@ -573,13 +573,16 @@ CHAT_FIELDS = {
     "first_message",
     "expected_last_state",
     "expected_updated_at",
-    "keep_order",
 }
 
 
 def _validated_chat_changes(body: Any) -> dict[str, Any]:
     if not isinstance(body, dict) or not body or not set(body) <= CHAT_FIELDS:
-        raise HTTPException(400, "provide only title, last_state, titled_by_user, or first_message")
+        raise HTTPException(
+            400,
+            "provide only title, last_state, titled_by_user, first_message,"
+            " or expected_last_state and expected_updated_at",
+        )
     # expected_*: a compare-and-set of last_state, both together with last_state
     expected = {"expected_last_state", "expected_updated_at"} & set(body)
     if expected and (
@@ -603,10 +606,6 @@ def _validated_chat_changes(body: Any) -> dict[str, Any]:
         if len(title) > 200:
             raise HTTPException(400, "title must be at most 200 characters")
         body["title"] = title = _text(title)
-    # keep_order: a state re-report (a chat joins a tab's parked list), never a new turn,
-    # so the chat keeps its place in the list
-    if "keep_order" in body and (body["keep_order"] is not True or "last_state" not in body):
-        raise HTTPException(400, "keep_order is true and goes with last_state")
     state = body.get("last_state")
     if "last_state" in body and state not in {None, "idle", "running", "approval", "failed"}:
         raise HTTPException(400, "invalid last_state")

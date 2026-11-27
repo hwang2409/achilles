@@ -87,8 +87,7 @@ export function takeParkedEvent(client: object | null, text: string): boolean {
   }
   const row = parseRow({ ...frame.params.data, session_id: sessionId });
   if (!row) return true;
-  // a chat joining the parked list (swapped away from, or a stopped chat parked again) ran no new turn: it keeps its place
-  void writeRowState(sessionId, rowState(before, { from: "parked", row }).write, index < 0 ? { keepOrder: true } : {});
+  void writeRowState(sessionId, rowState(before, { from: "parked", row }).write);
   publish(client, index < 0 ? [...rows, row] : rows.map((old, at) => at === index ? row : old));
   return true;
 }

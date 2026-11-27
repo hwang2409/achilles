@@ -891,10 +891,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
 
   const retrySaving = useCallback(() => { if (!canWrite) return; retryingCreation.current = true; setRouteRefresh((value) => value + 1); }, [canWrite]);
   const retryAttachment = useCallback(() => {
+    // the attach again replaces any pending swap (its token is dropped): the kept chat's composer is no longer held
+    setSwap(null);
     owner.current.clear();
     setAttachSlow(false);
     setRouteRefresh((value) => value + 1);
-  }, []);
+  }, [setSwap]);
   // "try again" on the too-many-chats screen repeats what failed: the new chat, or the attach of the url's chat
   const retryLimit = useCallback(() => {
     const replace = refusedCreate.current;
