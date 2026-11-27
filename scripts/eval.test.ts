@@ -170,3 +170,42 @@ test("suite selection validates every task and sums one command budget", async (
   expect(validateTask(faulted).backend).toBe("scripted");
   expect(() => validateTask({ ...faulted, backend: undefined })).toThrow('set backend: "scripted"');
 });
+test("related pages include both ends of successful page-tool calls only", () => {
+  const before = { pages: [{ id: "home" }], tools: [], records: [], assignments: [] };
+  const after = { pages: [{ id: "home" }, { id: "review" }], tools: [{ id: "tool-1", page_id: "review", name: "add_annotation" }], records: [], assignments: [] };
+  const calls = [
+    { page_id: "home", tool: "achilles__inspect_page", success: true },
+    { page_id: "home", tool: "achilles__create_page", success: true },
+    { page_id: "review", tool: "achilles__create_tool", success: true },
+    { page_id: "review", tool: "mcp_discover", success: true },
+    { page_id: "home", tool: "achilles__add_annotation", success: false },
+    { page_id: "home", tool: "achilles__add_annotation", success: true },
+  ];
+  expect(relatedPages(before, after, calls)).toEqual(["home", "review", "review", "review"]);
+});
+test("every declared seed key is verified before setup and grading", () => {
+  const setup: TaskSetup = { tools: [{ name: "add_note", operation: "insert", collection: "notes", input_schema: { type: "object", required: ["text"] } }], records: [{ id: "note-1", collection: "notes", data: { text: "seeded" } }] };
+  const stored = { tool_versions: [{ page_id: "home", ...setup.tools[0] }], records: [{ page_id: "home", ...setup.records[0] }] } as Record<string, any>;
+  const taskFor = (seed: TaskSetup) => validateTask({ id: "declared-seeds", page_plan: [{ alias: "p", source: "setup", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "work", kind: "prompt", page: "p", chat: "c", prompt: "work" }], setup: seed, checks: [{ id: "page", type: "page_exists", page: "p" }] });
+  const grade = (seed: TaskSetup, initial: Record<string, any>) => gradeReference(taskFor(seed), { initial, pages: [{ id: "home", alias: "p" }] });
+  const mutations: Array<[string, (state: Record<string, any>) => void]> = [
+    ["tool name", state => { state.tool_versions[0].name = "wrong"; }],
+    ["tool operation", state => { state.tool_versions[0].operation = "list"; }],
+    ["tool collection", state => { state.tool_versions[0].collection = "wrong"; }],
+    ["tool input_schema", state => { state.tool_versions[0].input_schema = { type: "object", required: ["title"] }; }],
+    ["record id", state => { state.records[0].id = "wrong"; }],
+    ["record collection", state => { state.records[0].collection = "wrong"; }],
+    ["record data", state => { state.records[0].data = { text: "wrong" }; }],
+  ];
+  for (const [key, mutate] of mutations) {
+    const changed = structuredClone(stored); mutate(changed);
+    expect(() => verifySetup(setup, changed), `${key} setup verification`).toThrow("seed mismatch");
+    expect(grade(setup, changed).status, `${key} grading precondition`).toBe("harness_error");
+  }
+  expect(() => verifySetup(setup, stored)).not.toThrow();
+  expect(grade(setup, stored).status).toBe("pass");
+
+  const withoutSchema = { ...setup, tools: [{ name: "add_note", operation: "insert" as const, collection: "notes" }] };
+  expect(() => verifySetup(withoutSchema, stored), "an undeclared default input_schema is ignored").not.toThrow();
+  expect(grade(withoutSchema, stored).status).toBe("pass");
+});

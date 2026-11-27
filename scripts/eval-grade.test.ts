@@ -444,3 +444,21 @@ test("successful_result with step counts only a call made in that step", () => {
   expect(() => steps([{ ...check, step: "missing" }])).toThrow("names step missing");
   expect(() => steps([{ ...check, step: "use-action" }])).toThrow("names step use-action");
 });
+test("expectation tokens cover each literal-bearing check shape", () => {
+  const cases = [
+    [{ id: "page", type: "page_exists", page: "p", route: "/wanted" }, ["/wanted"]],
+    [{ id: "count", type: "count", page: "p", name: "records", count: 1 }, ["records"]],
+    [{ id: "tool", type: "tool", page: "p", name: "add_note" }, ["add_note"]],
+    [{ id: "approval", type: "approval", page: "p", tool: "achilles__add_note", count: 1 }, ["add_note"]],
+    [{ id: "record", type: "record", page: "p", value: { text: "wanted" } }, ["text", "wanted"]],
+    [{ id: "browser", type: "browser_text", page: "p", text: "visible" }, ["visible"]],
+  ] as const;
+  for (const [check, expected] of cases) expect(expectationTokens(check as never), check.type).toEqual(expected);
+});
+test("task schema is closed and count checks name real collections", () => {
+  expect(validateTask(task).id).toBe("x-task");
+  expect(() => validateTask({ ...task, extra: true })).toThrow("unknown key");
+  expect(() => validateTask({ ...task, checks: [{ id: "missing", type: "count", page: "p", name: "invalid_tool_versions", count: 0 }] })).toThrow("known collection");
+  expect(validateTask({ ...task, prompt: "one source", steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a" }] }).prompt).toBe("one source");
+  expect(() => validateTask({ ...task, prompt: "duplicate" })).toThrow("prompt source");
+});
