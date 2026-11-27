@@ -349,7 +349,6 @@ def build_mcp(store: PageStore):
                         created,
                         digest,
                         existing,
-                        detail_summary,
                         note,
                     ) = await anyio.to_thread.run_sync(
                         store.create_page,
@@ -379,18 +378,13 @@ def build_mcp(store: PageStore):
                         await notify(created["page_id"])
             except ValidationError as exc:
                 return _safe_error(exc)
-            except OSError:
-                return _safe_error(ValidationError("", "atomic page creation", "create_failed"))
-            except (
-                KeyError,
-                TypeError,
-                ValueError,
-                json.JSONDecodeError,
-                PermissionError,
-            ) as exc:
+            # PermissionError is an OSError: catch it first, so create mode off says forbidden
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
                 return CallToolResult(
                     isError=True, content=[TextContent(type="text", text=str(exc))]
                 )
+            except OSError:
+                return _safe_error(ValidationError("", "atomic page creation", "create_failed"))
             await notify(page["id"])
             return _text(result)
         listed_versions = context.session._connection.state.get(

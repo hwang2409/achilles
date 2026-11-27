@@ -1,3 +1,4 @@
+import json
 import shutil
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -9,40 +10,17 @@ import achilles.pages as pages
 from achilles.pages import PageStore
 from achilles.tools import ValidationError
 
-_BUNDLE = {
-    "format_version": 1,
-    "kind": "data_operation",
-    "name": "add_book",
-    "description": "add a book",
-    "input_schema": {
-        "type": "object",
-        "properties": {"title": {"type": "string"}},
-        "required": ["title"],
-        "additionalProperties": False,
-    },
-    "implementation": {
-        "operation": "insert",
-        "collection": "books",
-        "data_schema": {
-            "type": "object",
-            "properties": {"title": {"type": "string"}},
-            "required": ["title"],
-            "additionalProperties": False,
-        },
-    },
-}
 
-
-def _update_page(store: PageStore) -> str:
-    store.set_create_mode("home", True)
-    page, _, _, _, _ = store.create_page(
-        "/reading",
-        "reading",
-        {"blocks": [{"type": "list", "title": "books", "collection": "books"}]},
-        tools=[_BUNDLE],
-    )
-    store.set_create_mode(page["id"], True)
-    return page["id"]
+def _revisions(store: PageStore) -> list[dict]:
+    with store.transaction() as db:
+        rows = db.execute(
+            "SELECT digest, diagnostics, resolved_dependencies, lockfile FROM code_revision "
+            "WHERE page_id='home' ORDER BY version DESC"
+        ).fetchall()
+    return [
+        dict(row) | {"resolved_dependencies": json.loads(row["resolved_dependencies"])}
+        for row in rows
+    ]
 
 
 def test_old_chat_table_defaults_to_chat_purpose(tmp_path) -> None:
@@ -143,7 +121,7 @@ def test_code_build_failure_keeps_previous_revision_active(monkeypatch, tmp_path
 
     assert failure.value.hint == "src/Page.tsx:2:3: bad"
     assert store.page_code("home")["version"] == first["revision"]
-    failed = store.inspect_code("home")["revisions"][0]
+    failed = _revisions(store)[0]
     assert failed["digest"] is None and failed["diagnostics"] == "src/Page.tsx:2:3: bad"
 
 
@@ -172,7 +150,7 @@ def test_overlapping_build_cannot_activate_after_expected_revision_changes(monke
         assert failure.value.hint == "build started at revision 0, but revision 1 is now active"
 
     assert store.page_code("home")["digest"] == fast["digest"]
-    revisions = store.inspect_code("home")["revisions"]
+    revisions = _revisions(store)
     assert revisions[0]["digest"] is None
     assert (
         revisions[0]["diagnostics"] == "build started at revision 0, but revision 1 is now active"
@@ -188,7 +166,7 @@ def test_code_revision_returns_exact_versions_and_lockfile(monkeypatch, tmp_path
 
     assert result["resolved_dependencies"]["nanoid"] == "5.1.6"
     assert result["lockfile"] == "exact lockfile"
-    revision = store.inspect_code("home")["revisions"][0]
+    revision = _revisions(store)[0]
     assert revision["resolved_dependencies"] == {
         "nanoid": "5.1.6",
         "react": "19.0.0",
@@ -256,11 +234,27 @@ def test_old_database_migrates_in_place_with_backup_and_non_page_data(tmp_path, 
         assert db.execute("SELECT document FROM layout_version").fetchone() is not None
 
 
+def test_migration_after_another_process_migrated_is_a_no_op(tmp_path):
+    database = tmp_path / "achilles.sqlite3"
+    shutil.copy(Path(__file__).parent / "fixtures/old-block-achilles.sqlite3", database)
+    racing = sqlite3.connect(database)
+    assert racing.execute("PRAGMA user_version").fetchone()[0] == 3
+    try:
+        PageStore(tmp_path)  # the other process wins the first open
+        pages._drop_block_model(racing, database)
+    finally:
+        racing.close()
+
+    with sqlite3.connect(database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert [path.name for path in tmp_path.iterdir() if path.name.endswith(".tmp")] == []
+
+
 def test_create_write_inspect_history_and_restore_code(built, tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
     source = "export default function Page(){return <main>one</main>}"
-    page, digest, existing, _, _ = store.create_page(
+    page, digest, existing, _ = store.create_page(
         "/notes", "notes", {"source": source, "dependencies": {}}
     )
     assert not existing
@@ -288,7 +282,55 @@ def test_create_write_inspect_history_and_restore_code(built, tmp_path):
 def test_create_page_without_package_builds_minimal_react_shell(built, tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
-    page, _, _, _, _ = store.create_page("/empty", "empty")
+    page, _, _, _ = store.create_page("/empty", "empty")
     code = store.page_code(page["id"])
     assert 'createRoot(document.getElementById("root")!)' in code["source"]
     assert code["version"] == 1
+
+
+def test_existing_page_session_is_copied_to_chat_once(tmp_path) -> None:
+    database = tmp_path / "achilles.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "CREATE TABLE page (id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, "
+            "title TEXT NOT NULL, zeta_session_id TEXT, active_layout_version INTEGER, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT)"
+        )
+        db.execute(
+            "INSERT INTO page VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                "existing",
+                "/existing",
+                "existing",
+                "session-old",
+                None,
+                "created",
+                "updated",
+                0,
+                None,
+            ),
+        )
+        db.execute("PRAGMA user_version = 3")
+    PageStore(tmp_path)
+    PageStore(tmp_path)
+    with sqlite3.connect(database) as db:
+        assert db.execute(
+            "SELECT session_id,page_id,created_at,updated_at FROM chat "
+            "WHERE session_id='session-old'"
+        ).fetchall() == [("session-old", "existing", "created", "updated")]
+
+
+def test_page_list_order_survives_setting_toggles(built, tmp_path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    reading = store.create_page("/reading", "reading")[0]["id"]
+    order = [page["route"] for page in store.pages()[0]]
+    assert order == ["/", "/reading"]
+    store.set_create_mode(reading, True)
+    store.set_create_mode("home", False)
+    store.set_create_mode(reading, False)
+    assert [page["route"] for page in store.pages()[0]] == order
+    first, cursor = store.pages(limit=1)
+    assert [page["route"] for page in first] == ["/"]
+    assert [page["route"] for page in store.pages(limit=1, before=cursor)[0]] == ["/reading"]

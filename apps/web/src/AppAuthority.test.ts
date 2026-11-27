@@ -188,8 +188,8 @@ const composer = (action: "send" | "steer" | "abort", options: Options = { attac
 } });
 const running = { attached: true, joined: { status: { state: "running", session: { session_id: "session" } } } };
 const insert = { description: "Add a book", name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } };
-// a page with a surface docks its chat; the unsupported-format notice is a surface without an iframe
-const docked: Options = { tool: insert, page: { unsupported_format: "this page uses the old block format" }, attached: true };
+// a page with a surface docks its chat; the no-revision notice is a surface without an iframe
+const docked: Options = { tool: insert, page: { unsupported_format: "this page has no compiled revision" }, attached: true };
 const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row => ({ kind: "visible", options, check: async (app, authority, writes) => {
   const control = select(app, tag(id));
   expect(disabled(control)).toBe(authority === "observer");

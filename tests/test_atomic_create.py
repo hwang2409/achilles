@@ -204,6 +204,115 @@ def test_create_tool_page_refuses_pages_this_page_did_not_create(page_family, ca
     assert state(root) == before
 
 
+def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_client):
+    root, store, client, home_headers = creation_client
+    created = mcp(
+        client, home_headers, 2, "tools/call", {"name": "create_page", "arguments": request()}
+    )
+    reading_id = json.loads(created["content"][0]["text"])["page_id"]
+    summary = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
+    value = json.loads(summary["content"][0]["text"])
+    assert value["route"] == "/reading"
+    assert value["code"]["revision"] == 1
+    assert value["code"]["source"] == request()["package"]["source"]
+    assert value["tools"][0]["name"] == "add_book"
+    assert value["collections"] == {}
+    serialized = json.dumps(value)
+    assert len(serialized.encode()) <= 8 * 1024
+    assert "credentials" not in serialized and str(root) not in serialized
+    secret = (root / "credentials" / reading_id).read_text()
+    with store.transaction() as db:
+        credential_hash = db.execute(
+            "SELECT credential_hash FROM page WHERE id=?", (reading_id,)
+        ).fetchone()[0]
+    assert secret not in serialized and credential_hash not in serialized
+
+    third = mcp(
+        client,
+        home_headers,
+        4,
+        "tools/call",
+        {"name": "create_page", "arguments": {**request(), "route": "/third", "title": "third"}},
+    )
+    third_id = json.loads(third["content"][0]["text"])["page_id"]
+    store.set_create_mode(third_id, True)
+    third_headers = initialize(client, store.ensure_credential(third_id), 5)
+    forbidden = mcp(
+        client,
+        third_headers,
+        6,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
+    assert forbidden["isError"]
+    expected = {"code": "forbidden", "expected": "authorized page", "path": ""}
+    assert json.loads(forbidden["content"][0]["text"]) == expected
+
+    store.set_create_mode(reading_id, True)
+    reading_headers = initialize(client, store.ensure_credential(reading_id), 7)
+    cross_forbidden = mcp(
+        client,
+        reading_headers,
+        8,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/"}},
+    )
+    missing = mcp(
+        client,
+        reading_headers,
+        9,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/missing"}},
+    )
+    assert json.loads(cross_forbidden["content"][0]["text"]) == expected
+    assert json.loads(missing["content"][0]["text"]) == expected
+
+
+def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_client):
+    root, store, client, headers = creation_client
+    created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    page_headers = initialize(client, store.ensure_credential(page_id), 3)
+    assert not store.page(page_id)["create_mode"]
+
+    catalog = mcp(client, page_headers, 4, "tools/list", {})
+    assert sorted(tool["name"] for tool in catalog["tools"]) == ["add_book", "inspect_page"]
+    inspect = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
+    assert "create mode is currently OFF" in inspect["description"]
+    assert inspect["annotations"]["readOnlyHint"] is True
+
+    before = state(root)
+    inspected = mcp(
+        client, page_headers, 5, "tools/call", {"name": "inspect_page", "arguments": {}}
+    )
+    assert inspected.get("isError") is not True, inspected
+    summary = json.loads(inspected["content"][0]["text"])
+    assert summary["route"] == "/reading" and summary["title"] == "reading list"
+    assert summary["code"]["source"] == request()["package"]["source"]
+    assert state(root) == before
+
+    for request_id, name, arguments in (
+        (6, "write_page", {"source": "export default 1", "dependencies": {}}),
+        (7, "create_page", {**request(), "route": "/other"}),
+        (8, "create_tool", {"bundle": bundle(name="sneaky")}),
+        (9, "restore_version", {"kind": "code", "version": 1, "expected_version": 1}),
+    ):
+        refused = mcp(
+            client, page_headers, request_id, "tools/call", {"name": name, "arguments": arguments}
+        )
+        assert refused["isError"] is True, name
+        assert refused["content"][0]["text"] == "forbidden: create mode is off", name
+    assert state(root) == before
+    home = {"name": "inspect_page", "arguments": {"route": "/"}}
+    assert mcp(client, page_headers, 10, "tools/call", home)["isError"] is True
+
+
 def test_fresh_mcp_session_must_list_tools_before_generated_call(creation_client):
     _root, store, client, headers = creation_client
     store.create_tool("home", bundle(name="same_name"))
@@ -775,26 +884,6 @@ def _restore(client, headers, arguments):
 
 def _active_tool_version(store):
     return store.page_tools("home")[0]["version"]
-
-
-def test_write_page_dispatch_is_create_mode_gated(creation_client):
-    root, store, client, headers = creation_client
-    created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
-    page_id = json.loads(created["content"][0]["text"])["page_id"]
-    page_headers = initialize(client, store.ensure_credential(page_id), 3)
-    before = state(root)
-
-    refused = mcp(
-        client,
-        page_headers,
-        4,
-        "tools/call",
-        {"name": "write_page", "arguments": {"source": "export default 1", "dependencies": {}}},
-    )
-
-    assert refused["isError"] is True
-    assert refused["content"][0]["text"] == "forbidden: create mode is off"
-    assert state(root) == before
 
 
 def test_page_code_lifecycle_through_real_mcp_requests(monkeypatch, tmp_path):

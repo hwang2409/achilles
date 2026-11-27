@@ -190,7 +190,7 @@ function activeComposerProps(
   return { state: turn === "running" ? "steerable" : "idle", onSubmit, onStop, placeholder };
 }
 
-// a page renders only as its compiled react revision; the server names an old block page as unsupported
+// a page renders as its compiled react revision; a non-home page without one (a migrated block page) shows the server's notice
 function PageSurface({ page, credential }: { page: Page; credential: string }) {
   if (page.code) return <PageFrame pageId={page.id} credential={credential} revision={page.code.version} />;
   return <main className="page-content"><p className="page-unsupported">{page.unsupported_format}</p></main>;

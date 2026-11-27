@@ -124,10 +124,6 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
     return result, encoded
 
 
-def require_inspectable(value: dict[str, Any]) -> None:
-    bounded_inspect(value)
-
-
 def validate_page_route(route: str) -> None:
     validate_schema(route, CREATE_PAGE_SCHEMA["properties"]["route"], "/route")
 
@@ -234,14 +230,6 @@ def _same_json_scalar(left: Any, right: Any) -> bool:
     return type(left) is type(right) and left == right
 
 
-def _filter_value_text(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return str(value).lower()
-    return str(value)
-
-
 def _suggest_filter_field(
     db: sqlite3.Connection,
     page_id: str,
@@ -273,6 +261,39 @@ def _suggest_filter_field(
     )
 
 
+def _drop_block_model(db: sqlite3.Connection, database: Path) -> None:
+    """Migrate v1-v3 to v4: back up the database once, then drop the block layout model."""
+    backup = Path(str(database) + ".pre-block-model-v3.backup")
+    if not backup.exists():
+        # a unique name per process, so two first opens cannot collide on one temporary file
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{backup.name}.", suffix=".tmp", dir=backup.parent
+        )
+        os.close(fd)
+        try:
+            destination = sqlite3.connect(temporary)
+            try:
+                db.backup(destination)
+            finally:
+                destination.close()
+            os.replace(temporary, backup)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        directory = os.open(backup.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        print(f"Achilles database backup: {backup}")
+    db.execute("BEGIN IMMEDIATE")
+    if db.execute("PRAGMA user_version").fetchone()[0] != 4:
+        if "active_layout_version" in {row[1] for row in db.execute("PRAGMA table_info(page)")}:
+            db.execute("ALTER TABLE page DROP COLUMN active_layout_version")
+        db.execute("DROP TABLE IF EXISTS layout_version")
+        db.execute("PRAGMA user_version = 4")
+    db.commit()
+
+
 class PageStore:
     def __init__(self, root: Path):
         self.root = root
@@ -285,28 +306,7 @@ class PageStore:
         if version not in (0, 1, 2, 3, 4):
             raise RuntimeError(f"unsupported Achilles database version: {version}")
         if version in (1, 2, 3):
-            backup = Path(str(self._database) + ".pre-block-model-v3.backup")
-            if not backup.exists():
-                temporary_backup = backup.with_name(backup.name + ".tmp")
-                try:
-                    temporary_backup.unlink(missing_ok=True)
-                    with sqlite3.connect(temporary_backup) as destination:
-                        db.backup(destination)
-                    temporary_backup.chmod(0o600)
-                    os.replace(temporary_backup, backup)
-                finally:
-                    temporary_backup.unlink(missing_ok=True)
-                print(f"Achilles database backup: {backup}")
-            tables = {
-                row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
-            columns = {row[1] for row in db.execute("PRAGMA table_info(page)")}
-            if "layout_version" in tables:
-                db.execute("DROP TABLE layout_version")
-            if "active_layout_version" in columns:
-                db.execute("ALTER TABLE page DROP COLUMN active_layout_version")
-            db.execute("PRAGMA user_version = 4")
-            db.commit()
+            _drop_block_model(db, self._database)
         db.executescript("""
         CREATE TABLE IF NOT EXISTS page (
           id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
@@ -869,7 +869,7 @@ class PageStore:
         package: Any = None,
         principal_id: str = "home",
         tools: Any = None,
-    ) -> tuple[sqlite3.Row, str, bool, list[dict[str, Any]], str | None]:
+    ) -> tuple[sqlite3.Row, str, bool, str | None]:
         package = package or {"source": _MINIMAL_PAGE_SOURCE, "dependencies": {}}
         bundles = [] if tools is None else tools
         validate_schema(
@@ -909,7 +909,7 @@ class PageStore:
                     and json.loads(active["dependencies"]) == package["dependencies"]
                     and [row[0] for row in existing_tools] == requested_tools
                 ):
-                    return existing, active["digest"], True, [], _missing_update_note(bundles)
+                    return existing, active["digest"], True, _missing_update_note(bundles)
                 raise ValidationError("/route", "unused route or equivalent request", "conflict")
         page_id = secrets.token_hex(12)
         try:
@@ -1004,7 +1004,7 @@ class PageStore:
             raise
         row = self.page(page_id)
         assert row is not None
-        return row, built["digest"], False, [], _missing_update_note(bundles)
+        return row, built["digest"], False, _missing_update_note(bundles)
 
     @staticmethod
     def _cleanup_create_paths(paths: set[Path]) -> None:
@@ -1287,36 +1287,6 @@ class PageStore:
                 "SELECT * FROM code_revision WHERE page_id=? AND version=?", (page_id, row[0])
             ).fetchone()
         return dict(code) if code else None
-
-    def inspect_code(self, page_id: str) -> dict[str, Any]:
-        with self._connect() as db:
-            page = db.execute(
-                "SELECT active_code_revision FROM page WHERE id=?", (page_id,)
-            ).fetchone()
-            rows = db.execute(
-                "SELECT * FROM code_revision WHERE page_id=? ORDER BY version DESC", (page_id,)
-            ).fetchall()
-        return {
-            "active_revision": page["active_code_revision"] if page else None,
-            "revisions": [
-                {
-                    **{
-                        key: r[key]
-                        for key in (
-                            "version",
-                            "digest",
-                            "artifact_size",
-                            "diagnostics",
-                            "runtime_error",
-                            "lockfile",
-                            "created_at",
-                        )
-                    },
-                    "resolved_dependencies": json.loads(r["resolved_dependencies"]),
-                }
-                for r in rows
-            ],
-        }
 
     def set_runtime_error(self, page_id: str, revision: int, error: str) -> None:
         with self.transaction() as db:
