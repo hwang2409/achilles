@@ -141,7 +141,7 @@ async function chatBinding(sessionId: string) {
   const loaded = await fetch(`/api/pages/${chat.page_id}`, { cache: "no-store" });
   if (!loaded.ok) return null;
   const page = await loaded.json() as Page;
-  const credential = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" });
+  const credential = await fetch(`/api/pages/${page.id}/credential`, { headers: shellHeaders(), cache: "no-store" });
   if (!credential.ok) throw new Error(`could not load page credential (${credential.status})`);
   return pageBinding(((await credential.json()) as { credential: string }).credential, page.workspace);
 }
