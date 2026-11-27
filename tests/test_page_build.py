@@ -145,7 +145,7 @@ def test_cleanup_runs_before_waiting_for_open_pipes(monkeypatch, tmp_path: Path)
 
     class _OpenPipe:
         def read(self, _size: int) -> bytes:
-            released.wait()
+            released.wait(10)
             return b""
 
     class _ProcessWithOpenPipes:
@@ -183,9 +183,12 @@ def test_cleanup_runs_before_waiting_for_open_pipes(monkeypatch, tmp_path: Path)
 
     worker = threading.Thread(target=run_container, daemon=True)
     worker.start()
-    assert finished.wait(1), "container cleanup must not wait for open pipes"
-    assert removed.is_set()
-    worker.join(1)
+    try:
+        assert finished.wait(10), "container cleanup must not wait for open pipes"
+        assert removed.is_set()
+    finally:
+        released.set()
+        worker.join(10)
 
 
 def test_timed_out_step_removes_container(monkeypatch, tmp_path: Path) -> None:

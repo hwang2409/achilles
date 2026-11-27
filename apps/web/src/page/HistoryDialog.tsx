@@ -3,7 +3,7 @@ import { wrapTab } from "../keyboard";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "../writeSurfaces";
 import "../settings-dialog.css";
 
-type CodeRevision = { version: number; created_at: string; active: boolean; failed: boolean };
+type CodeRevision = { version: number; created_at: string; active: boolean; failed: boolean; stale: boolean };
 type ToolVersion = { name: string; version: number; created_at: string; active: boolean; restored_from: number | null };
 type Versions = { code: CodeRevision[]; tools: ToolVersion[] };
 
@@ -72,9 +72,9 @@ export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, 
   };
 
   const toolNames = [...new Set(versions?.tools.map((row) => row.name))];
-  const button = (key: string, row: { active: boolean }) => row.active
+  const button = (key: string, row: { active: boolean; version: number }) => row.active
     ? <span className="history-current">current</span>
-    : <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={busy || !canWrite} title={!canWrite ? disabledReason : undefined} onClick={() => setPending(key)}>restore</button>;
+    : <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={busy || !canWrite} title={!canWrite ? disabledReason : undefined} onClick={() => setPending(key)}>restore v{row.version}</button>;
   // the row in its confirm state; only "confirm" sends the restore
   const confirmRow = (key: string, version: number, kind: string, run: () => void) => <li key={version} data-row={key} className="history-confirm">
     <span id={`${key}-ask`}>restore version {version}? the current {kind} stays in history</span>
@@ -100,7 +100,7 @@ export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, 
             {versions.code.length === 0 ? <p className="history-hint">this page has no code yet.</p>
               : <ol>{versions.code.map((row) => <li key={row.version} data-row={`code-${row.version}`}>
                 <span className="history-version">v{row.version}</span>
-                <span className="history-detail">{row.failed ? "build failed" : ""}</span>
+                <span className="history-detail">{row.stale ? "skipped: the page changed" : row.failed ? "build failed" : ""}</span>
                 <time dateTime={row.created_at}>{when(row.created_at)}</time>
                 {row.active && <span className="history-current">current</span>}
               </li>)}</ol>}

@@ -15,7 +15,7 @@ export function PagesLanding({ catalog: { items, next, loading, error }, reload,
     <div className="pages-landing">
       {error ? <ModuleState kind="failed" title="the page catalog did not load" action={{ label: "retry", run: reload }} />
         : items === null ? <ModuleState kind="loading" title="reading pages…" />
-        : items.length === 0 ? <ModuleState kind="empty" title="no pages yet" detail="pages you build will appear here." />
+        : items.length === 0 ? <ModuleState kind="empty" title="no pages yet" detail="describe one on Create and an agent builds it." action={{ label: "create a page", run: () => location.assign(surfaceHref("/create")) }} />
         : <section className="page-list" aria-label="page catalog" data-list-state={loading ? "loading" : "ready"} data-loaded-count={items.length}>
           <ul className="pages-grid">
             {items.map((page) => <li key={page.id}>
@@ -33,6 +33,7 @@ export function PagesLanding({ catalog: { items, next, loading, error }, reload,
             {loading ? "reading pages…" : "show more pages"}
           </button>}
         </section>}
+      {!!items?.length && <p className="pages-hint">to add a page, describe it on <a href={surfaceHref("/create")}>Create</a>.</p>}
     </div>
   </ModuleFrame>;
 }

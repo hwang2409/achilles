@@ -283,7 +283,8 @@ def build_mcp(store: PageStore):
                     "for this chat. "
                     "read-only: this page's route, title, layout blocks, record counts, "
                     "tools, metric_values and detail_filter_matches (by block index), and "
-                    "pages it created. "
+                    "pages it created, and code: each revision's build diagnostics and "
+                    "runtime_error, the last error the page threw in the browser. "
                     f"{inspect_edit_hint}"
                 ),
                 inputSchema=INSPECT_PAGE_SCHEMA,

@@ -95,9 +95,11 @@
 
 /* the page crumb's word spaces plus this margin match the 8px gap around the title's "/" */
 .page-crumb > span { margin-inline: 4px; }
-.page-crumb::first-letter { text-transform: uppercase; }
 .page-content { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; padding: var(--g1-page-padding); }
 .page-unsupported { max-width: 64ch; margin: 0 auto; color: var(--fulcrum-muted); }
+.page-frame { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.page-frame > iframe { flex: 1 1 auto; width: 100%; min-height: 560px; border: 0; }
+.page-error { margin: 0; padding: var(--g1-space-2) var(--g1-space-4); border-bottom: 1px solid var(--fulcrum-border); color: var(--fulcrum-danger); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-heading strong[role="button"] { cursor: text; border-radius: 2px; line-height: 40px; }
 .chat-heading strong[role="button"]:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 .chat-title-edit { flex: 1 1 160px; min-width: 160px; min-height: 40px; margin-inline-start: -5px; padding: 2px 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: inherit; font-weight: 600; color: inherit; }

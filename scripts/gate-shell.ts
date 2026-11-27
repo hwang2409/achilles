@@ -14,7 +14,8 @@ export async function gateShell(
   const grouped = await places.locator("section").evaluateAll((sections) => sections.map((section) => [section.getAttribute("aria-label"), [...section.querySelectorAll("a")].map((link) => link.querySelector("span")?.textContent)]));
   const expected = [["work", ["chats", "pages", "agents", "sessions", "projects", "telemetry"]], ["library", ["skills", "agent profiles"]], ["manage", ["settings", "accounts", "connections"]]];
   if (JSON.stringify(grouped) !== JSON.stringify(expected)) throw new Error(`unexpected place order: ${JSON.stringify(grouped)}`);
-  if (!(await places.getByRole("link", { name: "chats", exact: true }).getAttribute("aria-current"))) throw new Error("home did not select chats");
+  // the gate seeds home with compiled code, so home is a page and selects Pages
+  if (!(await places.getByRole("link", { name: "pages", exact: true }).getAttribute("aria-current"))) throw new Error("home page did not select pages");
   if (await page.locator(".sidebar .page-list").count() || await page.locator(".sidebar").getByRole("button", { name: "settings", exact: true }).count()) throw new Error("sidebar duplicated a stable place");
   if (await places.locator("small:not(.waiting-count)").count()) throw new Error("a place shows a catalog count");
   await page.keyboard.press(appShortcut("k"));

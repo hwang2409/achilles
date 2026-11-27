@@ -1,4 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ZetaClient } from "@fulcrum/zeta";
+import { supportsFeature } from "../zeta";
+import { ACCOUNT_LIST_IDLE_FEATURE, readAccounts } from "../zeta/accounts";
+import { parseDefaults } from "../settings/SettingsModule";
 import { chatHref, timeLabel, titleOf, useOnScreen, type useAgentNavAdapter } from "../surface/AgentNavAdapter";
 import { surfaceHref } from "../surface/routes";
 import type { useActiveChat } from "../useActiveChat";
@@ -14,7 +18,27 @@ const starters = [
   "a weekly habit tracker",
 ];
 
-export function CreateLanding({ build, nav, activity }: { activity: BuildActivity; build: ReturnType<typeof useActiveChat>["build"]; nav: ReturnType<typeof useAgentNavAdapter> }) {
+// the login command when zeta's default provider is claude or codex and has no usable account, else null. only a hint: the guess is
+// wrong for API-key mode or when serve runs another provider, so the build stays available and reports a real missing login itself.
+function useMissingLogin(client: ZetaClient | null) {
+  const [missing, setMissing] = useState<string | null>(null);
+  useEffect(() => {
+    if (!client || !supportsFeature(client, ACCOUNT_LIST_IDLE_FEATURE)) return;
+    let live = true;
+    Promise.all([client.request("state_settings", { collection: "mcp", limit: 1 }), readAccounts(client)]).then(([settings, { accounts }]) => {
+      const provider = parseDefaults(settings)?.provider;
+      const login = provider === "codex" ? "codex" : provider === "claude" ? "anthropic" : null;
+      // other providers (a test or local model) need no account login
+      const ready = !login || accounts.some((row) => row.available && row.account.startsWith(`${login}:`));
+      if (live) setMissing(ready ? null : `zeta login ${login}`);
+    }, () => {});
+    return () => { live = false; };
+  }, [client]);
+  return missing;
+}
+
+export function CreateLanding({ build, nav, activity, client }: { activity: BuildActivity; build: ReturnType<typeof useActiveChat>["build"]; nav: ReturnType<typeof useAgentNavAdapter>; client: ZetaClient | null }) {
+  const missingLogin = useMissingLogin(client);
   const prompt = useRef<HTMLTextAreaElement>(null);
   const submit = useRef<HTMLButtonElement>(null);
   const { catalog, pageCatalog } = nav;
@@ -28,6 +52,7 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
     <div className="create-scroll">
       <div className="create-landing">
         <h1>what should we build?</h1>
+        {missingLogin && <p data-testid="login-hint">no model login found. if builds fail, run <code>{missingLogin}</code> in a terminal or sign in on <a href={surfaceHref("/accounts")}>accounts</a>.</p>}
         <form onSubmit={(event) => { event.preventDefault(); void build.start(); }} aria-busy={build.pending}>
           <textarea ref={prompt} aria-label="describe your page" aria-describedby="create-build-status" value={build.draft}
             readOnly={build.pending || build.locked} placeholder="a page to track…" onChange={(event) => build.setDraft(event.target.value)} />
