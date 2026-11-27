@@ -37,10 +37,13 @@ export function rowState(stored: RowState | null | undefined, live?: Live): { sh
   return { shown: next ?? stored ?? null, write: next !== null && next !== stored ? next : null };
 }
 
-// the state this tab last wrote for each chat: forgotten when another tab writes the chat, or a list load shows another
+// the state this tab last wrote for each chat it holds: forgotten when another tab writes the chat, a list load shows
+// another, a write fails, or the chat leaves this tab
 const lastWritten = new Map<string, RowState>();
 /** Each test case is a fresh tab. */
 export const forgetRowWrites = () => lastWritten.clear();
+/** The chats this tab holds now: a chat released, taken by another tab or device, or closed is forgotten. */
+export const keepRowWrites = (held: ReadonlySet<string>) => { for (const id of lastWritten.keys()) if (!held.has(id)) lastWritten.delete(id); };
 const written = new Set<(remote: boolean) => void>();
 const notify = (remote: boolean) => { for (const listener of [...written]) listener(remote); };
 // the other tabs of this browser hear each chat write here (a post never reaches its own sender); other browsers and

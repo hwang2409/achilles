@@ -36,7 +36,7 @@ import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { TOO_MANY_CHATS } from "./zeta/session";
 import { parkedRows, subscribeParked } from "./zeta/parked";
-import { subscribeRowWrites, verifyChatStates } from "./zeta/rowState";
+import { keepRowWrites, subscribeRowWrites, verifyChatStates } from "./zeta/rowState";
 import { trackQueuedSteer, useActiveChat, type Page, type ParkedChat, type StopState } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -442,6 +442,9 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const listedChats = nav.catalog.chats;
   // (a chat a stop left attached has no other writer, so the check covers it too)
   const heldIds = [ready?.sessionId, ...parked.map((row) => row.session_id)].filter((id): id is string => Boolean(id)).join(" ");
+  // this tab's own chats (not one shown read-only): what it last wrote is kept for these only
+  const ownIds = [ready && !ready.controlledElsewhere ? ready.sessionId : null, ...parked.map((row) => row.session_id)].filter(Boolean).join(" ");
+  useEffect(() => keepRowWrites(new Set(ownIds.split(" "))), [ownIds]);
   // a list another tab's write reloaded is not checked: that tab holds the chat and just stored its state, and zeta's
   // view of it could lag behind
   const remoteReload = useRef(false);

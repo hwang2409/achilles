@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { parkedRows, refreshParked, takeParkedEvent } from "./parked";
-import { forgetRowWrites, rowState, subscribeRowWrites, verifyChatStates, writeShownState, type RowState } from "./rowState";
+import { forgetRowWrites, keepRowWrites, rowState, subscribeRowWrites, verifyChatStates, writeShownState, type RowState } from "./rowState";
 
 // achilles' chat rows as the server keeps them: each state write adds 1 to state_version, and a write with an expected
 // row is a compare-and-set (the row unchanged when it changed since the read), as in PageStore.update_chat
 type Row = { last_state: RowState | null; state_version: number };
 let server = new Map<string, Row>();
 let stored = 0;
+// the next chat PATCH fails (achilles answers 500, nothing stored)
+let failing = false;
 const realFetch = globalThis.fetch;
 beforeEach(() => {
   server = new Map(); stored = 0;
@@ -17,6 +19,7 @@ beforeEach(() => {
     const body = JSON.parse(String(init?.body)) as { last_state: RowState; expected_last_state?: RowState | null; expected_state_version?: number };
     const row = server.get(id);
     if (!row) return new Response(null, { status: 404 });
+    if (failing) return new Response(null, { status: 500 });
     if (body.expected_state_version !== undefined && (row.last_state !== body.expected_last_state || row.state_version !== body.expected_state_version)) { stored += 1; return Response.json(row); }
     server.set(id, { last_state: body.last_state, state_version: row.state_version + 1 });
     stored += 1;
@@ -27,8 +30,14 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 const event = (data: object) => JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "parked_session_changed", session_id: "c", data } });
 type Step =
-  // this tab shows the chat, and its header state changes
-  | { attached: RowState }
+  // this tab shows the chat, and its header state changes (`fails`: achilles does not store it)
+  | { attached: RowState; fails?: true }
+  // another device stores a state (no post reaches this tab)
+  | { elsewhere: RowState }
+  // this tab's chat list loads while it holds the chat
+  | { listed: true }
+  // the chat leaves this tab (released, taken, or closed)
+  | { released: true }
   // this tab keeps the chat parked: zeta reports a change, or closed
   | { parked: { state: string; pending_approvals?: number } }
   // another tab's chat list load checks the row with zeta (null: session_not_found); `meanwhile` runs while zeta answers
@@ -37,6 +46,11 @@ type RowCase = { name: string; stored: RowState | null; parkedAtStart?: boolean;
 const rows: RowCase[] = [
   { name: "the shown chat runs, then goes idle", stored: null, steps: [{ attached: "running" }, { attached: "idle" }], shown: ["running", "idle"] },
   { name: "the holder writes a state it already wrote once", stored: null, steps: [{ attached: "running" }, { attached: "running" }, { attached: "idle" }, { attached: "idle" }], shown: ["running", "running", "idle", "idle"], writes: 2 },
+  // each forget, so a later same-state write is stored again: a list load shows another device's write, the write failed,
+  // the chat left this tab
+  { name: "a list load that shows another device's write forgets this tab's", stored: null, steps: [{ attached: "running" }, { elsewhere: "idle" }, { listed: true }, { attached: "running" }], shown: ["running", "idle", "idle", "running"], writes: 2 },
+  { name: "a failed write is written again", stored: null, steps: [{ attached: "running", fails: true }, { attached: "running" }], shown: [null, "running"], writes: 1 },
+  { name: "a chat that left this tab and came back writes its state again", stored: null, steps: [{ attached: "idle" }, { elsewhere: "running" }, { released: true }, { attached: "idle" }], shown: ["idle", "running", "running", "idle"], writes: 2 },
   { name: "a parked chat goes idle (only a background agent works), then closes", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "idle" } }, { parked: { state: "closed" } }], shown: ["running", "idle"] },
   { name: "a parked chat that closes while it runs", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "closed" } }], shown: ["idle"] },
   { name: "a parked chat needs you, then runs on", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "running", pending_approvals: 1 } }, { parked: { state: "running" } }], shown: ["approval", "running"] },
@@ -60,7 +74,10 @@ test.each(rows)("a chat row's state: $name", async (row) => {
     return { session: { session_id: "c", status }, items: [] };
   } };
   async function run(step: Step) {
-    if ("attached" in step) await writeShownState("c", step.attached);
+    if ("attached" in step) { failing = Boolean(step.fails); await writeShownState("c", step.attached); failing = false; }
+    else if ("elsewhere" in step) server.set("c", { last_state: step.elsewhere, state_version: server.get("c")!.state_version + 1 });
+    else if ("listed" in step) await verifyChatStates(client as never, [{ session_id: "c", ...server.get("c")! }], new Set(["c"]));
+    else if ("released" in step) keepRowWrites(new Set());
     else if ("parked" in step) { takeParkedEvent(client, event({ pending_approvals: 0, ...step.parked })); await new Promise((resolve) => setTimeout(resolve, 0)); }
     else { meanwhile = step.meanwhile ?? []; await verifyChatStates(client as never, [{ session_id: "c", ...server.get("c")! }], new Set()); }
   }
