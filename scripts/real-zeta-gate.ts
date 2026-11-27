@@ -51,8 +51,10 @@ const render = async () => {
   annotations.textContent = "trace annotations: " + await list("trace_annotations");
   notes.textContent = "frame notes: " + await list("frame_notes");
 };
-render();
-setInterval(render, 500);
+// a failed list rejects (achilles restarts mid-gate); the next poll tries again
+const poll = () => render().catch(() => {});
+poll();
+setInterval(poll, 500);
 `;
 
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);

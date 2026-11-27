@@ -398,8 +398,9 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
 
 // `checking`: no state yet, and a read of this build is queued or in flight.
 export type BuildRow = { chat: Chat; state: BuildState | null; reason: BuildReason | null; results: string[]; tools: string[]; checking?: boolean };
-// A reason marks a remembered state that is not live now; it is never counted.
-export const buildLabel = ({ state, reason, checking }: Pick<BuildRow, "state" | "reason" | "checking">) => state === null ? checking ? "checking" : null : reason ? `last known ${state} · ${reason}` : state;
+// A reason marks a remembered state that is not live now; it is never counted. A remembered building or needs-you
+// may have ended elsewhere, so it shows no badge.
+export const buildLabel = ({ state, reason, checking }: Pick<BuildRow, "state" | "reason" | "checking">) => state === null || (reason && active(state)) ? checking ? "checking" : null : reason ? `last known ${state} · ${reason}` : state;
 // The chat-list state class for a build row: only live states get a live tone.
 export const buildTone = (row?: BuildRow) => !row?.state || row.reason ? null : row.state === "building" ? "running" : row.state === "needs you" ? "approval" : row.state;
 

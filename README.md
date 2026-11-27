@@ -10,13 +10,13 @@ cd achilles
 make dev
 ```
 
-prerequisites: `make`, `uv`, `bun`, and `git`, plus a provider and model in the zeta home. `make dev` prepares its pinned zeta checkout; set `ACHILLES_USE_PATH_ZETA=1` only when you want to use `zeta` on `PATH`. providers that use an account must be logged in; local ollama does not need credentials.
+prerequisites: `make`, `uv`, `bun`, `git`, docker (page builds), and playwright chromium (`render_page`; install with `cd apps/web && bun node_modules/playwright/cli.js install chromium`), plus a provider and model in the zeta home. `make dev` prepares its pinned zeta checkout; set `ACHILLES_USE_PATH_ZETA=1` only when you want to use `zeta` on `PATH`. providers that use an account must be logged in; local ollama does not need credentials.
 
 `make dev` installs dependencies, prepares pinned zeta in `.cache/zeta` with its own virtual environment, builds pinned fulcrum packages and the web app when needed, configures achilles in `$ZETA_HOME/mcp.json`, starts or reuses its own zeta serve under the achilles data directory, starts achilles in yolo mode, and opens the app. to use zeta from `PATH` instead, set `ACHILLES_USE_PATH_ZETA=1`; an older path zeta is rejected without changing it.
 
 set `ACHILLES_APPROVAL=ask` to require approval for tool calls.
 
-create-mode pages can use `inspect_page` for themselves and pages they created with `create_page`; older pages can inspect only themselves.
+a page's own chat can edit that page without create mode; create mode is needed only to create pages and tools. create-mode pages can use `inspect_page` for themselves and pages they created with `create_page`; older pages can inspect only themselves.
 
 ## pages
 

@@ -17,12 +17,12 @@ function bounded() {
   let omitted = 0;
   return { items, add: (value: string) => (items.length < MAX_ITEMS ? items.push(clip(value)) : omitted++), done: () => (omitted ? [...items, `... ${omitted} more`] : items) };
 }
-const consoleErrors = bounded(), pageErrors = bounded(), failedRequests = bounded();
+const consoleErrors = bounded(), pageErrors = bounded(), failedRequests = bounded(), dialogs = bounded();
 
 // the host mirrors the shell's PageFrame bridge: same iframe sandbox, records list reads real data, writes are refused
 const hostPath = `/__achilles_render__/${encodeURIComponent(input.pageId)}`;
 const host = `<!doctype html><meta charset="utf-8"><style>html,body,iframe{margin:0;border:0;width:100%;height:100%;display:block}</style>
-<iframe sandbox="allow-scripts allow-forms allow-downloads" src="/api/pages/${encodeURIComponent(input.pageId)}/frame"></iframe>
+<iframe sandbox="allow-scripts allow-forms allow-downloads allow-modals" src="/api/pages/${encodeURIComponent(input.pageId)}/frame"></iframe>
 <script>
 const pageId=${JSON.stringify(input.pageId)}, credential=${JSON.stringify(input.credential)}, frame=document.querySelector("iframe");
 window.__render={pending:0,calls:[],rejections:[]};
@@ -36,8 +36,8 @@ addEventListener("message", async event => {
   __render.pending++;
   try {
     const response = await fetch("/api/pages/" + encodeURIComponent(pageId) + "/records/" + encodeURIComponent(m.collection), { headers: { authorization: "Bearer " + credential } });
-    const body = await response.json();
-    if (!response.ok) __render.rejections.push(where + ": " + (body.detail ?? response.status));
+    const body = response.ok ? await response.json() : { detail: await response.text() };
+    if (!response.ok) __render.rejections.push(where + ": " + body.detail);
     reply(response.ok, body);
   } catch (caught) { __render.rejections.push(where + ": " + caught); reply(false, { detail: String(caught) }); }
   finally { __render.pending--; }
@@ -53,6 +53,8 @@ try {
   const page = await context.newPage();
   await page.route(`${input.origin}${hostPath}`, (route) => route.fulfill({ contentType: "text/html", body: host }));
   page.on("console", (message) => { if (message.type() === "error") { const at = message.location(); consoleErrors.add(`${message.text()} (${at.url}:${at.lineNumber + 1})`); } });
+  // a dialog left open would stall the page; accept it and report it
+  page.on("dialog", (dialog) => { dialogs.add(`${dialog.type()}: ${dialog.message()}`); void dialog.accept(); });
   page.on("pageerror", (error) => pageErrors.add(error.stack || String(error)));
   page.on("requestfailed", (request) => failedRequests.add(`${request.method()} ${request.url()}: ${request.failure()?.errorText ?? "failed"}`));
   page.on("response", (response) => { if (response.status() >= 400) failedRequests.add(`${response.request().method()} ${response.url()}: HTTP ${response.status()}`); });
@@ -89,7 +91,7 @@ try {
   const calls = bounded(), rejections = bounded();
   for (const call of state?.calls ?? []) calls.add(call);
   for (const rejection of state?.rejections ?? []) rejections.add(rejection);
-  Object.assign(result, { timed_out: timedOut, console_errors: consoleErrors.done(), page_errors: pageErrors.done(), failed_requests: failedRequests.done(), bridge_calls: calls.done(), bridge_rejections: rejections.done() });
+  Object.assign(result, { timed_out: timedOut, console_errors: consoleErrors.done(), page_errors: pageErrors.done(), failed_requests: failedRequests.done(), dialogs: dialogs.done(), bridge_calls: calls.done(), bridge_rejections: rejections.done() });
 } finally {
   await browser.close(); // closing the browser process also ends a hung renderer
 }

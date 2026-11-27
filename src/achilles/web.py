@@ -19,7 +19,7 @@ from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
 from .page_build import PageBuildError
-from .pages import CHAT_PURPOSES, ChatChanged, PageStore
+from .pages import CHAT_PURPOSES, ChatChanged, PageStore, RecordExists
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
 
@@ -193,6 +193,10 @@ def create_app() -> Starlette:
         if row is None:
             raise HTTPException(404, "page not found")
         code = await anyio.to_thread.run_sync(store.page_code, row["id"])
+        # create_page always builds code: only home or a migrated block page lacks it
+        unsupported = EMPTY_PAGE if not code and row["id"] != "home" else None
+        if unsupported and store.block_model_backup.exists():
+            unsupported += f" the old layout of this page is saved in {store.block_model_backup}"
         return JSONResponse(
             {
                 key: row[key]
@@ -210,8 +214,7 @@ def create_app() -> Starlette:
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
                 "create_mode": bool(row["create_mode"]),
                 "code": code,
-                # create_page always builds code: only home or a migrated block page lacks it
-                "unsupported_format": EMPTY_PAGE if not code and row["id"] != "home" else None,
+                "unsupported_format": unsupported,
             }
         )
 
@@ -238,8 +241,10 @@ def create_app() -> Starlette:
             headers={
                 "content-security-policy": (
                     "default-src 'self' https:; script-src 'self' https:; "
+                    "style-src 'self' https: 'unsafe-inline'; "
+                    "img-src 'self' https: data: blob:; font-src 'self' https: data: blob:; "
                     "connect-src https: http:; frame-ancestors 'self'; "
-                    "sandbox allow-scripts allow-forms allow-downloads"
+                    "sandbox allow-scripts allow-forms allow-downloads allow-modals"
                 ),
                 "cache-control": "no-store",
             },
@@ -264,7 +269,7 @@ addEventListener('message',event=>{{if(event.source!==parent||event.origin===\"n
  event.data.ok?item.resolve(event.data.result):item.reject(event.data.result);
 }});
 addEventListener('error',event=>parent.postMessage({{...identity,runtimeError:String(event.message)}},'*'));
-addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,runtimeError:String(event.reason)}},'*'));
+addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,runtimeError:String(event.reason?.detail??event.reason)}},'*'));
 """
         return Response(
             script,
@@ -528,9 +533,13 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         collection = request.path_params["collection"]
         if request.method == "POST":
             body = await json_object(request)
-            return JSONResponse(
-                await anyio.to_thread.run_sync(store.insert_record, page_id, collection, body)
-            )
+            try:
+                inserted = await anyio.to_thread.run_sync(
+                    store.insert_record, page_id, collection, body
+                )
+            except RecordExists as exc:
+                raise HTTPException(409, "a record with this record_id already exists") from exc
+            return JSONResponse(inserted)
         field = request.query_params.get("field")
         raw_equals = request.query_params.get("equals")
         raw_limit = request.query_params.get("limit", "100")

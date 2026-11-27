@@ -4,8 +4,8 @@ export type PageTool = { name: string; description: string; operation: string; c
 type Snapshot = { tools: PageTool[] | null; error: string | null };
 type Entry = { snapshot: Snapshot; listeners: Set<() => void> };
 
-// One owner for GET /api/pages/{id}/tools: FormBlock and EmptyChat both need a page's tool
-// list, so a page that mounts both issues one request, not two. Keyed on pageId+credential+
+// One owner for GET /api/pages/{id}/tools: EmptyChat reads a page's tool list through it,
+// so components that share a key issue one request. Keyed on pageId+credential+
 // refreshKey; each live key keeps its own cache entry, dropped once nothing subscribes to it.
 const entries = new Map<string, Entry>();
 

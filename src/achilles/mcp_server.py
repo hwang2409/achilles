@@ -64,6 +64,7 @@ PAGE_RECORDS_API = (
     "first, each with record_id; insert(collection, document) returns the new record; "
     "update(collection, record_id, fields) merges fields into the record and returns it; "
     "delete(collection, record_id) removes it. A failed call rejects with {detail}. "
+    "Ask for confirmation inside the page, not with confirm() or alert(). "
 )
 RENDER_WAIT_SECONDS = 5
 RENDER_AFTER_BUILD = "After a visual change, call render_page to see the result. "

@@ -28,20 +28,21 @@ function Frame({ pageId, credential, revision }: Props) {
         setError(String(message.runtimeError));
         return;
       }
+      // every call gets a reply, so the page's promise always settles; a failure rejects with {detail}
+      const reply = (ok: boolean, result: unknown) => frame.current?.contentWindow?.postMessage({ requestId: message.requestId, ok, result }, "*");
       try {
         const record = message.method === "update" || message.method === "delete" ? `/${encodeURIComponent(message.id)}` : "";
         const path = `/api/pages/${encodeURIComponent(pageId)}/records/${encodeURIComponent(message.collection)}${record}`;
         const method = BRIDGE_HTTP[message.method];
         const response = await fetch(path, { method, headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" }, body: method === "POST" || method === "PATCH" ? JSON.stringify(message.document) : undefined });
-        const result = await response.json();
-        frame.current?.contentWindow?.postMessage({ requestId: message.requestId, ok: response.ok, result }, "*");
-      } catch (caught) { setError(String(caught)); }
+        reply(response.ok, response.ok ? await response.json() : { detail: await response.text() });
+      } catch (caught) { reply(false, { detail: String(caught) }); }
     };
     addEventListener("message", onMessage);
     return () => removeEventListener("message", onMessage);
   }, [credential, pageId, revision]);
   return <div className="page-frame">
     {error && <p className="page-error" role="alert" title={error}>this page hit an error: {error}</p>}
-    <iframe ref={frame} title="custom page" sandbox="allow-scripts allow-forms allow-downloads" src={`/api/pages/${encodeURIComponent(pageId)}/frame`} />
+    <iframe ref={frame} title="custom page" sandbox="allow-scripts allow-forms allow-downloads allow-modals" src={`/api/pages/${encodeURIComponent(pageId)}/frame`} />
   </div>;
 }
