@@ -95,7 +95,8 @@ def creation_client(monkeypatch, tmp_path):
         lambda _root, _page_id, source, dependencies: {
             "digest": "test-digest",
             "size": len(source),
-            "dependencies": dependencies,
+            # the real builder stores the react pins with the requested deps
+            "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", **dependencies},
             "resolved_dependencies": dependencies,
             "lockfile": "test-lock",
         },
@@ -854,7 +855,7 @@ def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creatio
         (request(tools=[bundle(), bundle()]), "create_failed", ""),
     ],
 )
-def test_create_page_failures_leave_no_rows_or_files(creation_client, arguments, code, path):
+def test_create_page_failures_leave_no_rows_or_page_files(creation_client, arguments, code, path):
     root, _store, client, headers = creation_client
     before = state(root)
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": arguments})
@@ -865,7 +866,9 @@ def test_create_page_failures_leave_no_rows_or_files(creation_client, arguments,
         "expected": error["expected"],
         "path": path,
     }
-    assert state(root) == before
+    # content-addressed bundle files may stay: they are never removed once written
+    counts, files = state(root)
+    assert (counts, {name for name in files if not name.startswith("bundles/")}) == before
 
 
 def test_simultaneous_identical_create_page_calls_are_idempotent(creation_client):
@@ -899,7 +902,10 @@ def test_simultaneous_identical_create_page_calls_are_idempotent(creation_client
         assert not thread.is_alive(), f"concurrent create caller {index} hung"
     assert not errors, errors
     values = [json.loads(result["content"][0]["text"]) for result in results]
-    assert sorted(value["existing"] for value in values) == [False, True]
+    assert sorted(value.get("existing") for value in values if "code" not in value) == [
+        False,
+        True,
+    ], values
     assert len({value["page_id"] for value in values}) == 1
     counts, files = state(root)
     assert counts == {

@@ -47,6 +47,6 @@
     }
   ],
   "goal_capabilities": [
-    "create_page_with_tools"
+    "create_page"
   ]
 }

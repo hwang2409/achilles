@@ -234,19 +234,25 @@ def test_old_database_migrates_in_place_with_backup_and_non_page_data(tmp_path, 
         assert db.execute("SELECT document FROM layout_version").fetchone() is not None
 
 
-def test_migration_after_another_process_migrated_is_a_no_op(tmp_path):
+def test_migration_after_another_process_migrated_is_a_no_op(monkeypatch, tmp_path):
     database = tmp_path / "achilles.sqlite3"
     shutil.copy(Path(__file__).parent / "fixtures/old-block-achilles.sqlite3", database)
+    backup = Path(str(database) + ".pre-block-model-v3.backup")
     racing = sqlite3.connect(database)
     assert racing.execute("PRAGMA user_version").fetchone()[0] == 3
     try:
         PageStore(tmp_path)  # the other process wins the first open
+        # the racing open checked for the backup before the winner wrote it
+        real_exists = Path.exists
+        monkeypatch.setattr(Path, "exists", lambda path: path != backup and real_exists(path))
         pages._drop_block_model(racing, database)
     finally:
         racing.close()
 
     with sqlite3.connect(database) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+    with sqlite3.connect(backup) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3, "v3 backup was overwritten"
     assert [path.name for path in tmp_path.iterdir() if path.name.endswith(".tmp")] == []
 
 

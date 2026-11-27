@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .page_build import PageBuildError, build_page
+from .page_build import PageBuildError, build_page, effective_dependencies
 from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
 
@@ -274,21 +274,28 @@ def _drop_block_model(db: sqlite3.Connection, database: Path) -> None:
             prefix=f".{backup.name}.", suffix=".tmp", dir=backup.parent
         )
         os.close(fd)
+        created = False
         try:
             destination = sqlite3.connect(temporary)
             try:
                 db.backup(destination)
             finally:
                 destination.close()
-            os.replace(temporary, backup)
+            # link, never replace: a racing first open may already have migrated, and its
+            # copy would overwrite the real v3 backup with a v4 one
+            os.link(temporary, backup)
+            created = True
+        except FileExistsError:
+            pass
         finally:
             Path(temporary).unlink(missing_ok=True)
-        directory = os.open(backup.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-        print(f"Achilles database backup: {backup}")
+        if created:
+            directory = os.open(backup.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+            print(f"Achilles database backup: {backup}")
     db.execute("BEGIN IMMEDIATE")
     if db.execute("PRAGMA user_version").fetchone()[0] != 4:
         if "active_layout_version" in {row[1] for row in db.execute("PRAGMA table_info(page)")}:
@@ -910,7 +917,8 @@ class PageStore:
                     existing["title"] == title
                     and active is not None
                     and active["source"] == package["source"]
-                    and json.loads(active["dependencies"]) == package["dependencies"]
+                    and json.loads(active["dependencies"])
+                    == effective_dependencies(package["dependencies"])
                     and [row[0] for row in existing_tools] == requested_tools
                 ):
                     return existing, active["digest"], True, _missing_update_note(bundles)
@@ -941,12 +949,10 @@ class PageStore:
                     raise PermissionError("forbidden: create mode is off")
                 if db.execute("SELECT 1 FROM page WHERE route=?", (route,)).fetchone():
                     raise _RouteTaken
-                # bundle files are shared by digest: write them under the write lock, so a failed
-                # concurrent call cannot remove a file that another call just committed
+                # bundle files are shared by digest and never removed on failure: once the lock
+                # is released, another committed call may own the same file
                 for bundle in bundles:
                     path = self.root / "bundles" / f"{bundle_digest(bundle)}.json"
-                    if not path.exists():
-                        created_paths.add(path)
                     self._atomic_private_write(path, (canonical_bundle(bundle) + "\n").encode())
                 hook = getattr(self, "before_create_commit", None)
                 if hook is not None:
