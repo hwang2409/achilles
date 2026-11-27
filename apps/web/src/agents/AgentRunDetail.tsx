@@ -39,7 +39,7 @@ export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follo
       {chosen ? <RunDetail key={id} row={chosen} parent={parent} rootTitle={title!} />
         : <ModuleState kind="empty" title={id || invalid ? "run not in this view" : "select a run"}
           detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
-      {chosen && !controls && <p className="agents-cancel">control this run from <ChatLink sessionId={chosen.sessionId}>its chat</ChatLink>.</p>}
+      {chosen && !controls && <p className="agents-note">control this run from <ChatLink sessionId={chosen.sessionId}>its chat</ChatLink>.</p>}
       {controls && <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh} readOnly={readOnly}
         elapsed={chosen?.elapsedSeconds === undefined ? "elapsed unavailable" : `${duration(chosen.elapsedSeconds)} at last refresh`} />}
       {chosen && <RunActivity client={client} row={chosen} />}

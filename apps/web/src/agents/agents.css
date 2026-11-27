@@ -49,6 +49,8 @@
 .agents-run-head dt, .agents-activity small { color: var(--fulcrum-muted); font-size: inherit; }
 .agents-run-head dd { margin: 0; font-variant-numeric: tabular-nums; }
 .agents-run-head dd a { text-decoration: underline; }
+.agents-note { margin: 0; padding: var(--g1-space-2) var(--g1-page-gutter); }
+.agents-note a { text-decoration: underline; }
 .agents-activity { border-top: 1px solid var(--fulcrum-border); }
 .agents-activity h3 { margin: 0; font-size: 1em; }
 .agents-activity small { font-weight: 400; margin-inline-start: 8px; }

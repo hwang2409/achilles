@@ -52,7 +52,8 @@ export function AgentSpawn({ client, owner, refresh, sessionId, title, readOnly 
       </select></label>
       {profile?.description && <small>{display(profile.description)}</small>}
       <label>task <textarea required value={task} onChange={(event) => setTask(event.currentTarget.value)} /></label>
-      <button ref={opener} type="submit" disabled={!!unavailable || !profile || !task.trim()} data-write-surface={WRITE_SURFACE.agentsSpawn}>review spawn</button>
+      {/* aria-disabled, not disabled: a spawn clears the task, and focus must stay on this button inside the dialog */}
+      <button ref={opener} type="submit" aria-disabled={!!unavailable || !profile || !task.trim() || undefined} data-write-surface={WRITE_SURFACE.agentsSpawn}>review spawn</button>
     </form>}
     <div ref={setActivity} />
     {review && <Confirmation key={review.id} level={2} title={t("spawn an agent")} action={t("spawn agent")} keep={t("keep draft")}
@@ -82,11 +83,12 @@ export function AgentCancel({ client, owner, refresh, row, title, parent, elapse
   const [review, setReview] = useState<{ id: number; row: AgentRun; title?: string; parent?: AgentRun; elapsed: string }>();
   const [activity, setActivity] = useState<HTMLDivElement | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const unavailable = readOnly ?? reason(client) ?? (row && isTerminal(row.status) ? "this run is already terminal." : undefined);
+  const unavailable = readOnly ?? reason(client) ?? (row && isTerminal(row.status) ? "this run has finished." : undefined);
   return <>
     {row && <div className="agents-cancel">
-      <button ref={opener} type="button" disabled={!!unavailable} data-write-surface={WRITE_SURFACE.agentsCancel}
-        onClick={() => setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed })}>cancel run</button>
+      {/* aria-disabled, not disabled: a cancelled run turns terminal while this button has focus, and focus must stay in the dialog */}
+      <button ref={opener} type="button" aria-disabled={!!unavailable || undefined} data-write-surface={WRITE_SURFACE.agentsCancel}
+        onClick={() => { if (!unavailable) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed }); }}>cancel run</button>
       {unavailable && <small>{unavailable}</small>}
     </div>}
     <div ref={setActivity} className="agents-cancel-activity" />
@@ -100,9 +102,9 @@ function CancelReview({ row, title, parent, elapsed, owner, refresh, activity, o
 }) {
   return <Confirmation level={2} title={t("cancel this run?")} action={t("cancel run")} keep={t("keep run")}
     effect={display(`${row.agentType || "agent"} · ${row.description || "no task summary"}`)}
-    scope={display(`${title ? `${title} · ` : ""}${row.sessionId}${row.parentRunId ? ` · parent ${runDisplayId(parent?.agentType, row.parentRunId)}` : ""}`, 750)}
+    scope={display(`${title || "this chat"}${row.parentRunId ? ` · parent ${runDisplayId(parent?.agentType, row.parentRunId)}` : ""}`, 750)}
     current={display(`${stateWord(row.status)} · ${row.turnsUsed === undefined ? "turns unavailable" : `${row.turnsUsed} turns`} · ${elapsed}`)}
-    after={t("cancellation is requested; zeta reports the terminal state through child events/catalog refresh.")}
+    after={t("the run stops at its next safe point.")}
     undo={t("no. work in progress can be lost; the transcript stays; a new run starts from zero.")}
     proof={{ kind: "name", name: runDisplayId(row.agentType, row.runId) }} external={{ opener }} activity={activity}
     {...owner.operation({ kind: "cancel", row }, refresh)} />;
