@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { controlFeature, createChildControls, readControlParent } from "./childControls";
+import { controlFeature, createChildControls, readControlParent, withLiveRow } from "./childControls";
 import type { AgentRun } from "./reads";
 
 const row: AgentRun = { sessionId: "root", runId: "fixture-run", parentRunId: null, agentType: "fixture", description: "fixture task", status: "idle" };
@@ -121,4 +121,13 @@ test("active status projects the picker, not stored catalog rows", async () => {
   const f = fixture();
   expect(await deadline("active status", readControlParent(f.connection.client!, AbortSignal.timeout(500)))).toEqual(parent);
   expect(f.reads).toEqual([]);
+});
+
+test("a running report takes the live transcript row's newer step and tool count; finished runs keep the report", () => {
+  const running: AgentRun = { ...row, status: "running", currentStep: "starting", toolCount: 2 };
+  expect(withLiveRow(running, { status: "running", latestActivity: "turn 1: thinking", toolCount: 3 })).toMatchObject({ currentStep: "turn 1: thinking", toolCount: 3 });
+  expect(withLiveRow(running, { status: "running", toolCount: 1 })).toMatchObject({ currentStep: "starting", toolCount: 2 });
+  expect(withLiveRow(running, { status: "done", toolCount: 5 })).toBe(running);
+  expect(withLiveRow({ ...running, status: "completed" }, { status: "running", latestActivity: "late" }).currentStep).toBe("starting");
+  expect(withLiveRow(running, undefined)).toBe(running);
 });

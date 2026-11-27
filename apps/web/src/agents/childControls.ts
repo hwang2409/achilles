@@ -16,6 +16,12 @@ const terminal = ["completed", "failed", "canceled"] as const;
 // the chat transcript's sub-agent row says "done"; use the same word in agent views
 export const stateWord = (status: string) => status === "completed" ? "done" : status;
 export const isTerminal = (state: unknown): state is typeof terminal[number] => terminal.some((value) => value === state);
+// the chat transcript's live sub-agent row for a run (fulcrum's sub_agent item). zeta's run report can lag it, so a
+// running report takes the running row's newer step and tool count; finished runs keep the report
+export function withLiveRow(row: AgentRun, live: { status: string; latestActivity?: string; toolCount?: number } | undefined): AgentRun {
+  if (!live || ["done", "error", "canceled"].includes(live.status) || isTerminal(row.status)) return row;
+  return { ...row, currentStep: live.latestActivity ?? row.currentStep, toolCount: live.toolCount === undefined ? row.toolCount : Math.max(row.toolCount ?? 0, live.toolCount) };
+}
 
 type Profile = { name: string; description: string; tools: string[] | null };
 export type ControlParent = { id: string; cwd: string; profiles: Profile[]; idle: boolean };

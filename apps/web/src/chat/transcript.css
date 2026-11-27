@@ -29,4 +29,6 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
   .chat-starters i { display: block; }
   .transcript [data-part="timeline"] { padding: 14px 12px 8px; }
   .transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: 100%; }
+  /* the rows span the pane edge to edge here; the bordered sub-agent card keeps the timeline's 12px side gap */
+  .transcript [data-part="sub-agent"] { width: calc(100% - 24px); margin-inline: 12px; }
 }
