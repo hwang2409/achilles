@@ -921,14 +921,14 @@ class PageStore:
             workspace.chmod(0o700)
             created_paths.add(workspace.parent)
             credential = self.root / "credentials" / page_id
-            self._atomic_private_write(credential, token.encode())
             created_paths.add(credential)
+            self._atomic_private_write(credential, token.encode())
             for bundle in bundles:
                 path = self.root / "bundles" / f"{bundle_digest(bundle)}.json"
                 existed = path.exists()
-                self._atomic_private_write(path, (canonical_bundle(bundle) + "\n").encode())
                 if not existed:
                     created_paths.add(path)
+                self._atomic_private_write(path, (canonical_bundle(bundle) + "\n").encode())
             with self.transaction() as db:
                 principal = db.execute(
                     "SELECT create_mode FROM page WHERE id=?", (principal_id,)

@@ -379,7 +379,15 @@ def build_mcp(store: PageStore):
                         await notify(created["page_id"])
             except ValidationError as exc:
                 return _safe_error(exc)
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
+            except OSError:
+                return _safe_error(ValidationError("", "atomic page creation", "create_failed"))
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+                PermissionError,
+            ) as exc:
                 return CallToolResult(
                     isError=True, content=[TextContent(type="text", text=str(exc))]
                 )
