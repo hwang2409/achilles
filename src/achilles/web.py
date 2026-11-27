@@ -456,7 +456,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             raise HTTPException(403, "forbidden")
         try:
             body = await request.json()
-        except json.JSONDecodeError:
+        except ValueError:  # bad JSON, or a body that is not UTF-8
             error = ValidationError("", "valid JSON object")
             return JSONResponse({"error": error_document(error)}, status_code=400)
         if not isinstance(body, dict) or set(body) - {"arguments", "version"}:
@@ -507,7 +507,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def json_object(request) -> dict:
         try:
             body = await request.json()
-        except json.JSONDecodeError:
+        except ValueError:  # bad JSON, or a body that is not UTF-8
             body = None
         if not isinstance(body, dict):
             raise HTTPException(400, "body must be a JSON object")
@@ -566,7 +566,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         page_id = await require_page_bearer(request)
         try:
             body = await request.json()
-        except json.JSONDecodeError:
+        except ValueError:  # bad JSON, or a body that is not UTF-8
             error = ValidationError("", "valid JSON object")
             return JSONResponse({"error": error_document(error)}, status_code=400)
         if not isinstance(body, dict):
@@ -602,7 +602,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         page_id = await require_page_bearer(request)
         try:
             body = await request.json()
-        except json.JSONDecodeError:
+        except ValueError:  # bad JSON, or a body that is not UTF-8
             body = None
         if not isinstance(body, dict):
             error = ValidationError("", "JSON object")

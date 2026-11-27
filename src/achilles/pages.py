@@ -61,6 +61,39 @@ _RESTORE_ARGS_SCHEMA = {
     "required": ["version", "expected_version"],
 }
 STALE_BUILD = "build started at revision"
+PAGE_FILES = ("src/Page.tsx", "package.json")
+READ_PAGE_FILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"enum": list(PAGE_FILES)},
+        "offset": {"type": "integer", "minimum": 0, "description": "First line, from 0."},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 2000},
+    },
+    "required": ["path"],
+    "additionalProperties": False,
+}
+EDIT_PAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"enum": list(PAGE_FILES)},
+        "edits": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "old_string": {"type": "string", "minLength": 1},
+                    "new_string": {"type": "string"},
+                },
+                "required": ["old_string", "new_string"],
+                "additionalProperties": False,
+            },
+        },
+        "expected_revision": {"type": "integer", "minimum": 1},
+    },
+    "required": ["path", "edits", "expected_revision"],
+    "additionalProperties": False,
+}
 INSPECT_MAX_BYTES = 8 * 1024
 DETAIL_SUGGESTION_RECORD_LIMIT = 200
 
@@ -122,6 +155,25 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
     if len(encoded.encode()) > INSPECT_MAX_BYTES:
         raise ValidationError("", f"inspectable page <= {INSPECT_MAX_BYTES} bytes", "too_large")
     return result, encoded
+
+
+_NO_CODE_HINT = "this page has no code yet; write it with write_page."
+
+
+def _page_files(row: sqlite3.Row) -> dict[str, str]:
+    """A code revision as the files an agent reads and edits."""
+    package = {"dependencies": json.loads(row["dependencies"])}
+    return {
+        "src/Page.tsx": row["source"],
+        "package.json": json.dumps(package, indent=2, sort_keys=True) + "\n",
+    }
+
+
+_CANDIDATE_DIAGNOSTICS_CHARS = 2000
+
+
+def _file_sizes(row: sqlite3.Row) -> list[dict[str, Any]]:
+    return [{"path": path, "bytes": len(text.encode())} for path, text in _page_files(row).items()]
 
 
 def validate_page_route(route: str) -> None:
@@ -518,11 +570,22 @@ class PageStore:
             "WHERE page_id=? ORDER BY version DESC LIMIT 100",
             (page_id,),
         ).fetchall()
+        newest = self._newest_code(db, page_id)
+        candidate = (
+            None
+            if newest is None or newest["diagnostics"] is None
+            else {
+                "revision": newest["version"],
+                "files": _file_sizes(newest),
+                "diagnostics": newest["diagnostics"][:_CANDIDATE_DIAGNOSTICS_CHARS],
+            }
+        )
         code = (
             None
             if active is None
             else {
                 "revision": active["version"],
+                "files": _file_sizes(active),
                 "source": active["source"],
                 "dependencies": json.loads(active["dependencies"]),
                 "resolved_dependencies": json.loads(active["resolved_dependencies"]),
@@ -547,6 +610,7 @@ class PageStore:
             "title": page["title"],
             "create_mode": bool(page["create_mode"]),
             "code": code,
+            "candidate": candidate,
             "tools": [
                 {
                     "name": tool["name"],
@@ -1286,7 +1350,9 @@ class PageStore:
                 (page_id, "write_page", digest, stamp, "page"),
             )
         if diagnostics:
-            raise ValidationError("/source", "a current valid build", error_code, diagnostics)
+            raise ValidationError(
+                "/source", "a current valid build", error_code, diagnostics, {"revision": version}
+            )
         return {
             "page_id": page_id,
             "revision": version,
@@ -1296,6 +1362,84 @@ class PageStore:
             "resolved_dependencies": result["resolved_dependencies"],
             "lockfile": result["lockfile"],
         }
+
+    @staticmethod
+    def _newest_code(db: sqlite3.Connection, page_id: str) -> sqlite3.Row | None:
+        """The newest code a page's chat works on: a failed build too, so it can be fixed; a
+        skipped stale build is not, because another write replaced it."""
+        return db.execute(
+            "SELECT * FROM code_revision WHERE page_id=? AND "
+            "(diagnostics IS NULL OR diagnostics NOT LIKE ?) ORDER BY version DESC LIMIT 1",
+            (page_id, STALE_BUILD + "%"),
+        ).fetchone()
+
+    def read_page_file(
+        self, page_id: str, path: str, offset: int = 0, limit: int = 500
+    ) -> dict[str, Any]:
+        with self._connect() as db:
+            row = self._newest_code(db, page_id)
+        if row is None:
+            raise ValidationError("/path", "a page with code", "not_found", _NO_CODE_HINT)
+        # shortcut: chunks count lines, so one huge line is returned whole; count bytes if needed
+        lines = _page_files(row)[path].splitlines(keepends=True)
+        end = min(offset + limit, len(lines))
+        return {
+            "path": path,
+            "revision": row["version"],
+            "failed": row["diagnostics"] is not None,
+            "content": "".join(lines[offset:end]),
+            "offset": offset,
+            "total_lines": len(lines),
+            "next_offset": end if end < len(lines) else None,
+        }
+
+    def edit_page(
+        self, page_id: str, path: str, edits: list[dict[str, str]], expected_revision: int
+    ) -> dict[str, Any]:
+        """Replace each old_string exactly once in one page file, then build it like write_page;
+        nothing is written unless every edit matches."""
+        with self._connect() as db:
+            row = self._newest_code(db, page_id)
+            active = db.execute(
+                "SELECT COALESCE(active_code_revision, 0) FROM page WHERE id=?", (page_id,)
+            ).fetchone()
+        if row is None:
+            raise ValidationError("/path", "a page with code", "not_found", _NO_CODE_HINT)
+        if row["version"] != expected_revision:
+            raise ValidationError(
+                "/expected_revision",
+                "the revision read_page_file returned",
+                "conflict",
+                "the page changed; read the file again and redo the edit.",
+                {"revision": row["version"]},
+            )
+        files = _page_files(row)
+        text = files[path]
+        for index, edit in enumerate(edits):
+            count = text.count(edit["old_string"])
+            if count != 1:
+                raise ValidationError(
+                    f"/edits/{index}/old_string",
+                    "text that occurs exactly once in the file",
+                    "edit_error",
+                    f"found {count} matches; nothing was changed. "
+                    + (
+                        "read the file and copy the text exactly."
+                        if count == 0
+                        else "include more surrounding text so it matches once."
+                    ),
+                )
+            text = text.replace(edit["old_string"], edit["new_string"], 1)
+        files[path] = text
+        try:
+            package = json.loads(files["package.json"])
+            dependencies = package["dependencies"]
+            validate_schema(dependencies, PAGE_PACKAGE_SCHEMA["properties"]["dependencies"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValidationError(
+                "/edits", "package.json with a dependencies map of strings", "edit_error"
+            ) from exc
+        return self.write_page(page_id, files["src/Page.tsx"], dependencies, active[0])
 
     def restore_code(self, page_id: str, version: Any, expected_version: Any) -> dict[str, Any]:
         """Append a copy of an old code revision; history is never rewritten."""

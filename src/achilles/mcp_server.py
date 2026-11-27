@@ -11,6 +11,8 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool, ToolAn
 
 from .pages import (
     CREATE_PAGE_SCHEMA,
+    EDIT_PAGE_SCHEMA,
+    READ_PAGE_FILE_SCHEMA,
     RESTORE_VERSION_SCHEMA,
     PageStore,
     bounded_inspect,
@@ -68,6 +70,7 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
         "title": {"type": "string"},
         "create_mode": {"type": "boolean"},
         "code": {"type": ["object", "null"]},
+        "candidate": {"type": ["object", "null"]},
         "tools": {"type": "array", "items": {"type": "object"}},
         "collections": {
             "type": "object",
@@ -112,6 +115,12 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
             )
         ],
     )
+
+
+def _write_error(exc: ValidationError) -> CallToolResult:
+    document = {"error": exc.code, "diagnostics": exc.hint, **(exc.current or {})}
+    text = json.dumps(document)
+    return CallToolResult(isError=True, content=[TextContent(type="text", text=text)])
 
 
 def _inspect_result(value: dict[str, Any]) -> CallToolResult:
@@ -178,11 +187,11 @@ def build_mcp(store: PageStore):
             connection.exit_stack.push_async_callback(remove_connection, page["id"], connection)
         create_status = "ON" if page["create_mode"] else "OFF"
         can_edit = edits_own_page(page)
-        tools: list[Tool] = [
+        edit_tools: list[Tool] = [
             Tool(
                 name="write_page",
                 description="write and compile React/TypeScript that mounts into #root; writes are immediate and audited. "  # noqa: E501
-                + PAGE_RECORDS_API,
+                "For a small change to existing code, use edit_page instead. " + PAGE_RECORDS_API,
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -198,18 +207,43 @@ def build_mcp(store: PageStore):
                 },
             ),
             Tool(
+                name="read_page_file",
+                description=(
+                    "read one file of this page's newest code by lines: src/Page.tsx (the "
+                    "source) or package.json (the dependencies). If the newest build failed, "
+                    "this is that failed code, so you can fix it. Returns revision for "
+                    "edit_page and next_offset while more lines remain."
+                ),
+                inputSchema=READ_PAGE_FILE_SCHEMA,
+                annotations=ToolAnnotations(readOnlyHint=True),
+            ),
+            Tool(
+                name="edit_page",
+                description=(
+                    "change one file of this page's code with exact replacements, without "
+                    "resending the whole file. Each old_string must occur exactly once; edits "
+                    "apply in order. Pass the revision read_page_file returned as "
+                    "expected_revision. The result compiles like write_page; if an edit does "
+                    "not match, nothing changes."
+                ),
+                inputSchema=EDIT_PAGE_SCHEMA,
+            ),
+        ]
+        tools: list[Tool] = [
+            Tool(
                 name="inspect_page",
                 description=(
                     f"this chat is on the page at route {page['route']!r} (title {page['title']!r}); "  # noqa: E501
                     f"create mode is currently {create_status}"
                     + (
-                        "; this chat can still rewrite this page with write_page and restore its "
-                        "code; creating pages and tools needs create mode. "
+                        "; this chat can still change this page with write_page or edit_page and "
+                        "restore its code; creating pages and tools needs create mode. "
                         if can_edit and not page["create_mode"]
                         else ". "
                     )
-                    + "Inspect the active React package, code revision history, record counts, "
-                    "tools, and pages created by this page."
+                    + "Inspect the active React package (file sizes, dependency versions), a "
+                    "newer failed build as candidate with its diagnostics, code revision "
+                    "history, record counts, tools, and pages created by this page."
                 ),
                 inputSchema=INSPECT_PAGE_SCHEMA,
                 outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
@@ -225,11 +259,11 @@ def build_mcp(store: PageStore):
             ),
             inputSchema=RESTORE_VERSION_SCHEMA,
         )
-        if not can_edit:
-            tools.pop(0)
-        elif not page["create_mode"]:
+        if can_edit:
+            tools[:0] = edit_tools
+        if can_edit and not page["create_mode"]:
             tools.append(restore_tool)
-        else:
+        elif page["create_mode"]:
             tools.extend(
                 [
                     Tool(
@@ -295,15 +329,33 @@ def build_mcp(store: PageStore):
                 args.get("expected_revision"),
             )
         except ValidationError as exc:
-            return CallToolResult(
-                isError=True,
-                content=[
-                    TextContent(
-                        type="text", text=json.dumps({"error": exc.code, "diagnostics": exc.hint})
-                    )
-                ],
-            )
+            return _write_error(exc)
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(result))])
+
+    async def read_page_file(page, args) -> CallToolResult:
+        try:
+            validate_schema(args, READ_PAGE_FILE_SCHEMA)
+            result = await anyio.to_thread.run_sync(
+                store.read_page_file,
+                page["id"],
+                args["path"],
+                args.get("offset", 0),
+                args.get("limit", 500),
+            )
+        except ValidationError as exc:
+            return _safe_error(exc)
+        return _text(result)
+
+    async def edit_page(page, args) -> CallToolResult:
+        try:
+            validate_schema(args, EDIT_PAGE_SCHEMA)
+            result = await anyio.to_thread.run_sync(
+                store.edit_page, page["id"], args["path"], args["edits"], args["expected_revision"]
+            )
+        except ValidationError as exc:
+            # a build failure reads like write_page's; a bad edit or stale revision is a plain error
+            return _write_error(exc) if exc.path == "/source" else _safe_error(exc)
+        return _text(result)
 
     async def inspect_page(page, args) -> CallToolResult:
         try:
@@ -350,13 +402,18 @@ def build_mcp(store: PageStore):
                 isError=True, content=[TextContent(type="text", text="forbidden")]
             )
         args = params.arguments or {}
-        if params.name == "write_page":
+        page_editors = {
+            "write_page": write_page,
+            "read_page_file": read_page_file,
+            "edit_page": edit_page,
+        }
+        if params.name in page_editors:
             if not edits_own_page(page):
                 return CallToolResult(
                     isError=True,
                     content=[TextContent(type="text", text="forbidden: create mode is off")],
                 )
-            return await write_page(page, args)
+            return await page_editors[params.name](page, args)
         if params.name == "inspect_page":
             return await inspect_page(page, args)
         if params.name in BUILTIN_TOOL_NAMES:

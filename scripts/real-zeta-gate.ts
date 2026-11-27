@@ -1998,7 +1998,7 @@ with _database() as db:
   const secondCatalog = await mcp(secondCredential, 10, "tools/list", {});
   const secondNames =
     secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
-  if (JSON.stringify(secondNames) !== JSON.stringify(["write_page", "inspect_page", "restore_version", "add_book", "list_books", "update_book"]))
+  if (JSON.stringify(secondNames) !== JSON.stringify(["write_page", "read_page_file", "edit_page", "inspect_page", "restore_version", "add_book", "list_books", "update_book"]))
     throw new Error(`reading page tools were not created atomically: ${JSON.stringify(secondNames)}`);
   const secondRecords = await (
     await fetch(`${origin}/api/pages/${createdPageId}/records/books`, {

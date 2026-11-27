@@ -283,7 +283,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       if (item.kind !== "tool") continue;
       const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
       const name = value?.tool_call?.name ?? "";
-      if (value && ["create_page", "achilles__create_page", "restore_version", "achilles__restore_version", "write_page", "achilles__write_page"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+      if (value && ["create_page", "achilles__create_page", "restore_version", "achilles__restore_version", "write_page", "achilles__write_page", "edit_page", "achilles__edit_page"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
         completedCreatePages.current.add(item.id);
         setPageRefreshNonce((current) => current + 1);
         if (["restore_version", "achilles__restore_version"].includes(name)) void active.refreshPage();
@@ -423,7 +423,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
       busy: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
       error: active.approvalChange?.error }} />;
   const content = <>
-    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
+    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} createMode={activePage.create_mode} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}

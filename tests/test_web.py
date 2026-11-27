@@ -1490,3 +1490,22 @@ def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) ->
     assert client.delete(path, headers=own).status_code == 200
     assert client.get("/api/pages/home/records/books", headers=own).json() == []
     assert client.delete(path, headers=own).status_code == 404
+
+
+def test_non_utf8_body_is_a_400_not_a_500(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    headers = {
+        "authorization": f"Bearer {store.ensure_credential('home')}",
+        "host": "127.0.0.1:5190",
+        "origin": "http://127.0.0.1:5190",
+        "content-type": "application/json",
+    }
+    client = TestClient(web.create_app(), client=("127.0.0.1", 1234), raise_server_exceptions=False)
+    for path in (
+        "/api/pages/home/records/notes",
+        "/api/pages/home/code/restore",
+        "/api/pages/home/tools/add_note/rollback",
+    ):
+        response = client.post(path, headers=headers, content=b'{"version": "\xff"}')
+        assert response.status_code == 400, path
