@@ -30,6 +30,8 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
   const shown = () => tab.locator(".chat-header [data-session-id]").getAttribute("data-session-id").catch(() => null);
   const urlChat = () => new URL(tab.url()).searchParams.get("chat");
   const rowMeta = (id: string) => tab.locator(`a[data-chat-id="${id}"] .chat-row-meta`).textContent({ timeout: 1_000 }).catch(() => null);
+  // the chat's row is listed and shows no state
+  const rowIdle = async (id: string) => await tab.locator(`a[data-chat-id="${id}"]`).count() === 1 && await tab.locator(`a[data-chat-id="${id}"] .chat-row-meta`).count() === 0;
   const sentSince = (since: number) => frames.slice(since).filter((frame) => frame.dir === "sent");
   const lastParked = (since: number) => frames.slice(since).filter((frame) => Array.isArray(frame.result?.parked_sessions)).at(-1)?.result!.parked_sessions as { session_id: string }[] | undefined;
   const notice = tab.getByRole("alert").filter({ hasText: "this tab already keeps 3 chats running" });
@@ -65,7 +67,7 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
     await notice.waitFor({ timeout: 30_000 });
     const beforeStop = frames.length;
     await notice.getByRole("button", { name: 'stop "park hold 1" and switch', exact: true }).click();
-    // the refused new chat's box stays on screen, so wait for the new chat itself: its id in the url, the notice gone
+    // the shown chat stays under the notice until the swap lands: wait for the new chat itself, its id in the url, the notice gone
     await waitFor(async () => !ids.includes(urlChat() ?? ids[0]!) && await notice.count() === 0, "stop-oldest opened the new chat");
     const stopFrames = sentSince(beforeStop);
     const resumeAt = stopFrames.findIndex((frame) => frame.method === "resume" && frame.params?.session_id === ids[0]);
@@ -74,7 +76,7 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
     if (resumeAt < 0 || abortAt < resumeAt || swapAt < abortAt) throw new Error(`stop-oldest frames out of order: resume ${resumeAt}, abort ${abortAt}, new_session ${swapAt}`);
     const abortReply = frames.slice(beforeStop).find((frame) => frame.dir === "received" && frame.id === stopFrames[abortAt]!.id);
     if (!abortReply || abortReply.error) throw new Error(`abort of the oldest parked chat failed: ${JSON.stringify(abortReply ?? null)}`);
-    await waitFor(async () => !(await rowMeta(ids[0]!))?.endsWith(" in this tab"), "the stopped chat's row is no longer parked");
+    await waitFor(() => rowIdle(ids[0]!), "the stopped chat's row shows no state");
     // a reload takes the 3 parked chats back (oldest first, each with its page binding) before the shown chat opens
     const fifth = urlChat();
     if (!fifth || ids.includes(fifth)) throw new Error("the new chat is not named in the url");
@@ -95,8 +97,8 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
     await reader.getByText(/park finished/).waitFor({ timeout: 30_000 }).catch(() => {
       throw new Error("G9: a parked chat's live reply did not reach the other tab that reads it");
     });
-    // the turns end: zeta closes the parked chats and the rows drop "here"
-    for (const id of ids.slice(1)) await waitFor(async () => !(await rowMeta(id))?.endsWith(" in this tab"), `finished chat ${id} is no longer parked`);
+    // the turns end: zeta closes the parked chats, and their rows show no state (not a stale "running")
+    for (const id of ids.slice(1)) await waitFor(() => rowIdle(id), `finished chat ${id} shows no state`);
     if ((await tab.locator("body").innerText()).includes("parked_session_changed")) throw new Error("a parked_session_changed event reached the page");
     console.log("session_park limit: notice names 3 parked chats; stay; stop oldest = resume, abort, new_session; reload reclaims 3; reader tab streams a parked chat");
     return ids;
