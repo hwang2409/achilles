@@ -287,9 +287,15 @@ class PageStore:
         if version in (1, 2, 3):
             backup = Path(str(self._database) + ".pre-block-model-v3.backup")
             if not backup.exists():
-                with sqlite3.connect(backup) as destination:
-                    db.backup(destination)
-                backup.chmod(0o600)
+                temporary_backup = backup.with_name(backup.name + ".tmp")
+                try:
+                    temporary_backup.unlink(missing_ok=True)
+                    with sqlite3.connect(temporary_backup) as destination:
+                        db.backup(destination)
+                    temporary_backup.chmod(0o600)
+                    os.replace(temporary_backup, backup)
+                finally:
+                    temporary_backup.unlink(missing_ok=True)
                 print(f"Achilles database backup: {backup}")
             tables = {
                 row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
