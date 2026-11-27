@@ -41,7 +41,7 @@ export function ChatAgents({ client, sessionId, title, controls, send, readOnly,
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="chat-agents-title">agents in this chat</h2></div>
         <div><button type="button" disabled={!reader || refreshing} onClick={refresh}>{refreshing ? "refreshing…" : "refresh"}</button><button type="button" onClick={onClose}>close</button></div></div>
       <div className="settings-content">
-        <AgentSpawn client={client} owner={controls} refresh={refresh} sessionId={sessionId} readOnly={readOnly} />
+        <AgentSpawn client={client} owner={controls} refresh={refresh} sessionId={sessionId} title={title} readOnly={readOnly} />
         {warning && <p role="status">{warning}</p>}
         {report && (rows.length ? <ul className="chat-agents-runs">{rows.map((row) => <li key={row.runId}>
           <button type="button" className="agents-row" aria-current={row.runId === chosenRun ? "true" : undefined} onClick={() => choose(row.runId)}>

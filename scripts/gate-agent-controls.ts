@@ -72,7 +72,7 @@ export async function gateAgentControls(browser: Browser, origin: string, discov
     await again.locator(spawnButton).click();
     await review.getByRole("checkbox", { name: "i reviewed the scope" }).check();
     await review.getByRole("button", { name: "spawn agent" }).click();
-    await main.getByText(/spawned run as/).waitFor();
+    await main.getByText(/spawned run:/).waitFor();
     await again.getByRole("button", { name: new RegExp(task) }).click();
     await capture(main, "chat-agents-1440");
     const detail = main.locator("dialog.chat-agents");

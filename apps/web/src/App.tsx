@@ -247,13 +247,15 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const [restores, setRestores] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyOpener = useRef<HTMLElement | null>(null);
-  // the agents dialog, opened from the header or a sub-agent row on that run
-  const [agents, setAgents] = useState<{ run?: string; opener: HTMLElement | null } | null>(null);
+  // the agents dialog of one chat, opened from the header or a sub-agent row on that run; shown only while that chat is on screen
+  const [agents, setAgents] = useState<{ sessionId: string; run?: string; opener: HTMLElement | null } | null>(null);
+  const readySessionId = ready?.sessionId;
   const agentNavigation = useMemo(() => ({
-    open: (run: string) => setAgents({ run, opener: document.activeElement as HTMLElement | null }),
+    open: (run: string) => { if (readySessionId) setAgents({ sessionId: readySessionId, run, opener: document.activeElement as HTMLElement | null }); },
     unavailable: () => client && supportsFeature(client, "agent_run_catalog_v1") ? undefined : "details need a newer zeta",
-  }), [client]);
-  useEffect(() => setAgents(null), [ready?.sessionId]);
+  }), [client, readySessionId]);
+  // another chat on screen closes the dialog in this render, so it never mounts or reopens for a chat that is not shown
+  if (agents && readySessionId && agents.sessionId !== readySessionId) setAgents(null);
   const refreshKey = `${completedTurns}:${completedTools}:${restores}`;
   const previousRefreshKey = useRef(refreshKey);
   const waiting = Number(approvalCount);
@@ -446,7 +448,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
       error: active.approvalChange?.error }} />;
   const content = <>
     {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
-    {ready && agents && <ChatAgents key={ready.sessionId} client={client} sessionId={ready.sessionId} title={title} controls={childControls} send={childSend} readOnly={canWrite ? undefined : readOnlyReason} initialRun={agents.run} opener={agents.opener} onClose={() => setAgents(null)} />}
+    {ready && agents?.sessionId === ready.sessionId && <ChatAgents key={ready.sessionId} client={client} sessionId={ready.sessionId} title={title} controls={childControls} send={childSend} readOnly={canWrite ? undefined : readOnlyReason} initialRun={agents.run} opener={agents.opener} onClose={() => setAgents(null)} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
@@ -488,7 +490,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
     workspace: landing ? undefined : { canWrite, serverForcesAsk, createMode },
-    header: !landing && activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} onAgents={ready ? (opener) => setAgents({ opener }) : undefined} />,
+    header: !landing && activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} onAgents={ready ? (opener) => setAgents({ sessionId: ready.sessionId, opener }) : undefined} />,
     children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} /> : content,
   });
 }

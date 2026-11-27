@@ -651,7 +651,7 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
     else await change(app.getByRole("textbox", { name: /type fixture-profile · ture-run to confirm/ }), "fixture-profile · ture-run");
     expect(confirm.disabled).toBe(false);
     await act(async () => { fireEvent.submit(confirm.form!); });
-    expect(await app.findByText(spawning ? /spawned fixture-profile as/ : /cancellation requested\./)).toBeTruthy();
+    expect(await app.findByText(spawning ? /spawned fixture-profile:/ : /cancellation requested\./)).toBeTruthy();
     expect(writes.slice(written)).toEqual([method]);
     expect(roles.slice(before)).toEqual([]);
   } };
@@ -672,7 +672,7 @@ test("spawn from a chat refuses a parent that is not the chat on screen", async 
 test("/agents is read-only: no agent write surface, and a run says where to control it", async () => {
   await withApp("controller", { ...agentOptions(["child_run_spawn", "child_run_cancel", "child_run_send"], "idle"), attached: false, path: "/agents/session/fixture-run" }, async (app) => {
     await app.findByRole("heading", { name: /fixture task/ });
-    expect(app.getByText("control this run from its chat.")).toBeTruthy();
+    expect(app.getByRole("link", { name: "its chat" }).getAttribute("href")).toContain("chat=session");
     expect(app.container.querySelector('[data-write-surface^="agents."]')).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { Confirmation, reviewText as t } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { supportsFeature } from "../zeta/connection";
-import { controlFeature, displayControl as display, isTerminal, newerControls, readControlParent, runDisplayId, type ChildControls, type ControlParent } from "./childControls";
+import { controlFeature, displayControl as display, isTerminal, newerControls, stateWord, readControlParent, runDisplayId, type ChildControls, type ControlParent } from "./childControls";
 import type { AgentRun } from "./reads";
 
 // readOnly: why this tab cannot write (an observer tab); the controls stay visible but disabled.
@@ -11,7 +11,8 @@ type Props = { client: ZetaClient | null; owner: ChildControls; refresh: () => v
 const reason = (client: ZetaClient | null) => !client ? "connect to zeta to make changes." : !supportsFeature(client, controlFeature) ? newerControls : undefined;
 
 // sessionId: the chat on screen; spawn refuses a parent that is not that chat.
-export function AgentSpawn({ client, owner, refresh, sessionId, readOnly }: Props & { sessionId?: string }) {
+// title: the chat's title, shown as the review's scope.
+export function AgentSpawn({ client, owner, refresh, sessionId, title, readOnly }: Props & { sessionId: string; title: string }) {
   const [open, setOpen] = useState(false);
   const [parent, setParent] = useState<ControlParent | null>();
   const [name, setName] = useState("");
@@ -26,7 +27,7 @@ export function AgentSpawn({ client, owner, refresh, sessionId, readOnly }: Prop
     const stop = new AbortController();
     void readControlParent(client, stop.signal).then((result) => {
       if (stop.signal.aborted) return;
-      const other = !!result && !!sessionId && result.id !== sessionId;
+      const other = !!result && result.id !== sessionId;
       setParent(other ? null : result);
       setNote(other ? "this chat is not attached in this tab. reload the chat, then try again." : result ? !result.profiles.length ? "no agent profiles are mounted in the active session." : "" : "open a parent session in zeta first.");
     }, () => { if (!stop.signal.aborted) setNote("could not read the active session. reopen the form to retry."); });
@@ -55,7 +56,7 @@ export function AgentSpawn({ client, owner, refresh, sessionId, readOnly }: Prop
     </form>}
     <div ref={setActivity} />
     {review && <Confirmation key={review.id} level={2} title={t("spawn an agent")} action={t("spawn agent")} keep={t("keep draft")}
-      effect={display(`spawn ${review.profile.name}`)} scope={display(review.parent.id)} current={t("no child created by this request")}
+      effect={display(`spawn ${review.profile.name}`)} scope={display(title || "this chat")} current={t("no child created by this request")}
       after={t("runs in the background; the parent receives its completion.")} undo={t("no. you can request cancellation after it starts.")}
       fields={[
         { label: t("profile"), value: display(review.profile.name) },
@@ -64,8 +65,15 @@ export function AgentSpawn({ client, owner, refresh, sessionId, readOnly }: Prop
         { label: t("allowed tools"), value: review.profile.tools === null ? t("uses the profile's default tool policy")
           : display(review.profile.tools.join(", ") || "none", 4096) },
       ]} proof={{ kind: "scope" }} external={{ opener: () => opener.current }} activity={activity ?? undefined}
-      {...owner.operation({ kind: "spawn", ...review }, refresh)} />}
+      {...clearOnCommit(owner.operation({ kind: "spawn", ...review }, refresh), () => setTask(""))} />}
   </section>;
+}
+
+// a committed spawn clears the task, so a second confirm cannot repeat it by accident
+type Operation = ReturnType<ChildControls["operation"]>;
+function clearOnCommit(operation: Operation, clear: () => void): Operation {
+  const after = (result: Awaited<ReturnType<Operation["execute"]>>) => { if (result.status === "committed") clear(); return result; };
+  return { ...operation, execute: () => operation.execute().then(after), checkResult: () => operation.checkResult().then(after) };
 }
 
 export function AgentCancel({ client, owner, refresh, row, title, parent, elapsed, readOnly }: Props & {
@@ -93,7 +101,7 @@ function CancelReview({ row, title, parent, elapsed, owner, refresh, activity, o
   return <Confirmation level={2} title={t("cancel this run?")} action={t("cancel run")} keep={t("keep run")}
     effect={display(`${row.agentType || "agent"} · ${row.description || "no task summary"}`)}
     scope={display(`${title ? `${title} · ` : ""}${row.sessionId}${row.parentRunId ? ` · parent ${runDisplayId(parent?.agentType, row.parentRunId)}` : ""}`, 750)}
-    current={display(`${row.status} · ${row.turnsUsed === undefined ? "turns unavailable" : `${row.turnsUsed} turns`} · ${elapsed}`)}
+    current={display(`${stateWord(row.status)} · ${row.turnsUsed === undefined ? "turns unavailable" : `${row.turnsUsed} turns`} · ${elapsed}`)}
     after={t("cancellation is requested; zeta reports the terminal state through child events/catalog refresh.")}
     undo={t("no. work in progress can be lost; the transcript stays; a new run starts from zero.")}
     proof={{ kind: "name", name: runDisplayId(row.agentType, row.runId) }} external={{ opener }} activity={activity}
