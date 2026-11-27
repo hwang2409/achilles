@@ -193,7 +193,7 @@ function activeComposerProps(
 // a page renders only as its compiled react revision; the server names an old block page as unsupported
 function PageSurface({ page, credential }: { page: Page; credential: string }) {
   if (page.code) return <PageFrame pageId={page.id} credential={credential} revision={page.code.version} />;
-  return <main className="page-content"><p className="page-unsupported" role="alert">{page.unsupported_format}</p></main>;
+  return <main className="page-content"><p className="page-unsupported">{page.unsupported_format}</p></main>;
 }
 const hasSurface = (page: Page | null | undefined) => !!page?.code || !!page?.unsupported_format;
 
