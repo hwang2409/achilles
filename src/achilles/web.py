@@ -6,7 +6,6 @@ import json
 import os
 import secrets
 import shlex
-import sqlite3
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -20,7 +19,7 @@ from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
 from .page_build import PageBuildError
-from .pages import CHAT_PURPOSES, ChatChanged, PageStore
+from .pages import CHAT_PURPOSES, ChatChanged, PageStore, RecordExists
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
 
@@ -267,7 +266,7 @@ addEventListener('message',event=>{{if(event.source!==parent||event.origin===\"n
  event.data.ok?item.resolve(event.data.result):item.reject(event.data.result);
 }});
 addEventListener('error',event=>parent.postMessage({{...identity,runtimeError:String(event.message)}},'*'));
-addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,runtimeError:String(event.reason)}},'*'));
+addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,runtimeError:String(event.reason?.detail??event.reason)}},'*'));
 """
         return Response(
             script,
@@ -535,7 +534,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
                 inserted = await anyio.to_thread.run_sync(
                     store.insert_record, page_id, collection, body
                 )
-            except sqlite3.IntegrityError as exc:
+            except RecordExists as exc:
                 raise HTTPException(409, "a record with this record_id already exists") from exc
             return JSONResponse(inserted)
         field = request.query_params.get("field")

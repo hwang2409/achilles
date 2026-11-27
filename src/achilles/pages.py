@@ -341,6 +341,10 @@ def _suggest_filter_field(
     )
 
 
+class RecordExists(Exception):
+    """An insert named a record_id this collection already has."""
+
+
 class _RouteTaken(Exception):
     """A concurrent create_page committed the same route first."""
 
@@ -693,6 +697,11 @@ class PageStore:
         record_id = str(document.get("record_id") or secrets.token_hex(12))
         stamp = now()
         with self.transaction() as db:
+            if db.execute(
+                "SELECT 1 FROM page_record WHERE page_id=? AND collection=? AND record_id=?",
+                (page_id, collection, record_id),
+            ).fetchone():
+                raise RecordExists(record_id)
             db.execute(
                 (
                     "INSERT INTO page_record(page_id,collection,record_id,version,revision,"
