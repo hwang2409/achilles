@@ -113,6 +113,8 @@
 .create-mode-alert { position: relative; z-index: 2; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; color: var(--fulcrum-danger); background: var(--fulcrum-bg); border-bottom: 1px solid var(--fulcrum-border); }
 .create-mode-alert button { flex: 0 0 auto; }
 .limit-notice .link-button, .limit-state .link-button { min-height: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+/* a name in the text wraps like text, not as a centred block */
+.limit-notice p .link-button, .limit-state p .link-button { display: inline; text-align: start; }
 .limit-notice:focus, .limit-state:focus { outline: none; }
 .limit-notice:focus-visible, .limit-state:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .limit-notice .chat-held-actions, .limit-state .chat-held-actions { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; }

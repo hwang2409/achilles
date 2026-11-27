@@ -1472,7 +1472,8 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
   }
   if (row.move === "during_back") {
     await settle();
-    expect(sent("abort"), "the stop did not reach its resume back").toEqual(["abort p1"]);
+    // a failed expectation still frees the gated fetch, so no promise is left pending
+    try { expect(sent("abort"), "the stop did not reach its resume back").toEqual(["abort p1"]); } catch (caught) { backGate.resolve(); throw caught; }
     await act(async () => { active.selectChat(listed.find((entry) => entry.session_id === "other")!); });
     await settle();
     backGate.resolve();

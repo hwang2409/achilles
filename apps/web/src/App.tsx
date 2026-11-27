@@ -594,7 +594,9 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   const focused = useRef(false);
   useEffect(() => {
     const at = document.activeElement;
-    if (focused.current && at && at !== document.body && !element.current?.contains(at)) return;
+    // never out of a text field: the user is typing (the notice can mount again during a stop, so the ref alone misses it)
+    const typing = at instanceof HTMLElement && (at.isContentEditable || at.matches("textarea, input"));
+    if (typing || (focused.current && at && at !== document.body && !element.current?.contains(at))) return;
     focused.current = true;
     element.current?.focus({ preventScroll: true });
   }, [kind, stop?.phase]);
@@ -603,16 +605,22 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   // the time is the same too, so each name means one chat
   const shown = [...parked.map((entry) => entry.chat), busy?.target ?? null, stop ? chatOf(stop.sessionId) : null, shownChat].filter((chat): chat is Chat => chat !== null);
   const timeOf = (chat: Chat) => new Date(chat.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase();
-  const nameOf = (chat: Chat | null) => {
-    if (!chat) return "a chat";
+  // [the quoted title, the suffix that tells twins apart ("" without twins)]
+  const partsOf = (chat: Chat | null): [string, string] => {
+    if (!chat) return ["a chat", ""];
     const title = titleOf(chat);
     const twins = shown.filter((other) => other.session_id !== chat.session_id && titleOf(other) === title);
-    if (twins.length === 0) return `"${title}"`;
+    if (twins.length === 0) return [`"${title}"`, ""];
     const time = timeOf(chat);
-    return `"${title}" (${time}${twins.some((other) => timeOf(other) === time) ? ` · ${chat.session_id.slice(0, 4)}` : ""})`;
+    return [`"${title}"`, ` (${time}${twins.some((other) => timeOf(other) === time) ? ` · ${chat.session_id.slice(0, 4)}` : ""})`];
   };
+  const nameOf = (chat: Chat | null) => partsOf(chat).join("");
   const name = (sessionId: string) => nameOf(chatOf(sessionId));
+  // the chat's name, as a link that opens it when achilles lists it
+  const link = (sessionId: string) => { const chat = chatOf(sessionId); return chat ? <button type="button" className="link-button" onClick={() => onOpen(chat)}>{nameOf(chat)}</button> : nameOf(chat); };
   const oldest = parked.find((entry) => !entry.finishing);
+  // only the title shortens: the suffix that tells twins apart stays whole
+  const oldestName = partsOf(oldest ? chatOf(oldest.sessionId) : null);
   const stuck = stop?.phase === "still_stopping";
   // one line for the whole run, the stop and the repeated swap, until zeta answers
   const running = stop?.phase === "stopping" || stop?.phase === "retrying";
@@ -621,9 +629,8 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   const failed = stop?.phase === "failed" ? `${stop.error}. ` : "";
   const list = <>{parked.map((entry, at) => <span key={entry.sessionId}>{at > 0 && ", "}{entry.chat ? <button type="button" className="link-button" onClick={() => onOpen(entry.chat!)}>{name(entry.sessionId)}</button> : name(entry.sessionId)}{entry.finishing && " (finishing)"}</span>)}</>;
   // a refused swap after a stop: the stopped chat still holds work (it is parked), or zeta has not closed it yet
-  const stopped = stop ? chatOf(stop.sessionId) : null;
-  const text = running ? <>stopping {stopped ? <button type="button" className="link-button" onClick={() => onOpen(stopped)}>{name(stop.sessionId)}</button> : name(stop.sessionId)}…</>
-    : stuck ? stop.working ? <>{name(stop.sessionId)} is still finishing its background work. try again when it is done.</> : <>zeta has not freed {name(stop.sessionId)} yet. try again in a moment, or stay.</>
+  const text = running ? <>stopping {link(stop.sessionId)}…</>
+    : stuck ? stop.working ? <>{link(stop.sessionId)} is still finishing its background work. try again when it is done.</> : <>zeta has not freed {link(stop.sessionId)} yet. try again in a moment, or stay.</>
     : kind === "parked" ? <>{failed}this tab already keeps {parked.length === 1 ? "1 chat" : `${parked.length} chats`} running: {list}. zeta allows 3 per tab. stop one to {target} here, or stay.</>
     // resident: only this tab's own chats are named; the rest are other tabs' (or recently closed ones), which it cannot see
     : parked.length > 0 ? <>{failed}zeta has no room for another open chat. this tab holds {onScreen ? "the chat on screen and " : ""}{list}. stop one to {target}, try again later, or stay.</>
@@ -634,7 +641,7 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
       {running ? <button type="button" className="ui-button" disabled>stopping…</button>
         : stuck ? <button type="button" className="ui-button" onClick={() => onRetryStopped()}>try again</button>
         : <>{onRetry && <button type="button" className="ui-button" onClick={onRetry}>try again</button>}
-          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop <span className="limit-title">{name(oldest.sessionId)}</span> and {verb}</button>}</>}
+          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop <span className="limit-title">{oldestName[0]}</span>{oldestName[1]} and {verb}</button>}</>}
       <button type="button" className="ui-button" onClick={onStay}>stay</button>
     </span>
   </div>;
