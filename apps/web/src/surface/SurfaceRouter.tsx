@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
 import { useBuildActivity, type BuildActivity } from "../create/buildActivity";
 import { AppShell, type AppShellProps } from "../AppShell";
@@ -46,8 +46,10 @@ export function SurfaceRouter() {
   const connectionStatus = { connected: phase === "connected", label: connectionLabels[phase] ?? "zeta is disconnected" };
   const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const controller = connectionState.phase === "connected" && connectionState.authority === "controller";
-  // The library's take-control reason and drafts live here: a socket replace unmounts the library module, not the router.
-  const [libraryControl, setLibraryControl] = useState<string | null>(null);
+  // the last take-control refusal shows in the banner, whichever button asked; the router holds it so a remount keeps it.
+  const [controlFeedback, setControlFeedback] = useState<string | null>(null);
+  useEffect(() => { if (controller) setControlFeedback(null); }, [controller]);
+  // the library drafts live here: a socket replace unmounts the library module, not the router.
   const [libraryDrafts] = useState(() => new Map<string, CreateDraft>());
   const [libraryEdits] = useState(() => new Map<LibraryKind, EditDraft>());
   // reveals a dropped socket cut short: the drop unmounts the projects module, and the reveal says why on remount.
@@ -67,10 +69,10 @@ export function SurfaceRouter() {
       && connection.state.authority === "controller" ? connection.client : null,
   }));
   const [liveClient] = useState(() => () => connection.client);
-  const takeLibraryControl = async () => {
-    setLibraryControl(null);
+  const takeControl = async () => {
+    setControlFeedback(null);
     const reason = await connection.takeControl();
-    setLibraryControl(reason);
+    setControlFeedback(reason);
     return reason;
   };
   const continuing = useRef(false);
@@ -92,7 +94,7 @@ export function SurfaceRouter() {
       continuing.current = false;
     }
   };
-  const observerBanner = observer && <ObserverBanner connection={connection} />;
+  const observerBanner = observer && <ObserverBanner takeControl={takeControl} feedback={controlFeedback} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!catalog) {
     return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} childControls={childControls} childSend={childSend} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
@@ -106,14 +108,14 @@ export function SurfaceRouter() {
       openTelemetrySettings={supportsFeature(client, HOME_SETTINGS_FEATURE) ? () => location.assign(surfaceHref("/settings") + "#telemetry") : undefined} />
       : route.id === "projects" ? <ProjectsModule client={client} actions={memoryActions} control={{ observer: !controller, withControl: (read) => connection.withControl(read), dropped: projectsDropped }} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
-        write={libraryWrite(client, route.id, controller, takeLibraryControl, controller ? null : libraryControl, libraryDrafts, libraryEdits, libraryWriter)} />) : <ModuleFrame title={route.label}>
+        write={libraryWrite(client, route.id, controller, takeControl, controller ? null : controlFeedback, libraryDrafts, libraryEdits, libraryWriter)} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
   } else if (route.id === "agents") {
     content = <AgentsModule client={client} connecting={connecting} retry={() => connection.retryNow()} />;
   } else if (route.id === "connections") {
-    content = <McpModule client={client} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
+    content = <McpModule client={client} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} controller={controller} takeControl={takeControl} />;
   } else if (route.id === "settings") {
     content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
   } else if (route.id === "accounts") {
@@ -122,10 +124,7 @@ export function SurfaceRouter() {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
   return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={observerBanner}
-    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow(), continueSession } : undefined}>
-    {/* keyed on the tab's role: a tab that takes control (or falls back to observer) mounts every module fresh, so each
-        reads again with its new authority instead of keeping an observer-era error */}
-    <Fragment key={observer ? "observer" : "controller"}>{content}</Fragment>{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
+    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow(), continueSession } : undefined}>{content}{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
 }
 
 // library_read_v1 path when hello granted it; each exact method is checked, so a catalog can work without its read.
@@ -160,23 +159,21 @@ function CatalogShell({ renderShell, route, connectionStatus, banner, children, 
 }
 
 // shown only when zeta refused this tab a control slot (too many controlling tabs, or a client in the other mode).
-function ObserverBanner({ connection }: { connection: Connection }) {
+function ObserverBanner({ takeControl, feedback }: { takeControl: () => Promise<string | null>; feedback: string | null }) {
   const [working, setWorking] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
   // aria-disabled, not disabled: a disabled button drops focus to <body> during the attempt.
-  const takeControl = async () => {
-    setWorking(true); setFeedback(null);
-    const reason = await connection.takeControl();
+  const take = async () => {
+    setWorking(true);
+    await takeControl();
     setWorking(false);
-    setFeedback(reason);
   };
   return <aside className="observer-banner" aria-label="observer mode">
     <p>
       <strong>zeta is full.</strong>{" "}
       <span id="tab-authority-description">this tab is read-only and shows updates. close another zeta tab, then take control.</span>
+      {/* the next line of the text, so it sits right under it, not under the taller button */}
+      <span id="take-control-feedback" role="status">{feedback}</span>
     </p>
-    <div className="observer-action"><button type="button" className="primary" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
-    {/* its own full-width row under the text and the button, so a long refusal does not squeeze the text */}
-    <span id="take-control-feedback" role="status">{feedback}</span>
+    <div className="observer-action"><button type="button" className="primary" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void take(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
   </aside>;
 }
