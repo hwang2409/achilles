@@ -40,16 +40,23 @@ export function rowState(stored: RowState | null | undefined, live?: Live): { sh
 const written = new Set<(remote: boolean) => void>();
 const notify = (remote: boolean) => { for (const listener of [...written]) listener(remote); };
 // the other tabs of this browser hear each chat write here (a post never reaches its own sender); other browsers and
-// devices load the list again when they come back (focus, visibility)
-const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("achilles:chats");
-channel?.addEventListener("message", () => notify(true));
+// devices load the list again when they come back (focus, visibility). open only while a list listens: an open channel
+// keeps a non-browser process (a bun script importing this module) alive
+let channel: BroadcastChannel | null = null;
 /**
  * Called after each chat write, so the chat list loads again. `remote`: another tab of this browser wrote; that tab
  * holds the chat and just stored its state, so a reload it caused must not check the rows with zeta (verifyChatStates).
  */
 export function subscribeRowWrites(listener: (remote: boolean) => void) {
   written.add(listener);
-  return () => { written.delete(listener); };
+  if (!channel && typeof BroadcastChannel !== "undefined") {
+    channel = new BroadcastChannel("achilles:chats");
+    channel.addEventListener("message", () => notify(true));
+  }
+  return () => {
+    written.delete(listener);
+    if (written.size === 0) { channel?.close(); channel = null; }
+  };
 }
 
 /** Every chat PATCH: an answered write loads the list again here and in the other tabs of this browser. */
