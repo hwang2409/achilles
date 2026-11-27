@@ -2383,6 +2383,8 @@ with _database() as db:
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await gateSettings(page, origin, gateWait);
+  await page.goto(`${origin}/allow?chat=${allowSession}`);
+  await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
   await gateCreationApprovalDefaults(page, requests, awaitApprovalMode, gateWait);
 
   await gateVim(page, control, waitFor, async (check) => {
