@@ -2379,14 +2379,9 @@ with _database() as db:
   if (await page.getByRole("alert").count()) throw new Error(`the woken turn's end showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
   await restartAchilles("allow");
   console.log("reload in a woken turn's setup asserted: the page attached, the turn ran a page tool, and ask mode applied after the turn ended");
-  await page.goto(`${origin}/allow?chat=${allowSession}`);
-  await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
+  await page.goto(`${origin}/?chat=${allowSession}`);
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   await page.setViewportSize({ width: 1440, height: 900 });
-  const pageChatBackdrop = page.locator(".page-chat-backdrop");
-  if (await pageChatBackdrop.count()) {
-    await pageChatBackdrop.evaluate((backdrop) => (backdrop as HTMLElement).click());
-    await gateWait.playwright(pageChatBackdrop, "waitFor", { state: "detached" });
-  }
   await gateSettings(page, origin, gateWait);
   await gateCreationApprovalDefaults(page, requests, awaitApprovalMode, gateWait);
 
