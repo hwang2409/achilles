@@ -2,24 +2,22 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { parkedRows, refreshParked, takeParkedEvent } from "./parked";
 import { rowState, subscribeRowWrites, verifyChatStates, writeShownState, type RowState } from "./rowState";
 
-// achilles' chat rows as the server keeps them: an active state that changes moves updated_at, and a write with an
-// expected row is a compare-and-set (the row unchanged when it changed since the read), as in PageStore.update_chat
-type Row = { last_state: RowState | null; updated_at: string };
+// achilles' chat rows as the server keeps them: each state write adds 1 to state_version, and a write with an expected
+// row is a compare-and-set (the row unchanged when it changed since the read), as in PageStore.update_chat
+type Row = { last_state: RowState | null; state_version: number };
 let server = new Map<string, Row>();
-let clock = 0;
 let stored = 0;
 const realFetch = globalThis.fetch;
 beforeEach(() => {
-  server = new Map(); clock = 0; stored = 0;
+  server = new Map(); stored = 0;
   sessionStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const id = decodeURIComponent(String(input).split("/").at(-1)!);
-    const body = JSON.parse(String(init?.body)) as { last_state: RowState; expected_last_state?: RowState | null; expected_updated_at?: string };
+    const body = JSON.parse(String(init?.body)) as { last_state: RowState; expected_last_state?: RowState | null; expected_state_version?: number };
     const row = server.get(id);
     if (!row) return new Response(null, { status: 404 });
-    if (body.expected_updated_at !== undefined && (row.last_state !== body.expected_last_state || row.updated_at !== body.expected_updated_at)) { stored += 1; return Response.json(row); }
-    const moves = body.last_state !== "idle" && body.last_state !== row.last_state;
-    server.set(id, { last_state: body.last_state, updated_at: moves ? `t${++clock}` : row.updated_at });
+    if (body.expected_state_version !== undefined && (row.last_state !== body.expected_last_state || row.state_version !== body.expected_state_version)) { stored += 1; return Response.json(row); }
+    server.set(id, { last_state: body.last_state, state_version: row.state_version + 1 });
     stored += 1;
     return Response.json({});
   }) as typeof fetch;
@@ -48,7 +46,7 @@ const rows: RowCase[] = [
 ];
 
 test.each(rows)("a chat row's state: $name", async (row) => {
-  server.set("c", { last_state: row.stored, updated_at: "t0" });
+  server.set("c", { last_state: row.stored, state_version: 0 });
   const reads: string[] = [];
   let meanwhile: Step[] = [];
   const client = { request: async (method: string, params: { session_id?: string }) => {
@@ -79,4 +77,19 @@ test.each(rows)("a chat row's state: $name", async (row) => {
   // each answered write (stored, or a lost compare-and-set) loads every sidebar's list again, so no row waits for a reload
   expect(reloads, "a stored state did not reload the chat list").toBe(stored);
   unsubscribe();
+});
+
+test("another tab's chat write loads this tab's list again, marked remote so the reload checks nothing with zeta", async () => {
+  server.set("c", { last_state: "idle", state_version: 0 });
+  const causes: boolean[] = [];
+  const unsubscribe = subscribeRowWrites((remote) => { causes.push(remote); });
+  const otherTab = new BroadcastChannel("achilles:chats");
+  try {
+    await writeShownState("c", "running");
+    expect(causes, "this tab's own write: a local reload, and its post does not come back to it").toEqual([false]);
+    otherTab.postMessage("written");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(causes, "another tab's post reloads the list as remote").toEqual([false, true]);
+    expect(stored, "a remote reload writes nothing").toBe(1);
+  } finally { otherTab.close(); unsubscribe(); }
 });

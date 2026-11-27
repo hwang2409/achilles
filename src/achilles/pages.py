@@ -675,6 +675,9 @@ class PageStore:
         # default 1: rows from before this column, or written by older code, count as sent and
         # stay listed; only register_chat/save_session insert a new chat as 0 until its first send.
         ensure_column(db, "chat", "message_sent", "INTEGER NOT NULL DEFAULT 1")
+        # the compare-and-set key of last_state: every state write adds 1 (updated_at moves only
+        # on a user send, so it cannot tell two writes of the same state apart)
+        ensure_column(db, "chat", "state_version", "INTEGER NOT NULL DEFAULT 0")
         # the first message's title, kept apart from `title` so clearing a rename falls back to it;
         # an older chat's automatic title is its best first-message title.
         ensure_column(
@@ -1107,7 +1110,7 @@ class PageStore:
             rows = db.execute(
                 "SELECT c.session_id,c.page_id,p.route AS page_route,p.title AS page_title,"
                 "c.title,c.first_title,c.created_at,c.updated_at,c.last_state,c.titled_by_user,"
-                "c.message_sent,c.purpose FROM chat c "
+                "c.message_sent,c.purpose,c.state_version FROM chat c "
                 f"JOIN page p ON p.id=c.page_id {where} "
                 "ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?",
                 (*parameters, limit + 1),
@@ -1150,7 +1153,7 @@ class PageStore:
         with self._connect() as db:
             row = db.execute(
                 "SELECT session_id,page_id,title,first_title,created_at,updated_at,last_state,"
-                "titled_by_user,message_sent,purpose FROM chat WHERE session_id=?",
+                "titled_by_user,message_sent,purpose,state_version FROM chat WHERE session_id=?",
                 (session_id,),
             ).fetchone()
         if row is None:
@@ -1161,15 +1164,17 @@ class PageStore:
         self,
         session_id: str,
         changes: dict[str, Any],
-        expected: tuple[str | None, str] | None = None,
+        expected: tuple[str | None, int] | None = None,
     ) -> dict[str, Any]:
-        """Writes `changes`. `expected` (last_state, updated_at) makes it a compare-and-set:
+        """Writes `changes`. `expected` (last_state, state_version) makes it a compare-and-set:
         a tab that does not hold the chat corrects a stale state only if the holder wrote
-        nothing since it read the row (ChatChanged otherwise)."""
+        no state since it read the row (ChatChanged otherwise). `message` (a user send)
+        moves the chat to the top of the list."""
         # a title-only write is an automatic name; it never replaces a title the user chose
         changes = dict(changes)
         sent = "first_message" in changes
         first_title = changes.pop("first_message", None)
+        message = changes.pop("message", False)
         keep_user_title = "title" in changes and "titled_by_user" not in changes
         assignments = [
             "title=CASE WHEN titled_by_user THEN title ELSE ? END"
@@ -1177,26 +1182,25 @@ class PageStore:
             else f"{key}=?"
             for key in changes
         ]
-        # updated_at is the last message time, so the list order and time follow messages only:
-        # renames, automatic titles and re-reported states (an attach) never move a chat
-        active = changes.get("last_state") in ("running", "approval", "failed")
-        message = "NOT message_sent" if sent else "0"
-        if active:
-            message += " OR last_state IS NOT ?"
-        assignments.append(f"updated_at=CASE WHEN {message} THEN ? ELSE updated_at END")
+        # updated_at is the last user message time, so the list order and time follow user sends
+        # only: states (a stop, a re-park, an agent turn), renames and approvals never move a chat
+        moved = "1" if message else "NOT message_sent" if sent else "0"
+        assignments.append(f"updated_at=CASE WHEN {moved} THEN ? ELSE updated_at END")
+        if "last_state" in changes:
+            # the compare-and-set key: it only grows, so a state seen before can never match again
+            assignments.append("state_version=state_version+1")
         if sent:
             # the first send marks the chat sent and keeps the first title; repeats change nothing
             assignments.append("message_sent=1,first_title=COALESCE(first_title,?)")
-        elif active:
+        elif changes.get("last_state") in ("running", "approval", "failed"):
             # a turn ran, so the chat was sent even when the client never recorded its first message
             assignments.append("message_sent=1")
         with self.transaction() as db:
             updated = db.execute(
                 f"UPDATE chat SET {','.join(assignments)} WHERE session_id=?"
-                + (" AND last_state IS ? AND updated_at=?" if expected else ""),
+                + (" AND last_state IS ? AND state_version=?" if expected else ""),
                 (
                     *changes.values(),
-                    *([changes["last_state"]] if active else []),
                     now(),
                     *([first_title] if sent else []),
                     session_id,

@@ -108,7 +108,8 @@ function CancelReview({ row, title, parent, elapsed, owner, refresh, activity, o
   return <Confirmation level={2} title={t("cancel this run?")} action={t("cancel run")} keep={t("keep run")}
     effect={display(`${row.agentType || "agent"} · ${row.description || "no task summary"}`)}
     scope={display(`${title || "this chat"}${row.parentRunId ? ` · parent ${runDisplayId(parent?.agentType, row.parentRunId)}` : ""}`, 750)}
-    current={display([`${stateWord(row.status)} ${elapsed ?? ""}`.trim(), row.turnsUsed === undefined ? "" : `${row.turnsUsed} turns`].filter(Boolean).join(" · "))}
+    // "0 turns" during the first turn reads as "did nothing", so it says nothing
+    current={display([`${stateWord(row.status)} ${elapsed ?? ""}`.trim(), !row.turnsUsed ? "" : `${row.turnsUsed} turns`].filter(Boolean).join(" · "))}
     after={t("the run stops at its next safe point.")}
     undo={t("no. work in progress can be lost; the transcript stays; a new run starts from zero.")}
     proof={{ kind: "name", name: runDisplayId(row.agentType, row.runId) }} external={{ opener }} activity={activity}
