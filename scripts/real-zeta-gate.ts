@@ -2381,6 +2381,7 @@ with _database() as db:
   console.log("reload in a woken turn's setup asserted: the page attached, the turn ran a page tool, and ask mode applied after the turn ended");
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   if (await page.locator(".page-chat-backdrop").isVisible()) {
     await page.getByRole("button", { name: "close page chat" }).click();
     await gateWait.playwright(page.locator(".page-chat-backdrop"), "waitFor", { state: "detached" });
