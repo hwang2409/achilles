@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { parkedRows, refreshParked, takeParkedEvent } from "./parked";
-import { rowState, verifyChatStates, writeShownState, type RowState } from "./rowState";
+import { rowState, subscribeRowWrites, verifyChatStates, writeShownState, type RowState } from "./rowState";
 
 // achilles' chat rows as the server keeps them: an active state that changes moves updated_at, and a write with an
 // expected row is a compare-and-set (409 when the row changed), as in PageStore.update_chat
 type Row = { last_state: RowState | null; updated_at: string };
 let server = new Map<string, Row>();
 let clock = 0;
+let stored = 0;
 const realFetch = globalThis.fetch;
 beforeEach(() => {
-  server = new Map(); clock = 0;
+  server = new Map(); clock = 0; stored = 0;
   sessionStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const id = decodeURIComponent(String(input).split("/").at(-1)!);
@@ -19,6 +20,7 @@ beforeEach(() => {
     if (body.expected_updated_at !== undefined && (row.last_state !== body.expected_last_state || row.updated_at !== body.expected_updated_at)) return new Response(null, { status: 409 });
     const moves = body.last_state !== "idle" && body.last_state !== row.last_state;
     server.set(id, { last_state: body.last_state, updated_at: moves ? `t${++clock}` : row.updated_at });
+    stored += 1;
     return Response.json({});
   }) as typeof fetch;
 });
@@ -62,6 +64,8 @@ test.each(rows)("a chat row's state: $name", async (row) => {
     else if ("parked" in step) { takeParkedEvent(client, event({ pending_approvals: 0, ...step.parked })); await new Promise((resolve) => setTimeout(resolve, 0)); }
     else { meanwhile = step.meanwhile ?? []; await verifyChatStates(client as never, [{ session_id: "c", ...server.get("c")! }], new Set()); }
   }
+  let reloads = 0;
+  const unsubscribe = subscribeRowWrites(() => { reloads += 1; });
   await refreshParked(client as never);
   const shown: (RowState | null)[] = [];
   for (const step of row.steps) {
@@ -72,4 +76,7 @@ test.each(rows)("a chat row's state: $name", async (row) => {
   expect(shown, "the row's state after each step").toEqual(row.shown);
   expect(server.get("c")!.last_state, "the stored state every tab reads").toBe(row.shown.at(-1)!);
   if (row.reads !== undefined) expect(reads).toHaveLength(row.reads);
+  // each stored state loads every sidebar's list again, so no row waits for a reload
+  expect(reloads, "a stored state did not reload the chat list").toBe(stored);
+  unsubscribe();
 });
