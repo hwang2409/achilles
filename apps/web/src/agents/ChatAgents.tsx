@@ -40,8 +40,12 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
   const reported = rows.find((row) => row.runId === chosenRun);
   const chosen = reported && withLiveRow(reported, live);
   const liveEnded = !!live && ["done", "error", "canceled"].includes(live.status);
-  // the row finished after the report: read the outcome instead of showing a running run
-  useEffect(() => { if (liveEnded && reported && !isTerminal(reported.status) && !refreshing) refresh(); }, [liveEnded, reported?.status, refreshing]);
+  // the row finished after the report: read the outcome instead of showing a running run, once per run end; a failed
+  // or stale reread keeps the report and the refresh button, it does not retry
+  const reread = useRef<string>(undefined);
+  useEffect(() => {
+    if (liveEnded && reported && !isTerminal(reported.status) && !refreshing && reread.current !== chosenRun) { reread.current = chosenRun; refresh(); }
+  }, [liveEnded, reported?.status, refreshing, chosenRun]);
   const parent = chosen?.parentRunId ? rows.find((row) => row.runId === chosen.parentRunId) : undefined;
   return <dialog ref={dialog} className="settings-dialog chat-agents" aria-labelledby="chat-agents-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }}
