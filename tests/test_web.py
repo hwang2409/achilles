@@ -725,7 +725,8 @@ def test_a_compare_and_set_state_write_never_overwrites_the_holders_newer_state(
     # unchanged since the read: the stale state is corrected
     seen = client.get("/api/chats?include=c").json()["chats"][0]
     fresh = {"expected_last_state": "running", "expected_updated_at": seen["updated_at"]}
-    assert client.patch("/api/chats/c", json={"last_state": "idle", **fresh}).json()["last_state"] == "idle"
+    corrected = client.patch("/api/chats/c", json={"last_state": "idle", **fresh})
+    assert corrected.json()["last_state"] == "idle"
     assert client.patch("/api/chats/gone", json={"last_state": "idle", **fresh}).status_code == 404
     for body in (
         {"last_state": "idle", "expected_last_state": "running"},

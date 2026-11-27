@@ -576,11 +576,7 @@ CHAT_FIELDS = {
 
 
 def _validated_chat_changes(body: Any) -> dict[str, Any]:
-    if (
-        not isinstance(body, dict)
-        or not body
-        or not set(body) <= CHAT_FIELDS
-    ):
+    if not isinstance(body, dict) or not body or not set(body) <= CHAT_FIELDS:
         raise HTTPException(400, "provide only title, last_state, titled_by_user, or first_message")
     # expected_*: a compare-and-set of last_state, both together with last_state
     expected = {"expected_last_state", "expected_updated_at"} & set(body)
@@ -590,7 +586,9 @@ def _validated_chat_changes(body: Any) -> dict[str, Any]:
         or body["expected_last_state"] not in {None, "idle", "running", "approval", "failed"}
         or not isinstance(body["expected_updated_at"], str)
     ):
-        raise HTTPException(400, "expected_last_state and expected_updated_at go together with last_state")
+        raise HTTPException(
+            400, "expected_last_state and expected_updated_at go together with last_state"
+        )
     if "first_message" in body:
         first = body["first_message"]
         if not isinstance(first, str) or len(first) > 200:

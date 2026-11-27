@@ -1163,8 +1163,9 @@ class PageStore:
         changes: dict[str, Any],
         expected: tuple[str | None, str] | None = None,
     ) -> dict[str, Any]:
-        """Writes `changes`. `expected` (last_state, updated_at) makes it a compare-and-set: a tab that does not hold the
-        chat corrects a stale state only if the holder wrote nothing since it read the row (ChatChanged otherwise)."""
+        """Writes `changes`. `expected` (last_state, updated_at) makes it a compare-and-set:
+        a tab that does not hold the chat corrects a stale state only if the holder wrote
+        nothing since it read the row (ChatChanged otherwise)."""
         # a title-only write is an automatic name; it never replaces a title the user chose
         changes = dict(changes)
         sent = "first_message" in changes
@@ -1203,8 +1204,8 @@ class PageStore:
                 ),
             ).rowcount
             if not updated:
-                found = db.execute("SELECT 1 FROM chat WHERE session_id=?", (session_id,)).fetchone()
-                if expected and found:
+                found = db.execute("SELECT 1 FROM chat WHERE session_id=?", (session_id,))
+                if expected and found.fetchone():
                     raise ChatChanged(session_id)
                 raise KeyError(session_id)
             if sent:
