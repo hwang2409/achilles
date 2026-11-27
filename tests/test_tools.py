@@ -421,7 +421,15 @@ def test_stale_record_revision_cannot_overwrite_or_audit(tmp_path):
 def test_reserved_bundle_names_are_rejected(tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
-    for name in ("inspect_page", "create_page", "create_tool", "restore_version"):
+    for name in (
+        "inspect_page",
+        "create_page",
+        "create_tool",
+        "restore_version",
+        "write_page",
+        "read_page_file",
+        "edit_page",
+    ):
         with pytest.raises(ValidationError, match="not one of"):
             store.create_tool("home", {**BUNDLE, "name": name})
 

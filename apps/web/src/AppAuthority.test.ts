@@ -782,14 +782,14 @@ const rows: Record<WriteSurfaceId, Row> = {
     await keydown(window, "o", { ctrlKey: !isMac, metaKey: isMac, shiftKey: true });
     if (authority === "controller") didWrite(writes, "new_session");
   } },
-  "history.restore": { kind: "visible", options: { http: (path) => path.endsWith("/versions") ? Response.json({ code: [], tools: [1, 2].map((version) => ({ name: "add_book", version, created_at: "2026-01-01", active: version === 2, restored_from: null })) }) : undefined }, check: async (app, authority, writes) => {
+  "history.restore": { kind: "visible", options: { http: (path) => path.endsWith("/versions") ? Response.json({ code: [1, 2].map((version) => ({ version, created_at: "2026-01-01", active: version === 2, failed: false, stale: false, restored_from: null })), tools: [] }) : undefined }, check: async (app, authority, writes) => {
     await click(select(app, '.chat-actions > button:not([data-write-surface])'));
     const restore = select(app, tag("history.restore"));
     expect(disabled(restore)).toBe(authority === "observer");
     await click(restore);
     if (authority === "controller") {
       await click(select(app, '.history-confirm ' + tag("history.restore")));
-      didWrite(writes, "POST /api/pages/page/tools/add_book/rollback");
+      didWrite(writes, "POST /api/pages/page/code/restore");
     }
   } },
   "library.create": { kind: "visible", options: library(true), check: async (app, authority, writes) => {

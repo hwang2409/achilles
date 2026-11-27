@@ -285,6 +285,45 @@ def test_create_write_inspect_history_and_restore_code(built, tmp_path):
     assert store.versions(page_id)["code"][0]["restored_from"] == 1
 
 
+def test_inspect_bounds_non_ascii_candidate_diagnostics(built, monkeypatch, tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    page, _, _, _ = store.create_page("/notes", "notes")
+
+    def fail(*_args):
+        raise pages.PageBuildError("書" * 3000)
+
+    monkeypatch.setattr(pages, "build_page", fail)
+    with pytest.raises(ValidationError):
+        store.write_page(page["id"], "broken", {}, expected_revision=1)
+    result, encoded = pages.bounded_inspect(store.inspect_page(page["id"]))
+    assert result["candidate"]["revision"] == 2
+    assert result["candidate"]["diagnostics"].startswith("書")
+    assert len(encoded.encode()) <= pages.INSPECT_MAX_BYTES
+
+
+def test_edit_page_conflicts_when_a_write_commits_between_its_reads(built, monkeypatch, tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    page, _, _, _ = store.create_page(
+        "/notes", "notes", {"source": "<main>one</main>", "dependencies": {}}
+    )
+    newest_code = store._newest_code
+    injected = []
+
+    def newest_then_write(db, page_id):
+        row = newest_code(db, page_id)
+        if not injected:
+            injected.append(store.write_page(page_id, "<main>newer</main>", {}, 1))
+        return row
+
+    monkeypatch.setattr(store, "_newest_code", newest_then_write)
+    with pytest.raises(ValidationError) as raised:
+        store.edit_page(page["id"], "src/Page.tsx", [{"old_string": "one", "new_string": "two"}], 1)
+    assert raised.value.code == "conflict"
+    assert store.page_code(page["id"])["source"] == "<main>newer</main>"
+
+
 def test_create_page_without_package_builds_minimal_react_shell(built, tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)

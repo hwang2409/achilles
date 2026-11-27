@@ -7,11 +7,12 @@ type CodeRevision = { version: number; created_at: string; active: boolean; fail
 type ToolVersion = { name: string; version: number; created_at: string; active: boolean; restored_from: number | null };
 type Versions = { code: CodeRevision[]; tools: ToolVersion[] };
 
+const TOOL_RESTORE_REASON = "restoring a tool needs create mode";
 const when = (stamp: string) => new Date(stamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 // the page's code revisions and tool versions; a tool restore goes through the same guarded store path as the agent's restore_version
 // onChanged refreshes the page behind the dialog: after a restore, and after a 409 or 403 that means the page changed elsewhere
-export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, canWrite = false, disabledReason = READ_ONLY_REASON }: { pageId: string; credential: string; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canWrite?: boolean; disabledReason?: string }) {
+export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, canWrite = false, disabledReason = READ_ONLY_REASON, createMode = false }: { pageId: string; credential: string; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canWrite?: boolean; disabledReason?: string; createMode?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
@@ -72,9 +73,10 @@ export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, 
   };
 
   const toolNames = [...new Set(versions?.tools.map((row) => row.name))];
-  const button = (key: string, row: { active: boolean; version: number }) => row.active
+  // restoring a tool needs create mode, like creating one; the reason shows before the click, not as a 403 after it
+  const button = (key: string, row: { active: boolean; version: number }, locked = false) => row.active
     ? <span className="history-current">current</span>
-    : <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={busy || !canWrite} title={!canWrite ? disabledReason : undefined} onClick={() => setPending(key)}>restore v{row.version}</button>;
+    : <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={busy || !canWrite || locked} title={!canWrite ? disabledReason : locked ? TOOL_RESTORE_REASON : undefined} onClick={() => setPending(key)}>restore v{row.version}</button>;
   // the row in its confirm state; only "confirm" sends the restore
   const confirmRow = (key: string, version: number, kind: string, run: () => void) => <li key={version} data-row={key} className="history-confirm">
     <span id={`${key}-ask`}>restore version {version}? the current {kind} stays in history</span>
@@ -110,6 +112,7 @@ export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, 
                 </li>;
               })}</ol>}
           </section>
+          {canWrite && !createMode && toolNames.length > 0 && <p className="history-hint" role="note">{TOOL_RESTORE_REASON}</p>}
           {toolNames.map((name) => {
             const rows = versions.tools.filter((row) => row.name === name);
             const active = rows.find((row) => row.active)?.version;
@@ -122,7 +125,7 @@ export function HistoryDialog({ pageId, credential, opener, onClose, onChanged, 
                   <span className="history-version">v{row.version}</span>
                   <span className="history-detail">{row.restored_from ? `restored from v${row.restored_from}` : ""}</span>
                   <time dateTime={row.created_at}>{when(row.created_at)}</time>
-                  {button(key, row)}
+                  {button(key, row, !createMode)}
                 </li>;
               })}</ol>
             </section>;

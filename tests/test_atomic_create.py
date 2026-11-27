@@ -317,7 +317,14 @@ def test_page_chat_edits_its_own_page_without_create_mode(creation_client):
 
     catalog = mcp(client, page_headers, 4, "tools/list", {})
     names = sorted(tool["name"] for tool in catalog["tools"])
-    assert names == ["add_book", "inspect_page", "restore_version", "write_page"]
+    assert names == [
+        "add_book",
+        "edit_page",
+        "inspect_page",
+        "read_page_file",
+        "restore_version",
+        "write_page",
+    ]
     inspect = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
     assert "read-only" not in inspect["description"]
 
@@ -892,6 +899,8 @@ def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creatio
     catalog = mcp(client, page_headers, 4, "tools/list", {})
     assert [tool["name"] for tool in catalog["tools"]] == [
         "write_page",
+        "read_page_file",
+        "edit_page",
         "inspect_page",
         "restore_version",
         "add_book",
@@ -1274,3 +1283,218 @@ def test_page_code_lifecycle_through_real_mcp_requests(monkeypatch, tmp_path):
         )
         assert browser_restore.status_code == 200
         assert browser_restore.json()["version"] == 4
+
+
+_FILE_SOURCE = (
+    'import { createRoot } from "react-dom/client";\n'
+    "function Page() { return <main><h1>reading</h1><p>a</p><p>a</p></main>; }\n"
+    'createRoot(document.getElementById("root")!).render(<Page />);\n'
+)
+
+
+def _tool_value(result):
+    return result.get("isError", False), json.loads(result["content"][0]["text"])
+
+
+def test_page_files_read_edit_and_restore_over_public_mcp(creation_client, monkeypatch):
+    import hashlib
+
+    from achilles.page_build import PageBuildError
+
+    root, store, client, headers = creation_client
+    builds = []
+
+    def build(build_root, _page_id, source, dependencies):
+        builds.append((source, dependencies))
+        if "BROKEN" in source:
+            raise PageBuildError("src/Page.tsx:2:1: Unexpected BROKEN")
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        (build_root / "bundles" / f"{digest}.js").write_text(source)
+        return {
+            "digest": digest,
+            "size": len(source),
+            "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", **dependencies},
+            "resolved_dependencies": dependencies,
+            "lockfile": "test-lock",
+        }
+
+    monkeypatch.setattr(pages, "build_page", build)
+    created = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": {**request(), "package": {"source": _FILE_SOURCE, "dependencies": {}}},
+        },
+    )
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    token = store.ensure_credential(page_id)
+    page_headers = initialize(client, token, 3)
+    store.set_create_mode("home", False)
+
+    def call(request_id, name, arguments):
+        return _tool_value(
+            mcp(
+                client,
+                page_headers,
+                request_id,
+                "tools/call",
+                {"name": name, "arguments": arguments},
+            )
+        )
+
+    listed = mcp(client, page_headers, 4, "tools/list", {})
+    catalog = {tool["name"]: tool for tool in listed["tools"]}
+    assert catalog["read_page_file"]["annotations"]["readOnlyHint"] is True
+    assert "exactly once" in catalog["edit_page"]["description"]
+
+    # 1. a source file reads in two chunks that join to the whole file
+    error, first = call(5, "read_page_file", {"path": "src/Page.tsx", "limit": 2})
+    assert not error, first
+    assert (first["revision"], first["next_offset"], first["total_lines"]) == (1, 2, 3)
+    error, second = call(6, "read_page_file", {"path": "src/Page.tsx", "offset": 2})
+    assert not error and second["next_offset"] is None
+    assert first["content"] + second["content"] == _FILE_SOURCE
+
+    # path traversal is refused by the schema before anything is read or written
+    before = state(root)
+    for request_id, name, arguments in (
+        (7, "read_page_file", {"path": f"../credentials/{page_id}"}),
+        (8, "read_page_file", {"path": "/etc/passwd"}),
+        (
+            9,
+            "edit_page",
+            {
+                "path": "../../achilles.sqlite3",
+                "edits": [{"old_string": "a", "new_string": "b"}],
+                "expected_revision": 1,
+            },
+        ),
+    ):
+        error, refused = call(request_id, name, arguments)
+        assert error and refused["code"] == "invalid_input" and refused["path"] == "/path", name
+        assert token not in json.dumps(refused)
+    assert state(root) == before
+
+    # 4. zero or two matches, or one bad edit after a good one, change nothing
+    for request_id, edits, count in (
+        (10, [{"old_string": "<h2>", "new_string": "x"}], 0),
+        (11, [{"old_string": "<p>a</p>", "new_string": "x"}], 2),
+        (
+            12,
+            [
+                {"old_string": "<h1>reading</h1>", "new_string": "<h1>books</h1>"},
+                {"old_string": "missing", "new_string": "x"},
+            ],
+            0,
+        ),
+    ):
+        error, failed = call(
+            request_id,
+            "edit_page",
+            {"path": "src/Page.tsx", "edits": edits, "expected_revision": 1},
+        )
+        assert error and failed["code"] == "edit_error", failed
+        assert failed["hint"].startswith(f"found {count} matches; nothing was changed")
+    assert state(root) == before and len(builds) == 1
+
+    # 2. one exact edit compiles and becomes the active revision
+    error, edited = call(
+        13,
+        "edit_page",
+        {
+            "path": "src/Page.tsx",
+            "edits": [{"old_string": "<h1>reading</h1>", "new_string": "<h1>books</h1>"}],
+            "expected_revision": 1,
+        },
+    )
+    assert not error, edited
+    assert edited["revision"] == 2
+    assert store.page_code(page_id)["source"] == _FILE_SOURCE.replace("reading</h1>", "books</h1>")
+
+    # 3. a stale revision is a conflict and adds no revision
+    before = state(root)
+    error, stale = call(
+        14,
+        "edit_page",
+        {
+            "path": "src/Page.tsx",
+            "edits": [{"old_string": "books", "new_string": "stale"}],
+            "expected_revision": 1,
+        },
+    )
+    assert error and stale["code"] == "conflict" and stale["current"] == {"revision": 2}
+    assert state(root) == before
+
+    # a failed build is the candidate: inspect shows it, the next read and edit start from it
+    error, broken = call(
+        15,
+        "edit_page",
+        {
+            "path": "src/Page.tsx",
+            "edits": [{"old_string": "<main>", "new_string": "<main>BROKEN"}],
+            "expected_revision": 2,
+        },
+    )
+    assert error and broken == {
+        "error": "compile_error",
+        "diagnostics": "src/Page.tsx:2:1: Unexpected BROKEN",
+        "revision": 3,
+    }
+    assert store.page(page_id)["active_code_revision"] == 2
+    error, inspected = call(16, "inspect_page", {})
+    assert inspected["code"]["revision"] == 2
+    assert inspected["code"]["files"][0] == {
+        "path": "src/Page.tsx",
+        "bytes": len(store.page_code(page_id)["source"].encode()),
+    }
+    assert inspected["candidate"]["revision"] == 3
+    assert inspected["candidate"]["diagnostics"] == "src/Page.tsx:2:1: Unexpected BROKEN"
+    error, failed_read = call(17, "read_page_file", {"path": "src/Page.tsx"})
+    assert failed_read["failed"] is True and "BROKEN" in failed_read["content"]
+    error, fixed = call(
+        18,
+        "edit_page",
+        {
+            "path": "package.json",
+            "edits": [
+                {
+                    "old_string": '"react": "19.0.0"',
+                    "new_string": '"nanoid": "5.1.6",\n    "react": "19.0.0"',
+                }  # noqa: E501
+            ],
+            "expected_revision": 3,
+        },
+    )
+    assert error  # still broken: the package edit keeps the candidate's source
+    error, fixed = call(
+        19,
+        "edit_page",
+        {
+            "path": "src/Page.tsx",
+            "edits": [{"old_string": "<main>BROKEN", "new_string": "<main>"}],
+            "expected_revision": 4,
+        },
+    )
+    assert not error, fixed
+    assert builds[-2][1]["nanoid"] == "5.1.6"
+    assert fixed["revision"] == 5
+    error, inspected = call(20, "inspect_page", {})
+    assert inspected["candidate"] is None
+
+    # 5. restoring revision 1 appends a new revision that renders the original code
+    error, restored = call(
+        21,
+        "restore_version",
+        {"kind": "code", "version": 1, "expected_version": 5},
+    )
+    assert not error, restored
+    assert restored["revision"] == 6
+    assert store.page_code(page_id)["source"] == _FILE_SOURCE
+    frame = client.get(f"/api/pages/{page_id}/frame")
+    assert frame.status_code == 200
+    digest = hashlib.sha256(_FILE_SOURCE.encode()).hexdigest()
+    assert f"artifact/{digest}" in frame.text
+    assert client.get(f"/api/pages/{page_id}/artifact/{digest}").text == _FILE_SOURCE
