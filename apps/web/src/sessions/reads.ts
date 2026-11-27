@@ -19,9 +19,9 @@ const statuses = ["running", "approval", "idle", "failed", "unknown"] as const;
 type SessionStatus = typeof statuses[number];
 function state(v: unknown) {
   if (!isObject(v) || !nonempty(v.session_id) || !statuses.includes(v.status as SessionStatus) ||
-      !count(v.child_count) || !count(v.background_count) || (v.attention_count !== undefined && !count(v.attention_count))) return;
+      !count(v.child_count) || !count(v.background_count) || !count(v.attention_open)) return;
   return { id: v.session_id, status: v.status as SessionStatus, children: v.child_count, tasks: v.background_count,
-    attention: v.attention_count as number | undefined, profile: text(v.profile) };
+    attention: v.attention_open, profile: text(v.profile) };
 }
 
 function metadata(v: unknown) {

@@ -4,7 +4,7 @@ import { createSessionsReader, readError } from "./reads";
 
 const signal = () => new AbortController().signal;
 const row = (id: string, project_id: string | null = null) => ({ session_id: id, name: `session ${id}`, project_id });
-const state = (id: string, status: string) => ({ session_id: id, status, child_count: 0, background_count: 1, title: "not authoritative" });
+const state = (id: string, status: string) => ({ session_id: id, status, child_count: 0, background_count: 1, attention_count: 5, attention_open: 2, title: "not authoritative" });
 function serve(fn: (method: string, params: Record<string, unknown>) => unknown, features = ["list_sessions_paging", "state_read_v1", "session_history_read_v1"]) {
   const calls: [string, Record<string, unknown>][] = [];
   const client = { features, request: async (method: string, params: Record<string, unknown>) => { calls.push([method, params]); return fn(method, params); } } as unknown as ZetaClient;
@@ -18,8 +18,9 @@ test("walks short pages and joins by exact id; bad rows are omitted, not idle", 
     items: [state("ab", "running"), state("b", "bogus")], next_cursor: "older",
   } : { items: [state("orphan", "idle")], next_cursor: null });
   const reply = await reader.catalog(signal());
-  expect(reply.items.map(({ id, title, status, state }) => [id, title, status, state?.tasks])).toEqual([
-    ["a", "session a", "unknown", undefined], ["ab", "session ab", "running", 1], ["b", "session b", "unknown", undefined],
+  // attention shows open decisions (attention_open), not every stored record (attention_count)
+  expect(reply.items.map(({ id, title, status, state }) => [id, title, status, state?.tasks, state?.attention])).toEqual([
+    ["a", "session a", "unknown", undefined, undefined], ["ab", "session ab", "running", 1, 2], ["b", "session b", "unknown", undefined, undefined],
   ]);
   expect([reply.omitted, reply.complete]).toEqual([2, false]);
   expect(calls.map(([method, p]) => [method, p.offset ?? p.cursor])).toEqual([

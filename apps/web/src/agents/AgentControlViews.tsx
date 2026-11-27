@@ -78,21 +78,22 @@ function clearOnCommit(operation: Operation, clear: () => void): Operation {
 }
 
 export function AgentCancel({ client, owner, refresh, row, title, parent, elapsed, readOnly }: Props & {
-  row?: AgentRun; title?: string; parent?: AgentRun; elapsed: string;
+  row?: AgentRun; title?: string; parent?: AgentRun; elapsed?: string;
 }) {
-  const [review, setReview] = useState<{ id: number; row: AgentRun; title?: string; parent?: AgentRun; elapsed: string }>();
+  const [review, setReview] = useState<{ id: number; row: AgentRun; title?: string; parent?: AgentRun; elapsed?: string }>();
   const [activity, setActivity] = useState<HTMLDivElement | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const [focused, setFocused] = useState(false);
   const finished = !!row && isTerminal(row.status);
-  const unavailable = readOnly ?? reason(client) ?? (finished ? "this run has finished." : undefined);
+  const unavailable = readOnly ?? reason(client);
+  const shown = !finished || focused;
   return <>
-    {row && <div className="agents-cancel">
+    {row && shown && <div className="agents-cancel">
       {/* a finished run has no cancel; aria-disabled and kept while focused: a cancelled run turns terminal while this
           button has focus, and focus must stay in the dialog */}
-      {(!finished || focused) && <button ref={opener} type="button" aria-disabled={!!unavailable || undefined} data-write-surface={WRITE_SURFACE.agentsCancel}
+      <button ref={opener} type="button" aria-disabled={!!unavailable || finished || undefined} data-write-surface={WRITE_SURFACE.agentsCancel}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-        onClick={() => { if (!unavailable) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed }); }}>cancel run</button>}
+        onClick={() => { if (!unavailable && !finished) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed }); }}>cancel run</button>
       {unavailable && <small>{unavailable}</small>}
     </div>}
     <div ref={setActivity} className="agents-cancel-activity" />
@@ -101,13 +102,13 @@ export function AgentCancel({ client, owner, refresh, row, title, parent, elapse
 }
 
 function CancelReview({ row, title, parent, elapsed, owner, refresh, activity, opener }: {
-  row: AgentRun; title?: string; parent?: AgentRun; elapsed: string; owner: ChildControls; refresh: () => void;
+  row: AgentRun; title?: string; parent?: AgentRun; elapsed?: string; owner: ChildControls; refresh: () => void;
   activity?: HTMLElement; opener: () => HTMLElement | null;
 }) {
   return <Confirmation level={2} title={t("cancel this run?")} action={t("cancel run")} keep={t("keep run")}
     effect={display(`${row.agentType || "agent"} · ${row.description || "no task summary"}`)}
     scope={display(`${title || "this chat"}${row.parentRunId ? ` · parent ${runDisplayId(parent?.agentType, row.parentRunId)}` : ""}`, 750)}
-    current={display([stateWord(row.status), row.turnsUsed === undefined ? "" : `${row.turnsUsed} turns`, elapsed].filter(Boolean).join(" · "))}
+    current={display([`${stateWord(row.status)} ${elapsed ?? ""}`.trim(), row.turnsUsed === undefined ? "" : `${row.turnsUsed} turns`].filter(Boolean).join(" · "))}
     after={t("the run stops at its next safe point.")}
     undo={t("no. work in progress can be lost; the transcript stays; a new run starts from zero.")}
     proof={{ kind: "name", name: runDisplayId(row.agentType, row.runId) }} external={{ opener }} activity={activity}

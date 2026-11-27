@@ -32,7 +32,7 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
   const { report, refreshing, warning } = snapshot;
   const rows = report?.rows ?? [];
   const id = chosenRun ? rowKey(sessionId, chosenRun) : undefined;
-  // the transcript row of the chosen run is live; the report is as old as its last refresh
+  // the transcript row of the chosen run adds its waiting state and reply, and says when the run ended after the report
   const liveId = `sub-agent:${chosenRun}`;
   const liveItem = useSyncExternalStore(useCallback((fn: () => void) => store && chosenRun ? store.subscribe(liveId, fn) : () => {}, [store, liveId]),
     () => chosenRun ? store?.getItem(liveId) : undefined);

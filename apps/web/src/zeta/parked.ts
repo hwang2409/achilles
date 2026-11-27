@@ -8,13 +8,13 @@ import { CONTROLLED_RETRIES, CONTROLLED_RETRY_MS, controlledRetry, isResidentLim
  */
 export type ParkedRow = { session_id: string; state: "running" | "tool" | "idle"; pending_approvals: number };
 type Binding = ReturnType<typeof pageBinding>;
-type Owner = { rows: readonly ParkedRow[]; listeners: Set<() => void> };
+type Owner = { rows: readonly ParkedRow[]; listeners: Set<() => void>; closed: Set<(sessionId: string) => void> };
 
 const NONE: readonly ParkedRow[] = [];
 const owners = new WeakMap<object, Owner>();
 const ownerOf = (client: object) => {
   let owner = owners.get(client);
-  if (!owner) owners.set(client, owner = { rows: NONE, listeners: new Set() });
+  if (!owner) owners.set(client, owner = { rows: NONE, listeners: new Set(), closed: new Set() });
   return owner;
 };
 
@@ -83,6 +83,7 @@ export function takeParkedEvent(client: object | null, text: string): boolean {
   if (frame.params.data?.state === "closed") {
     void writeRowState(sessionId, rowState(before, { from: "closed" }).write);
     if (index >= 0) publish(client, rows.filter((row) => row.session_id !== sessionId));
+    for (const listener of [...ownerOf(client).closed]) listener(sessionId);
     return true;
   }
   const row = parseRow({ ...frame.params.data, session_id: sessionId });
@@ -130,15 +131,25 @@ export async function stopParked(client: ZetaClient, sessionId: string, bindingO
   return true;
 }
 
-/** Resolves once `sessionId` is not one of this tab's parked chats (zeta closed it, or never parked it), or after `ms`. */
-export function parkedLeft(client: object, sessionId: string, ms: number, clock: Pick<typeof globalThis, "setTimeout" | "clearTimeout"> = globalThis): Promise<void> {
-  return new Promise((resolve) => {
-    const check = () => { if (!parkedRows(client).some((row) => row.session_id === sessionId)) done(); };
-    const timer = clock.setTimeout(() => done(), ms);
-    const unsubscribe = subscribeParked(client, check);
-    function done() { clock.clearTimeout(timer); unsubscribe(); resolve(); }
-    check();
+/**
+ * Watches for zeta's `closed` event of this tab's parked chat `sessionId`. zeta sends it once the chat no longer holds a
+ * resident slot (a status read stops listing a closing chat earlier). Start it before the stop, so the event cannot
+ * pass unseen; `wait` resolves on the event (also one seen before) or after `ms`; `stop` ends the watch.
+ */
+export function watchClosed(client: object, sessionId: string, clock: Pick<typeof globalThis, "setTimeout" | "clearTimeout"> = globalThis) {
+  const { closed } = ownerOf(client);
+  let seen = false;
+  let wake = () => {};
+  const listener = (id: string) => { if (id === sessionId) { seen = true; wake(); } };
+  closed.add(listener);
+  const stop = () => { closed.delete(listener); };
+  const wait = (ms: number) => new Promise<void>((resolve) => {
+    const timer = clock.setTimeout(done, ms);
+    function done() { clock.clearTimeout(timer); stop(); resolve(); }
+    wake = done;
+    if (seen) done();
   });
+  return { wait, stop };
 }
 
 type Reclaim = { run: Promise<void>; skipped: string | null };
