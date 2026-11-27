@@ -76,8 +76,10 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-held-notice { position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; flex: none; gap: 8px 16px; padding: 10px var(--g1-page-gutter); border-bottom: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); color: var(--fulcrum-fg); }
 .chat-held-notice > p { flex: 1 1 16rem; min-width: 0; margin: 0; text-wrap: pretty; }
 .chat-held-actions { display: flex; flex: none; gap: 8px; }
-.chat-held-actions button { min-height: 32px; padding: 0 12px; }
 .chat-held-actions button[aria-disabled="true"] { cursor: wait; opacity: .65; }
+.stable-text { display: inline-grid; }
+.stable-text > * { grid-area: 1 / 1; }
+.stable-text > [aria-hidden="true"] { visibility: hidden; }
 fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .approval-control { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .approval-control button { min-height: 40px; padding: 0 12px; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }

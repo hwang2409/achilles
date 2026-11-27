@@ -132,8 +132,8 @@ const initialPageListState = initialListState<PageLink, null>(null);
 const initialChatListState = initialListState<Chat, number>(0);
 const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : state.loading || state.items === null ? "loading" : "ready";
 
-// heldChatId: the open chat another tab controls; only that tab renames it
-export function useAgentNavAdapter({ sessionId, waiting, canWrite, heldChatId = null, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: { sessionId: string | null; waiting: number; canWrite: boolean; heldChatId?: string | null; onSelectChat?: (chat: Chat) => void; onRenameChat?: (chat: Chat, title: string) => void; refreshKey: number; pageRefreshKey: number }) {
+// heldChatId: the open chat another tab controls; only that tab renames it, and F2 on its row calls onHeldRename
+export function useAgentNavAdapter({ sessionId, waiting, canWrite, heldChatId = null, onHeldRename, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: { sessionId: string | null; waiting: number; canWrite: boolean; heldChatId?: string | null; onHeldRename?: () => void; onSelectChat?: (chat: Chat) => void; onRenameChat?: (chat: Chat, title: string) => void; refreshKey: number; pageRefreshKey: number }) {
   const requestFocus = useFocusAfterCommit();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -285,7 +285,7 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, heldChatId = 
       const projectedBuild = (chat: Chat) => chat.purpose === "page_build" ? builds.find((row) => row.chat.session_id === chat.session_id) : undefined;
       return <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>recent chats</span></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite && chat.session_id !== heldChatId ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite && chat.session_id !== heldChatId ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite && chat.session_id !== heldChatId ? onRenameChat : undefined} onRenameRefused={chat.session_id === heldChatId ? onHeldRename : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite && chat.session_id !== heldChatId ? onRenameChat : undefined} onRenameRefused={chat.session_id === heldChatId ? onHeldRename : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>;
     },
@@ -298,7 +298,7 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, heldChatId = 
   };
 }
 
-function ChatRow({ chat, build, onScreen, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; build?: BuildRow; onScreen?: (id: string, shown: boolean) => void; current: boolean; active: boolean; index?: number; query: string; onSelect?: (chat: Chat) => void; onRename?: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
+function ChatRow({ chat, build, onScreen, current, active, index, query, onSelect, onRename, onRenameRefused, onRenameStart, onRenameEnd }: { chat: Chat; build?: BuildRow; onScreen?: (id: string, shown: boolean) => void; current: boolean; active: boolean; index?: number; query: string; onSelect?: (chat: Chat) => void; onRename?: (chat: Chat, title: string) => void; onRenameRefused?: () => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
   const rename = useInlineRename();
   const seen = useOnScreen(chat.purpose === "page_build" ? chat.session_id : undefined, onScreen);
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
@@ -319,9 +319,10 @@ function ChatRow({ chat, build, onScreen, current, active, index, query, onSelec
   }
   // F2 or the pencil both start a rename the same way, so focus returns to the row either way (onRenameStart marks it)
   const startRename = (event: { preventDefault(): void; stopPropagation(): void }) => {
-    if (!onRename) return;
+    if (!onRename && !onRenameRefused) return;
     event.preventDefault();
     event.stopPropagation();
+    if (!onRename) return onRenameRefused!();
     onRenameStart(chat.session_id);
     rename.start(chat.title?.trim() || chat.first_title?.trim() || "", (value) => onRename(chat, value));
   };

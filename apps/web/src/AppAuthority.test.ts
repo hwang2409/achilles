@@ -1154,10 +1154,11 @@ test.each([
   ["header.rename and sidebar.rename", heldElsewhere(), async (app: RenderResult, writes: string[]) => {
     const title = select(app, tag("header.rename"));
     expect(title.getAttribute("role")).toBeNull();
-    expect(title.getAttribute("title")).toBe(controlledReason);
     await click(title);
     await keydown(window, "F2");
     expect(app.container.querySelector(".chat-title-edit")).toBeNull();
+    // the refusal is said inline, in the notice, not only in a tooltip
+    expect(app.getByText("rename this chat in the tab that has it open.")).toBeTruthy();
     expect(app.container.querySelector(`[data-chat-id="session"] ${tag("sidebar.rename")}`)).toBeNull();
     expect(chatWrites(writes)).toEqual([]);
   }],
@@ -1196,7 +1197,7 @@ test("try again shows it is trying, then says the chat is still held", async () 
     await click(pending);
     expect(writes.filter((write) => write === "resume")).toHaveLength(5);
     await act(async () => release());
-    await app.findByText("this chat is still open in another tab. you can read it here.", {}, { timeout: 3000 });
+    await app.findByText("still open in another tab. you can read it here.", {}, { timeout: 3000 });
     expect(app.getByRole("button", { name: "try again" })).toBeTruthy();
     expect(writes.filter((write) => write === "resume")).toHaveLength(8);
   });

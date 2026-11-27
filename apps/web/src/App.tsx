@@ -227,6 +227,11 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   useEffect(() => { if (!ready?.controlledElsewhere) setHeldRetry(null); }, [ready?.controlledElsewhere]);
   const retryingHeld = Boolean(heldRetry && ready?.lease === heldRetry.lease);
   const stillHeld = Boolean(heldRetry && ready?.sessionId === heldRetry.sessionId && ready.lease !== heldRetry.lease);
+  // F2 or a click on a held chat's title says why it does not rename, in the notice
+  const [renameRefused, setRenameRefused] = useState(false);
+  useEffect(() => setRenameRefused(false), [ready?.sessionId, ready?.controlledElsewhere]);
+  const refuseRename = () => setRenameRefused(true);
+  const heldText = renameRefused ? HELD_TEXT.rename : stillHeld ? HELD_TEXT.still : HELD_TEXT.open;
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
   const activePage = ready?.page ?? empty?.page ?? null;
@@ -396,7 +401,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const keptNew = active.creationError && active.creationPageId ? chatQueues.unsent(`new:${active.creationPageId}`) : [];
   const state = headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent));
   const nav = useAgentNavAdapter({
-    sessionId: ready?.sessionId ?? null, waiting, canWrite, heldChatId: ready?.controlledElsewhere ? ready.sessionId : null, onSelectChat: active.selectChat,
+    sessionId: ready?.sessionId ?? null, waiting, canWrite, heldChatId: ready?.controlledElsewhere ? ready.sessionId : null, onHeldRename: refuseRename, onSelectChat: active.selectChat,
     onRenameChat: (chat, text) => { if (canWrite) void active.rename(chat.session_id, text); },
     refreshKey: active.listRefresh, pageRefreshKey: pageRefreshNonce,
   });
@@ -449,7 +454,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
-    {ready?.controlledElsewhere && <div className="chat-held-notice" role="status"><p>{stillHeld ? "this chat is still open in another tab. you can read it here." : "this chat is open in another tab. you can read it here."}</p><span className="chat-held-actions"><button type="button" onClick={() => void active.newChat()} disabled={!canWrite}>new chat</button><button type="button" aria-disabled={retryingHeld || undefined} onClick={() => { if (retryingHeld) return; setHeldRetry({ sessionId: ready.sessionId, lease: ready.lease }); active.retryAttachment(); }}>{retryingHeld ? "trying…" : "try again"}</button></span></div>}
+    {ready?.controlledElsewhere && <div className="chat-held-notice" role="status"><p><StableText text={heldText} reserve={Object.values(HELD_TEXT)} /></p><span className="chat-held-actions"><button type="button" className="ui-button" onClick={() => void active.newChat()} disabled={!canWrite}>new chat</button><button type="button" className="ui-button" aria-disabled={retryingHeld || undefined} onClick={() => { if (retryingHeld) return; setRenameRefused(false); setHeldRetry({ sessionId: ready.sessionId, lease: ready.lease }); active.retryAttachment(); }}><StableText text={retryingHeld ? "trying…" : "try again"} reserve={["try again", "trying…"]} /></button></span></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
@@ -488,7 +493,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
     workspace: landing ? undefined : { canWrite, serverForcesAsk, createMode },
-    header: !landing && activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} renameReason={ready?.controlledElsewhere ? chatReadOnlyReason : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
+    header: !landing && activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onRenameRefused={ready?.controlledElsewhere ? refuseRename : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
     children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} /> : content,
   });
 }
@@ -554,10 +559,21 @@ function runStateLabel(state: string, queued: number, building: boolean) {
   return state === "approval" ? "needs you" : state === "running" && building ? "building" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state;
 }
 
-function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, renameReason, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; renameReason?: string; onHistory: (opener: HTMLElement | null) => void }) {
+const HELD_TEXT = {
+  open: "this chat is open in another tab. you can read it here.",
+  still: "still open in another tab. you can read it here.",
+  rename: "rename this chat in the tab that has it open.",
+};
+
+// sized to the largest of its texts, so a text change does not move the layout; only the shown text is read out
+function StableText({ text, reserve }: { text: string; reserve: string[] }) {
+  return <span className="stable-text"><span>{text}</span>{reserve.filter((other) => other !== text).map((other) => <span key={other} aria-hidden="true">{other}</span>)}</span>;
+}
+
+function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, onRenameRefused, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; onRenameRefused?: () => void; onHistory: (opener: HTMLElement | null) => void }) {
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
-  const startRename = () => { if (onRename && sessionId) rename.start(title === "new chat" ? "" : title, (value) => onRename(sessionId, value)); };
+  const startRename = () => { if (!onRename) return onRenameRefused?.(); if (sessionId) rename.start(title === "new chat" ? "" : title, (value) => onRename(sessionId, value)); };
   // enter or esc unmounts the editor and drops focus to <body>; hand it back to the title. deferred past the focus
   // change, so a blur commit by a click elsewhere keeps the clicked control's focus.
   const wasEditing = useRef(false);
@@ -571,7 +587,7 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRenam
   // a chat switch closes the editor; its draft never moves to the next chat
   useEffect(() => rename.cancel, [sessionId]);
   useEffect(() => {
-    if (!onRename) return;
+    if (!onRename && !onRenameRefused) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "F2" || rename.editing || isEditableTarget(event)) return;
       event.preventDefault();
@@ -579,10 +595,10 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRenam
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [onRename, rename.editing, sessionId, title]);
+  }, [onRename, onRenameRefused, rename.editing, sessionId, title]);
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
-    : <strong ref={titleControl} title={renameReason ?? title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
+    : <strong ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   const routeLabel = page.route === "/" ? "Home" : page.title;
   if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
   return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span><button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
