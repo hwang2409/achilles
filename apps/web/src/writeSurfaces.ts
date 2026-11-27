@@ -1,4 +1,5 @@
 export const READ_ONLY_REASON = "this tab is read-only: too many tabs control zeta. take control to make changes";
+export const CHAT_CONTROLLED_REASON = "this chat is open in another tab. write there, or start a new chat here.";
 
 export const WRITE_SURFACE = {
   agentsSend: "agents.send",

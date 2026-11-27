@@ -500,22 +500,14 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
     await field(a).fill("first message in tab a", wait);
     await field(a).press("Enter", wait);
     await a.getByText("you said: first message in tab a", { exact: true }).waitFor(wait);
-    // the other chat's tab closed just before this step, and zeta may not have handled that socket close yet.
-    // shortcut: the gate reloads on `session_controlled`; slice 3 replaces this with the app's own bounded retry.
-    for (let attempt = 0; ; attempt++) {
-      const seen = controlled[1]!;
-      await b.goto(otherChatUrl);
-      let settled = false;
-      const attached = b.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait }).then(() => true, (error) => { if (settled) return false; throw error; });
-      const refused = (async () => { while (!settled && controlled[1] === seen) await Bun.sleep(50); return false; })();
-      const ok = await Promise.race([attached, refused]).finally(() => { settled = true; });
-      if (ok) break;
-      if (attempt === 4) throw new Error("tab b's chat stayed session_controlled after 5 loads");
-      await Bun.sleep(500);
-    }
-    if (controlled[1]) console.log(`two tabs: tab b's first load met session_controlled ${controlled[1]} time(s) while zeta released the closed tab; it reloaded`);
+    // the other chat's tab closed just before this step, and zeta may not have handled that socket close yet: the
+    // app's own bounded `resume` retry covers that race, so one load must open the chat writable
+    await b.goto(otherChatUrl);
+    await b.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait });
     await field(b).waitFor(wait);
+    if (await b.getByText(SAME_CHAT_NOTICE).count()) throw new Error(`tab b's chat stayed session_controlled after the app's retries (${controlled[1]} refusals)`);
     if (!await field(b).isEditable()) throw new Error("tab b opened its chat read-only");
+    if (controlled[1]) console.log(`two tabs: tab b's load met session_controlled ${controlled[1]} time(s) while zeta released the closed tab; the app's retry opened it`);
     const chats = await Promise.all(tabs.map((tab) => tab.locator("[data-session-id]").first().getAttribute("data-session-id")));
     if (!chats[0] || !chats[1] || chats[0] === chats[1]) throw new Error(`two tabs did not open two chats: ${JSON.stringify(chats)}`);
     await field(a).fill("together from a", wait);
@@ -534,5 +526,58 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
     const missing = features.map((list, index) => list.includes("multi_controller") ? null : index).filter((index) => index !== null);
     if (missing.length) throw new Error(`hello did not echo multi_controller for tab ${missing.join(", ")}`);
     console.log("two tabs: two chats sent at once, zeta ran both turns, each tab showed only its own reply, both hellos echoed multi_controller");
+    await gateSameChatReadOnly(browser, a);
   } finally { await Promise.all(tabs.map((tab) => tab.close())); }
+}
+
+const SAME_CHAT_NOTICE = "this chat is open in another tab. you can read it here.";
+
+/**
+ * gate step 2: tab C opens the chat tab A controls. zeta refuses C's `resume` (session_controlled) and C reads the chat
+ * live: the notice shows, the composer is read-only, the transcript is there, and A's next reply streams into C. after
+ * the refusal C never sends the page credential or a page binding.
+ */
+async function gateSameChatReadOnly(browser: Browser, a: Page) {
+  const wait = { timeout: 20_000 };
+  const c = await browser.newPage();
+  const sent: { method?: string; id?: unknown; raw: string }[] = [];
+  const refused = new Set<unknown>();
+  const refusals: string[] = [];
+  c.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => { const raw = String(payload); try { const frame = JSON.parse(raw); sent.push({ method: frame.method, id: frame.id, raw }); } catch { sent.push({ raw }); } });
+    socket.on("framereceived", ({ payload }) => { try { const frame = JSON.parse(String(payload)); if (frame.error?.data?.code === "session_controlled") { refused.add(frame.id); refusals.push(String(payload)); } } catch { /* not json */ } });
+  });
+  try {
+    const url = new URL(a.url());
+    const chat = url.searchParams.get("chat");
+    if (!chat) throw new Error(`tab a's url names no chat: ${a.url()}`);
+    await c.goto(url.href);
+    await c.getByText(SAME_CHAT_NOTICE, { exact: true }).waitFor(wait);
+    const field = c.getByRole("textbox", { name: "message", exact: true });
+    if (await field.isEditable()) throw new Error("tab c can write to the chat tab a controls");
+    await c.getByText("you said: together from a", { exact: true }).waitFor(wait);
+    if (await c.getByRole("button", { name: "take control" }).count()) throw new Error("tab c offered a take-over zeta does not support");
+    if (!await c.getByRole("button", { name: "new chat", exact: true }).first().isEnabled()) throw new Error("tab c's new chat is off");
+    // try again while tab a still holds the chat: zeta refuses again, and the notice says the chat is still held
+    await c.getByRole("button", { name: "try again", exact: true }).click(wait);
+    await c.getByText("still open in another tab. you can read it here.", { exact: true }).waitFor(wait);
+    if (await field.isEditable()) throw new Error("tab c's try again made the held chat writable");
+    const composer = a.getByRole("textbox", { name: "message", exact: true });
+    await composer.fill("after tab c joined", wait);
+    await composer.press("Enter", wait);
+    await c.getByText("you said: after tab c joined", { exact: true }).waitFor(wait);
+    const credential = await c.evaluate(async () => {
+      const page = await (await fetch("/api/pages/home", { cache: "no-store" })).json() as { id: string };
+      return (await (await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" })).json() as { credential: string }).credential;
+    });
+    const resumes = sent.filter((frame) => frame.method === "resume");
+    if (!resumes.length || resumes.some((frame) => !refused.has(frame.id))) throw new Error(`tab c's resume was not refused session_controlled: ${resumes.length} sent, ${refused.size} refused`);
+    // zeta never echoes a binding: the refusal names only the session (and, optionally, bounded holder facts)
+    if (refusals.some((raw) => raw.includes(credential) || raw.includes("Authorization") || raw.includes("mcp_bindings"))) throw new Error("a session_controlled refusal echoed the page binding");
+    const after = sent.slice(sent.lastIndexOf(resumes.at(-1)!) + 1);
+    if (!after.some((frame) => frame.method === "session_history_and_subscribe" && frame.raw.includes(chat))) throw new Error("tab c did not join tab a's chat after the refusal");
+    const leak = after.find((frame) => frame.raw.includes(credential) || frame.raw.includes("mcp_bindings") || frame.method === "resume");
+    if (leak) throw new Error(`tab c sent a page binding after the refusal: ${leak.method ?? "frame"}`);
+    console.log(`same chat in two tabs: tab c got session_controlled (${resumes.length} resume tries), read the chat live with the notice and a read-only composer, saw tab a's next reply, and sent no page binding after the refusal`);
+  } finally { await c.close(); }
 }

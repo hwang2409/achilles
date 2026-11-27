@@ -56,12 +56,19 @@ export function creationApprovalMode(serverMode: string | null | undefined, auto
 }
 
 export class SessionNotFoundError extends Error {}
-/** zeta refuses `resume` (-32014, `data.code: "session_controlled"`) while another client holds the chat. */
+/** zeta refuses `resume` (-32014, `data.code: "session_controlled"`) while another client, such as another tab, holds the chat. */
 export class SessionControlledError extends Error {
-  constructor() { super("this chat is open in another tab."); }
+  constructor(readonly sessionId: string) { super("this chat is open in another tab."); }
 }
+// a reload can reach zeta before zeta has seen the old page's socket close; the chat is free a moment later, so retry
+// a refusal that names this chat
+export const CONTROLLED_RETRIES = 3;
+const CONTROLLED_RETRY_MS = 500;
+// the retry pause; tests replace `wait` so a held chat does not sleep for real
+export const controlledRetry = { wait: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)) };
 
-export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null, current: () => boolean = () => true) {
+export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null, current: () => boolean = () => true, retries = CONTROLLED_RETRIES) {
+  let controlledRetries = 0;
   let name: string | null = null;
   let sessionCwd: string | null = null;
   // With `resume_attach`, `resume` of this chat during its live turn (for example an approval wait after a reload)
@@ -69,7 +76,7 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
   // transcript and pending approval come from status and history, and `rebind` re-sends the page binding when idle.
   // With `turn_reconnect`, a running turn kept after a reload reattaches through this same `resume`.
   let rebind = !supportsFeature(client, "resume_attach") && await runningSession(client) === id;
-  for (let retried = false; !rebind; retried = true) {
+  for (let retried = false; !rebind;) {
     try {
       const resumed = await rebindPage(client, id, pageBinding(credential, cwd)) as { session?: { name?: string | null; cwd?: unknown } };
       name = resumed.session?.name ?? null;
@@ -77,16 +84,22 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
       sessionCwd = typeof resumed.session?.cwd === "string" ? resumed.session.cwd : null;
       break;
     } catch (caught) {
-      const reason = (caught as { data?: { code?: string } }).data?.code;
+      const { code: reason, session_id: refusedId } = (caught as { data?: { code?: string; session_id?: string } }).data ?? {};
       if (reason === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
       if (reason === "session_owned") throw new Error(sessionOwned);
-      if (reason === "session_controlled") throw new SessionControlledError();
       if (isResidentLimit(caught)) throw new TooManyChatsError();
+      if (reason === "session_controlled") {
+        if (refusedId !== id || ++controlledRetries > retries) throw new SessionControlledError(id);
+        await controlledRetry.wait(CONTROLLED_RETRY_MS);
+        if (!current()) throw aborted();
+        continue;
+      }
       if ((caught as { code?: unknown }).code !== -32004) throw caught;
       const running = await runningSession(client);
       rebind = running === id;
       // null: the other turn ended between `resume` and `status`, so zeta is idle now and one more `resume` works
       if (!rebind && (running !== null || retried)) throw new ChatBusyError(running);
+      retried = true;
     }
   }
   if (!current()) throw aborted();
