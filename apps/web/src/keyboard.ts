@@ -28,6 +28,20 @@ export const restoreFocus = (...candidates: Array<Element | null>) => {
   restorableFocus(...candidates)?.focus();
 };
 
+// the element the user last focused: a re-render that replaces a field leaves focus on <body>, yet the user was there
+let lastFocus: Element | null = null;
+if (typeof document !== "undefined") document.addEventListener("focusin", (event) => { lastFocus = event.target as Element; }, true);
+const userFocus = () => { const at = document.activeElement; return (!at || at === document.body) && lastFocus && !lastFocus.isConnected ? lastFocus : at; };
+const textField = (element: Element | null): element is HTMLElement => element instanceof HTMLElement && (element.isContentEditable || element.matches("textarea, input"));
+// the one rule for composer focus through holds, swaps, stops and notices: the user is typing when focus is in a text field,
+// or was in one a re-render replaced. a notice then never takes focus (userTyping), and a composer that becomes editable,
+// or replaces the one the user typed in, takes focus back (returnFocusToComposer). a hold keeps its field focusable.
+export const userTyping = () => textField(userFocus());
+export const returnFocusToComposer = (field: HTMLElement | null | undefined) => {
+  const was = userFocus();
+  if (field && was !== field && textField(was) && was.closest('[data-part="composer"]')) field.focus({ preventScroll: true });
+};
+
 const composerField = () => document.querySelector('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
 // a control that unmounts or disables once used hands keyboard focus (Enter/Space: click detail 0) to the composer, not to <body>.
 // a mouse click or tap leaves focus alone: focusing the textarea on a tap opens the soft keyboard over the transcript

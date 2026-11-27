@@ -30,7 +30,7 @@ import { HistoryDialog } from "./page/HistoryDialog";
 import { useRecordWrites } from "./page/RecordForm";
 import { PageView } from "./page/PageView";
 import { EmptyChat } from "./EmptyChat";
-import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
+import { isEditableTarget, keyboardFocusToComposer, returnFocusToComposer, userTyping, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
@@ -107,6 +107,8 @@ function usePageChatSheet() {
   return { narrow: matches, open, setOpen };
 }
 
+// the composer's text field: the plain textarea or the vim editor
+const FIELD = 'textarea[aria-label="message"], [role="textbox"]';
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps & { held?: boolean }; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
@@ -122,10 +124,13 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
-  useLayoutEffect(() => { if (focus && !document.querySelector('[role="dialog"][aria-modal="true"]') && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
+  // a hold's end, or a swap that replaced the field the user typed in, gives focus back to this composer
+  const editable = props.state !== "read-only";
+  useLayoutEffect(() => { if (editable) returnFocusToComposer(slot.current?.querySelector<HTMLElement>(FIELD)); }, [editable]);
+  useLayoutEffect(() => { if (focus && !document.querySelector('[role="dialog"][aria-modal="true"]') && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>(FIELD)?.focus({ preventScroll: true }); }, [focus]);
   useLayoutEffect(() => {
     if (!focusRequest) return;
-    const field = slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]');
+    const field = slot.current?.querySelector<HTMLElement>(FIELD);
     if (!field || document.activeElement === field) return;
     field.focus({ preventScroll: true });
     // the caret goes after the draft, so typing continues it
@@ -141,7 +146,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     onActivity,
     questionWaiting,
     onCommand: (command: Parameters<typeof commands.run>[0]) => {
-      const field = slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]');
+      const field = slot.current?.querySelector<HTMLElement>(FIELD);
       commandOpener.current = field ?? null;
       return commands.run(command, commandOpener.current);
     },
@@ -587,10 +592,6 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
   </>;
 }
 
-// the element focus was on last: a field a re-render replaced leaves focus on <body>, yet the user was typing there
-let lastFocus: Element | null = null;
-if (typeof document !== "undefined") document.addEventListener("focusin", (event) => { lastFocus = event.target as Element; }, true);
-
 // zeta refused a swap: this tab keeps 3 chats running (parked_limit), or zeta is full (resident_limit). name the chats
 // that hold the slots, and offer to stop the oldest (zeta's status order) and try the swap again, or to stay. the notice
 // is a choice, not an error; focus moves into it, so the keyboard reaches its buttons next. it stays while a stop and its
@@ -602,10 +603,8 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   const focused = useRef(false);
   useEffect(() => {
     const at = document.activeElement;
-    const was = (!at || at === document.body) && lastFocus && !lastFocus.isConnected ? lastFocus : at;
     // never out of a text field: the user is typing (the notice can mount again during a stop, so the ref alone misses it)
-    const typing = was instanceof HTMLElement && (was.isContentEditable || was.matches("textarea, input"));
-    if (typing || (focused.current && at && at !== document.body && !element.current?.contains(at))) return;
+    if (userTyping() || (focused.current && at && at !== document.body && !element.current?.contains(at))) return;
     focused.current = true;
     element.current?.focus({ preventScroll: true });
   }, [kind, stop?.phase]);

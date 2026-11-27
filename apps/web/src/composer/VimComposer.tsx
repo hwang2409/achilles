@@ -31,7 +31,8 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const viewRef = useRef<EditorView | null>(null);
   const initialDefaultValue = useRef(defaultValue).current;
   const focusedRef = useRef(true);
-  const editable = useRef(new Compartment()).current;
+  // a hold makes the editor read-only, not uneditable: it keeps focus (and its caret) through the hold
+  const readOnly = useRef(new Compartment()).current;
   const { model, edit, submit: submitDraft, stop, retry, restore: restoreDraft, cancel, getModel } = useComposerDelivery(props);
   // enter and edit move text out of and into the box; the editor owns its document, so follow the model here
   const followModel = () => {
@@ -58,8 +59,8 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: defaultValue } });
   }, [defaultValue]);
   useLayoutEffect(() => {
-    viewRef.current?.dispatch({ effects: editable.reconfigure(EditorView.editable.of(state !== "read-only")) });
-  }, [editable, state]);
+    viewRef.current?.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(state === "read-only")) });
+  }, [readOnly, state]);
 
   useLayoutEffect(() => {
     if (!host.current) return;
@@ -76,7 +77,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       state: EditorState.create({
         doc: initialDefaultValue,
         extensions: [
-          vim(), history(), drawSelection(), EditorView.lineWrapping, editable.of(EditorView.editable.of(state !== "read-only")),
+          vim(), history(), drawSelection(), EditorView.lineWrapping, readOnly.of(EditorState.readOnly.of(state === "read-only")),
           EditorView.contentAttributes.of({ "aria-label": label, "aria-describedby": `${id}-mode ${id}-hint ${id}-message`, "data-placeholder": placeholder ?? "" }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) edit(update.state.doc.toString());
@@ -98,7 +99,8 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     const onFocus = () => { focusedRef.current = true; setFocused(true); syncVimState(view); };
     const onBlur = () => { focusedRef.current = false; setFocused(false); };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (modelRef.current.state === "read-only") return;
+      // held: no key reaches vim (its commands edit through dispatch, which read-only does not stop); cmd shortcuts and Tab pass
+      if (modelRef.current.state === "read-only") { if (event.key !== "Tab" && !event.metaKey) { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); } return; }
       const modeBefore = vimMode(view);
       const action = enterAction({ key: event.key, shiftKey: event.shiftKey, isComposing: event.isComposing, keyCode: event.keyCode, mode: modeBefore });
       if (action !== "ignore") {
@@ -152,7 +154,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       cm?.off("vim-command-done", commandDone);
       view.destroy(); viewRef.current = null;
     };
-  }, [edit, editable, id, initialDefaultValue, label, placeholder]);
+  }, [edit, readOnly, id, initialDefaultValue, label, placeholder]);
 
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";

@@ -23,7 +23,7 @@ type Authority = "observer" | "controller";
 // `slot`: like zeta, one controller at a time across every socket (a second controller hello gets -32001); `roles`
 // records each hello role.
 // `freed`: set it to let later controller hellos of an "observer" app through (a slot frees up after load).
-type Options = { freed?: { current: boolean }; path?: string; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
+type Options = { vim?: boolean; freed?: { current: boolean }; path?: string; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   options.roles?.splice(0);
@@ -94,7 +94,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
         : path.includes("/records/") ? [] : { ...page, ...options.page });
     }) as typeof fetch;
     (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(`http://fixture.invalid${options.path ?? "/"}${options.attached ? "?chat=session" : ""}`);
-    updateSettings({ vim: false, size: 14 });
+    updateSettings({ vim: options.vim ?? false, size: 14 });
     const { SurfaceRouter } = await import("./surface/SurfaceRouter");
     app = render(createElement(SurfaceRouter));
     await act(async () => {});
@@ -1401,4 +1401,97 @@ test("a pending swap holds the kept chat's composer read-only and says so; a ref
     expect(document.activeElement === field, "focus left the composer when the hold ended").toBe(true);
     expect([field.selectionStart, field.selectionEnd], "the caret moved").toEqual([2, 5]);
   });
+});
+
+// the one composer focus rule (keyboard.ts: returnFocusToComposer, userTyping), in both composers: through a hold, a
+// refused or successful swap and a stop, focus ends in the shown chat's composer, and keys typed there land.
+// (ux #337: vim lost focus to the notice at a hold, v-1; plain lost it after a successful held swap, f-1)
+describe("composer focus through holds, swaps and stops", () => {
+  const parkedLimit = { error: { code: -32004, message: "parked limit", data: { reason: "parked_limit", parked: ["parked"] } } };
+  const opened = { result: { session: { session_id: "fresh" } } };
+  // answer: zeta answers every pending new_session, and later ones the same (a refused swap is asked twice) until a stop.
+  // stop: the user clicks "stop … and open new chat" (again, until this tab has seen the parked chat in status)
+  type Steps = { answer: (value: object) => Promise<void>; stop: () => Promise<void>; focusField: () => Promise<void>; typeHeld: () => Promise<void> };
+  const events: Array<[string, (app: RenderResult, steps: Steps) => Promise<void>]> = [
+    ["refused swap", async (app, { answer, focusField, typeHeld }) => {
+      await click(select(app, tag("shell.new-chat")));
+      await waitFor(() => select(app, '[data-part="composer"][data-held]'));
+      await focusField();
+      await typeHeld();
+      await answer(parkedLimit);
+      await waitFor(() => select(app, ".limit-notice"), { timeout: 4000 });
+    }],
+    ["hold start and end during the stop wait", async (app, { answer, stop, focusField, typeHeld }) => {
+      await click(select(app, tag("shell.new-chat")));
+      await answer(parkedLimit);
+      await stop();
+      // the user clicks back into the composer and types through the stop and the repeated swap
+      await focusField();
+      await waitFor(() => select(app, '[data-part="composer"][data-held]'), { timeout: 4000 });
+      await typeHeld();
+      await answer(parkedLimit);
+    }],
+    ["successful held swap", async (app, { answer, focusField, typeHeld }) => {
+      await click(select(app, tag("shell.new-chat")));
+      await waitFor(() => select(app, '[data-part="composer"][data-held]'));
+      await focusField();
+      await typeHeld();
+      await answer(opened);
+    }],
+    ["stop and switch", async (app, { answer, stop }) => {
+      await click(select(app, tag("shell.new-chat")));
+      await answer(parkedLimit);
+      await stop();
+      await waitFor(() => select(app, '[data-part="composer"][data-held]'), { timeout: 4000 });
+      await answer(opened);
+    }],
+  ];
+  test.each((["plain", "vim"] as const).flatMap((composer) => events.map(([event, run]) => [composer, event, run] as const)))("%s composer, %s", async (composer, _event, run) => {
+    const answers: Array<(value: object) => void> = [];
+    let standing: object | null = null;
+    await withApp("controller", { vim: composer === "vim", attached: true, extraChat: { ...chat, session_id: "parked", title: "Parked chat" }, rpc: {
+      new_session: () => standing ?? new Promise<object>((resolve) => { answers.push(resolve); }) as never,
+      // the stopped chat closed: it is no longer parked
+      status: (_params, requests) => ({ result: { session: { session_id: "session" }, state: "idle", parked_sessions: requests.includes("abort") ? [] : [{ session_id: "parked", state: "running", pending_approvals: 0 }] } }),
+    } }, async (app, _writes, requests) => {
+      const fieldSelector = composer === "vim" ? '[data-part="composer"] .cm-content' : '[data-part="composer"] textarea';
+      const field = () => select(app, fieldSelector);
+      const text = () => composer === "vim" ? [...app.container.querySelectorAll('[data-part="composer"] .cm-line')].map((line) => line.textContent).join("\n") : (field() as HTMLTextAreaElement).value;
+      // one key at the focused element: plain types "k", vim (insert mode) adds a line with shift+enter
+      const type = () => act(async () => {
+        const at = document.activeElement!;
+        if (composer === "vim") fireEvent.keyDown(at, { key: "Enter", shiftKey: true });
+        else if (at instanceof HTMLTextAreaElement && !at.readOnly) fireEvent.change(at, { target: { value: `${at.value}k` } });
+      });
+      await waitFor(() => field(), { timeout: 4000 });
+      const steps: Steps = {
+        answer: async (value) => { await waitFor(() => expect(answers.length).toBeGreaterThan(0), { timeout: 4000 }); standing = value; await act(async () => answers.splice(0).forEach((resolve) => resolve(value))); },
+        stop: async () => {
+          await waitFor(() => select(app, tag("busy.retry")), { timeout: 4000 });
+          standing = null;
+          for (let turn = 0; turn < 40 && !requests.includes("abort"); turn++) {
+            const button = app.container.querySelector<HTMLElement>(tag("busy.retry"));
+            if (button) { button.focus(); await click(button); }
+            await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+          }
+          expect(requests, "the stop did not start").toContain("abort");
+        },
+        focusField: async () => { await act(async () => field().focus()); },
+        typeHeld: async () => {
+          expect(document.activeElement === field(), "focus left the held composer").toBe(true);
+          // happy dom keeps focus on an element that stops being editable; a browser drops it to <body> (ux v-1)
+          expect(field().getAttribute("contenteditable"), "the held editor cannot keep focus").not.toBe("false");
+          const before = text();
+          await type();
+          expect(text(), "a key typed while held changed the draft").toBe(before);
+        },
+      };
+      await run(app, steps);
+      await waitFor(() => expect(field().closest('[data-part="composer"]')?.getAttribute("data-state")).not.toBe("read-only"), { timeout: 4000 });
+      expect(document.activeElement === field(), `focus is on ${document.activeElement?.tagName}.${document.activeElement?.className}, not the shown composer`).toBe(true);
+      const before = text();
+      await type();
+      expect(text(), "a key typed in the editable composer was lost").not.toBe(before);
+    });
+  }, 20000);
 });
