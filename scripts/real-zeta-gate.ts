@@ -2745,11 +2745,14 @@ with _database() as db:
   await Promise.all(catalogTabs.map((tab) => tab.close()));
   console.log("cap step: five catalog tabs next to the chat tab all control zeta");
   const capFillers: Array<{ client: ReturnType<typeof createClient>; sessionId: string }> = [];
+  // discovery is shell-only on this branch: the fillers send the shell secret like the browser does
+  const capShellToken = (await fetch(origin).then((response) => response.text())).match(/<meta name="achilles-shell" content="([^"]+)">/)?.[1];
+  if (!capShellToken) throw new Error("achilles shell secret is unavailable");
   for (let opened = 0; ; opened++) {
     // the chat tab holds one of the sixteen slots, so fillers alone can be at most fifteen
     if (opened >= 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
     // the same handoff the browser reads, so the raw controllers reach the zeta serve the tabs use.
-    const discovery = await fetch(discoveryUrl).then((response) => response.json()) as { url: string; controller_token: string };
+    const discovery = await fetch(discoveryUrl, { headers: { "X-Achilles-Shell": capShellToken } }).then((response) => response.json()) as { url: string; controller_token: string };
     const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
     const filler = createClient(await webSocketTransport(url.toString(), ["zeta.v1", `zeta.bearer.${discovery.controller_token}`]));
     try { await filler.hello(FEATURES, "controller"); }
