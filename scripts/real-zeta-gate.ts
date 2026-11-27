@@ -2897,7 +2897,7 @@ with _database() as db:
   await gateWait.playwright(page, "waitForURL", (url) => url.pathname === "/reading" && Boolean(url.searchParams.get("chat") && url.searchParams.get("chat") !== controllerChat && url.searchParams.get("chat") !== alternateId));
   await setupMobileSheet(page, 844, "button");
   if (!(await dockHead(page).getByRole("button", { name: "new page chat" }).isDisabled())) throw new Error("new unsent chat did not disable +");
-  await gateWait.playwright(page.getByText("already in a new chat", { exact: true }), "waitFor");
+  await gateWait.playwright(dockHead(page).locator('[data-write-surface="page-chat.new"][title="already in a new chat"]:disabled'), "waitFor");
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${origin}/reading?chat=${controllerChat}&theme=${encodeURIComponent(theme)}`);
   await waitForIdleTurn(page, waitFor);

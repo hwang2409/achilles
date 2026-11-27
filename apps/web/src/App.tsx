@@ -1,6 +1,6 @@
 import { AccountSwitchReceipt } from "./accounts/AccountSwitchReview";
 import type { createAccountLogin } from "./accounts/accountLogin";
-import { PageChatHeader } from "./PageChatHeader";
+import { ALREADY_NEW, PageChatHeader } from "./PageChatHeader";
 import { createContext, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { createRunStore } from "@fulcrum/core";
@@ -395,7 +395,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   }, [state]);
   const title = ready?.title ?? "New chat";
   const newPageChatReason = !connected ? "new chat is off until zeta is back" : !canWrite ? readOnlyReason
-    : active.creatingChat ? "creating chat…" : empty || (ready && !ready.sent) ? "already in a new chat"
+    : active.creatingChat ? "creating chat…" : empty || (ready && !ready.sent) ? ALREADY_NEW
     : state === "running" || state === "approval" || active.busy ? "wait for the running chat to finish" : undefined;
   const createMode: CreateModeOwner | undefined = !landing && activePage ? {
     available: connected && canWrite && !active.creatingChat && (!active.toggleBlocked || active.toggleRetryable),
@@ -459,14 +459,15 @@ export function AgentSurface({ connection, client, connectionState, observerBann
         </div>
       </RunProvider>}
   </>;
-  // a chat on a page that is not home belongs to Pages, as its header crumb says; the address decides, so loading and missing pages agree
-  const onPage = current === chatsRoute && location.pathname !== "/" && location.pathname !== homeAlias;
+  // a chat on a page that is not home belongs to Pages, as its header crumb says; the address decides, so loading and missing
+  // pages agree. home belongs to Pages too once it shows a page
+  const onPage = current === chatsRoute && (hasPageSurface || (location.pathname !== "/" && location.pathname !== homeAlias));
   const place = landing ? createRoute : current === createRoute ? chatsRoute : onPage ? pagesRoute : current;
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
     workspace: landing ? undefined : { canWrite, serverForcesAsk, createMode },
     header: !landing && activePage && <ChatHeader page={activePage} docked={hasPageSurface} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
-    children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} /> : content,
+    children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} client={client} /> : content,
   });
 }
 

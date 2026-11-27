@@ -120,7 +120,8 @@ def _run_container(
             except (OSError, subprocess.TimeoutExpired):
                 pass
             for reader in readers:
-                reader.join()
+                if reader.ident is not None:
+                    reader.join()
         if overflow.is_set():
             raise PageBuildError(f"{step} output exceeds {stdout_limit} bytes")
         return subprocess.CompletedProcess(

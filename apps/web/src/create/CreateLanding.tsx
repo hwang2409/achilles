@@ -1,4 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ZetaClient } from "@fulcrum/zeta";
+import { supportsFeature } from "../zeta";
+import { ACCOUNT_LIST_IDLE_FEATURE, readAccounts } from "../zeta/accounts";
+import { parseDefaults } from "../settings/SettingsModule";
 import { chatHref, timeLabel, titleOf, useOnScreen, type useAgentNavAdapter } from "../surface/AgentNavAdapter";
 import { surfaceHref } from "../surface/routes";
 import type { useActiveChat } from "../useActiveChat";
@@ -14,7 +18,26 @@ const starters = [
   "a weekly habit tracker",
 ];
 
-export function CreateLanding({ build, nav, activity }: { activity: BuildActivity; build: ReturnType<typeof useActiveChat>["build"]; nav: ReturnType<typeof useAgentNavAdapter> }) {
+// the login command when zeta has no usable account for its default provider, else null. a failed or unsupported read
+// shows nothing: the build then reports its own error. shortcut: an API-key provider has no account and reads as missing.
+function useMissingLogin(client: ZetaClient | null) {
+  const [missing, setMissing] = useState<string | null>(null);
+  useEffect(() => {
+    if (!client || !supportsFeature(client, ACCOUNT_LIST_IDLE_FEATURE)) return;
+    let live = true;
+    Promise.all([client.request("state_settings", { collection: "mcp", limit: 1 }), readAccounts(client)]).then(([settings, { accounts }]) => {
+      const provider = parseDefaults(settings)?.provider;
+      const login = provider === "codex" ? "codex" : provider === "claude" ? "anthropic" : null;
+      const ready = accounts.some((row) => row.available && (!login || row.account.startsWith(`${login}:`)));
+      if (live) setMissing(ready ? null : login ? `zeta login ${login}` : "zeta login");
+    }, () => {});
+    return () => { live = false; };
+  }, [client]);
+  return missing;
+}
+
+export function CreateLanding({ build, nav, activity, client }: { activity: BuildActivity; build: ReturnType<typeof useActiveChat>["build"]; nav: ReturnType<typeof useAgentNavAdapter>; client: ZetaClient | null }) {
+  const missingLogin = useMissingLogin(client);
   const prompt = useRef<HTMLTextAreaElement>(null);
   const submit = useRef<HTMLButtonElement>(null);
   const { catalog, pageCatalog } = nav;
@@ -28,15 +51,16 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
     <div className="create-scroll">
       <div className="create-landing">
         <h1>what should we build?</h1>
-        <form onSubmit={(event) => { event.preventDefault(); void build.start(); }} aria-busy={build.pending}>
+        <form onSubmit={(event) => { event.preventDefault(); if (!missingLogin) void build.start(); }} aria-busy={build.pending}>
           <textarea ref={prompt} aria-label="describe your page" aria-describedby="create-build-status" value={build.draft}
             readOnly={build.pending || build.locked} placeholder="a page to track…" onChange={(event) => build.setDraft(event.target.value)} />
           <div className="create-form-actions">
             <span data-testid="build-facts">create on · runs in a new chat · {build.approvalMode === "ask" ? "ask before running tools" : build.approvalMode === "allow" ? "auto-approve tools" : "checking approval mode…"}</span>
-            <button ref={submit} type="submit" aria-disabled={build.unavailable || !build.draft.trim()} aria-busy={build.unavailable || undefined}>{build.unavailable ? "starting…" : build.error ? "retry build" : "build page"}</button>
+            {!missingLogin && <button ref={submit} type="submit" aria-disabled={build.unavailable || !build.draft.trim()} aria-busy={build.unavailable || undefined}>{build.unavailable ? "starting…" : build.error ? "retry build" : "build page"}</button>}
           </div>
           <div id="create-build-status" className="create-build-status" role={build.error ? "alert" : "status"}>
-            {build.error ?? (build.pending ? "starting your build chat…" : null)}
+            {missingLogin ? <>no model login yet. run <code>{missingLogin}</code> in a terminal, or sign in on <a href={surfaceHref("/accounts")}>accounts</a>, then reload.</>
+              : build.error ?? (build.pending ? "starting your build chat…" : null)}
           </div>
         </form>
         <div className="create-starters" aria-label="starter prompts">

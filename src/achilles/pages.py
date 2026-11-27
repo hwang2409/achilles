@@ -201,6 +201,8 @@ _RESTORE_ARGS_SCHEMA = {
     "required": ["version", "expected_version"],
 }
 LAYOUT_HISTORY_LIMIT = 20
+# a build that ended after another revision became active; history shows it apart from failures
+STALE_BUILD = "build started at revision"
 INSPECT_MAX_BYTES = 8 * 1024
 DETAIL_SUGGESTION_RECORD_LIMIT = 200
 
@@ -999,7 +1001,8 @@ class PageStore:
                     "version": r[0],
                     "created_at": r[1],
                     "active": bool(r[2]),
-                    "failed": r[3] is not None,
+                    "failed": r[3] is not None and not r[3].startswith(STALE_BUILD),
+                    "stale": r[3] is not None and r[3].startswith(STALE_BUILD),
                 }
                 for r in code
             ],
@@ -1710,9 +1713,7 @@ class PageStore:
             ).fetchone()[0]
             stale = active != current
             if stale:
-                diagnostics = (
-                    f"build started at revision {current}, but revision {active} is now active"
-                )
+                diagnostics = f"{STALE_BUILD} {current}, but revision {active} is now active"
                 error_code = "conflict"
                 digest = None
                 size = None

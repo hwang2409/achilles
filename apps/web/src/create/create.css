@@ -60,3 +60,4 @@
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
   .create-landing button, .build-receipt :is(.build-open, button), .build-status a { min-width: 44px; min-height: 44px; }
 }
+.create-build-status a { text-decoration: underline; }

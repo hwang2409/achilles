@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 
 import achilles.web as web
 from achilles.mcp_server import _remove_connection
-from achilles.pages import PageStore
+from achilles.pages import STALE_BUILD, PageStore
 from achilles.tools import bundle_digest, validate_bundle
 
 
@@ -1439,6 +1439,15 @@ def test_block_page_is_named_unsupported_and_code_page_is_not(tmp_path: Path) ->
                 "artifact_size,diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
                 ("home", 1, "source", "{}", "b" * 64, 16, None, None, "2025-01-02"),
             )
+            for version, diagnostics in (
+                (2, "compile error"),
+                (3, f"{STALE_BUILD} 1, but revision 2 is now active"),
+            ):
+                db.execute(
+                    "INSERT INTO code_revision(page_id,version,source,dependencies,"
+                    "diagnostics,created_at) VALUES(?,?,?,?,?,?)",
+                    ("home", version, "source", "{}", diagnostics, "2025-01-03"),
+                )
             db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
         code_page = client.get("/api/pages/home").json()
         history = client.get(
@@ -1448,5 +1457,7 @@ def test_block_page_is_named_unsupported_and_code_page_is_not(tmp_path: Path) ->
     assert code_page["code"]["version"] == 1
     assert code_page["unsupported_format"] is None
     assert history["code"] == [
-        {"version": 1, "created_at": "2025-01-02", "active": True, "failed": False}
+        {"version": 3, "created_at": "2025-01-03", "active": False, "failed": False, "stale": True},
+        {"version": 2, "created_at": "2025-01-03", "active": False, "failed": True, "stale": False},
+        {"version": 1, "created_at": "2025-01-02", "active": True, "failed": False, "stale": False},
     ]

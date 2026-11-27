@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-type Props = { pageId: string; credential: string; revision: number; onRuntimeError?: (message: string) => void };
+type Props = { pageId: string; credential: string; revision: number };
 
 export function acceptsBridgeMessage(event: MessageEvent, source: Window | null, pageId: string, revision: number) {
   const message = event.data;
@@ -8,15 +8,19 @@ export function acceptsBridgeMessage(event: MessageEvent, source: Window | null,
   return !!message.runtimeError || (typeof message.requestId === "string" && typeof message.collection === "string" && ["list", "insert"].includes(message.method));
 }
 
-export function PageFrame({ pageId, credential, revision, onRuntimeError }: Props) {
+// a new revision remounts the frame: the open document runs the old code and only sends old-revision messages
+export const PageFrame = (props: Props) => <Frame key={props.revision} {...props} />;
+
+function Frame({ pageId, credential, revision }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const onMessage = async (event: MessageEvent) => {
       if (!acceptsBridgeMessage(event, frame.current?.contentWindow ?? null, pageId, revision)) return;
       const message = event.data;
       if (message.runtimeError) {
         void fetch(`/api/pages/${encodeURIComponent(pageId)}/runtime-error`, { method: "POST", headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" }, body: JSON.stringify({ revision, error: String(message.runtimeError) }) });
-        onRuntimeError?.(String(message.runtimeError));
+        setError(String(message.runtimeError));
         return;
       }
       try {
@@ -24,10 +28,13 @@ export function PageFrame({ pageId, credential, revision, onRuntimeError }: Prop
         const response = await fetch(path, { method: message.method === "insert" ? "POST" : "GET", headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" }, body: message.method === "insert" ? JSON.stringify(message.document) : undefined });
         const result = await response.json();
         frame.current?.contentWindow?.postMessage({ requestId: message.requestId, ok: response.ok, result }, "*");
-      } catch (error) { onRuntimeError?.(String(error)); }
+      } catch (caught) { setError(String(caught)); }
     };
     addEventListener("message", onMessage);
     return () => removeEventListener("message", onMessage);
-  }, [credential, pageId, revision, onRuntimeError]);
-  return <iframe ref={frame} title="custom page" sandbox="allow-scripts allow-forms allow-downloads" src={`/api/pages/${encodeURIComponent(pageId)}/frame`} style={{ width: "100%", height: "100%", minHeight: "560px", border: 0 }} />;
+  }, [credential, pageId, revision]);
+  return <div className="page-frame">
+    {error && <p className="page-error" role="alert" title={error}>this page hit an error: {error}</p>}
+    <iframe ref={frame} title="custom page" sandbox="allow-scripts allow-forms allow-downloads" src={`/api/pages/${encodeURIComponent(pageId)}/frame`} />
+  </div>;
 }
