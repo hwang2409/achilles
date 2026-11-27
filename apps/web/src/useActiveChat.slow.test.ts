@@ -7,6 +7,7 @@ import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { useActiveChat } from "./useActiveChat";
+import { TOO_MANY_CHATS } from "./zeta/session";
 import type { Chat } from "./surface/AgentNavAdapter";
 
 
@@ -1247,6 +1248,60 @@ test("a new tab whose default chat is open in another tab gets its own new chat,
   }
   expect(creates, "Back from the fresh chat created another zeta session").toBe(1);
   expect(entries, "the fresh chat took the entry the tab arrived on").toEqual(["/?chat=fresh"]);
+});
+
+test("try again on the too-many-chats screen makes the new chat again, never the page's older chat", async () => {
+  const location = { pathname: "/", search: "", hash: "#new-chat", href: "http://achilles.test/#new-chat", origin: "http://achilles.test", assign() {} };
+  const go = (path: string) => { const url = new URL(path, location.href); Object.assign(location, { pathname: url.pathname, search: url.search, hash: url.hash, href: url.href }); };
+  setGlobals({
+    localStorage: new MemoryStorage(), location,
+    history: { state: null, pushState(_state: unknown, _title: string, path: string) { go(path); }, replaceState(_state: unknown, _title: string, path: string) { go(path); } },
+    addEventListener() {}, removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
+      // the page has an older chat no tab holds: a plain attach would resume it
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: url.includes("include=fresh") ? [{ ...chat, session_id: "fresh" }, chat] : [chat], next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const calls: string[] = [];
+  let full = true;
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq"],
+    request: async (method: string, params?: { session_id?: string }) => {
+      calls.push(method === "resume" ? `resume ${params?.session_id}` : method);
+      if (method === "new_session") {
+        if (full) throw Object.assign(new Error("resident limit"), { code: -32004, data: { reason: "resident_limit" } });
+        return { session: { session_id: "fresh" } };
+      }
+      if (method === "resume") return { session: { name: null } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
+      if (method === "status") return { session: { session_id: "fresh" }, state: "idle" };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => active.state.phase === "error");
+  expect(active.state).toMatchObject({ phase: "error", error: TOO_MANY_CHATS });
+  full = false;
+  calls.splice(0);
+  await act(async () => { active.retryLimit(); });
+  for (let flush = 0; flush < 40 && active.state.phase !== "ready"; flush += 1) await act(async () => {});
+  expect(calls.filter((call) => call.startsWith("resume ") && call !== "resume fresh"), "try again resumed an older chat").toEqual([]);
+  expect(calls.filter((call) => call === "new_session"), "try again did not retry the new chat").toHaveLength(1);
+  expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
+  expect(location.search).toBe("?chat=fresh");
 });
 
 // a message sent in the last moment of a turn goes out as a steer; the turn ends before zeta reads it and zeta drops it.
