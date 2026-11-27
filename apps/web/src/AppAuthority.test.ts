@@ -639,7 +639,7 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
       expect(app.getAllByText(READ_ONLY_REASON).length).toBeGreaterThan(0);
       // the click on the unavailable control opens no review
       await click(control);
-      expect(document.querySelector(".confirmation-primary")).toBeNull();
+      expect(document.querySelector(".confirmation-primary") === null, "review opened").toBe(true);
       expect(writes.slice(written)).toEqual([]);
       return;
     }
@@ -1298,7 +1298,7 @@ test.each([
     const cancel = await app.findByRole("button", { name: "cancel run" });
     expect(disabled(cancel)).toBe(true);
     await click(cancel);
-    expect(document.querySelector(".confirmation-primary")).toBeNull();
+    expect(document.querySelector(".confirmation-primary") === null, "review opened").toBe(true);
     await change(await app.findByRole("textbox", { name: "message fixture-profile" }), "fixture follow-up");
     expect(disabled(select(app, tag("agents.send")))).toBe(true);
     expect(app.getAllByText(controlledReason).length).toBeGreaterThan(0);
@@ -1311,7 +1311,8 @@ test.each([
     await keydown(window, "F2");
     expect(app.container.querySelector(".chat-title-edit")).toBeNull();
     // the refusal is said inline, in the notice, not only in a tooltip
-    expect(app.getByText("rename this chat in the tab that has it open.")).toBeTruthy();
+    // StableText keeps every notice text as an aria-hidden copy: match only the shown one
+    expect(app.getByText("rename this chat in the tab that has it open.", { ignore: '[aria-hidden="true"]' })).toBeTruthy();
     expect(app.container.querySelector(`[data-chat-id="session"] ${tag("sidebar.rename")}`)).toBeNull();
     expect(chatWrites(writes)).toEqual([]);
   }],
@@ -1350,7 +1351,7 @@ test("try again shows it is trying, then says the chat is still held", async () 
     await click(pending);
     expect(writes.filter((write) => write === "resume")).toHaveLength(5);
     await act(async () => release());
-    await app.findByText("still open in another tab. you can read it here.", {}, { timeout: 3000 });
+    await app.findByText("still open in another tab. you can read it here.", { ignore: '[aria-hidden="true"]' }, { timeout: 3000 });
     expect(app.getByRole("button", { name: "try again" })).toBeTruthy();
     expect(writes.filter((write) => write === "resume")).toHaveLength(8);
   });
