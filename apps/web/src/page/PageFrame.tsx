@@ -8,8 +8,9 @@ export function acceptsBridgeMessage(event: MessageEvent, source: Window | null,
   return !!message.runtimeError || (typeof message.requestId === "string" && typeof message.collection === "string" && ["list", "insert"].includes(message.method));
 }
 
-// a new revision remounts the frame: the open document runs the old code and only sends old-revision messages
-export const PageFrame = (props: Props) => <Frame key={props.revision} {...props} />;
+// a new page or revision remounts the frame: the open document runs the old code and only sends old-revision messages,
+// and an error line or in-flight reply must not carry over to another page
+export const PageFrame = (props: Props) => <Frame key={`${props.pageId}:${props.revision}`} {...props} />;
 
 function Frame({ pageId, credential, revision }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);

@@ -18,8 +18,8 @@ const starters = [
   "a weekly habit tracker",
 ];
 
-// the login command when zeta's default provider is claude or codex and has no usable account, else null. a failed or unsupported read
-// shows nothing: the build then reports its own error. shortcut: an API-key provider has no account and reads as missing.
+// the login command when zeta's default provider is claude or codex and has no usable account, else null. only a hint: the guess is
+// wrong for API-key mode or when serve runs another provider, so the build stays available and reports a real missing login itself.
 function useMissingLogin(client: ZetaClient | null) {
   const [missing, setMissing] = useState<string | null>(null);
   useEffect(() => {
@@ -52,16 +52,16 @@ export function CreateLanding({ build, nav, activity, client }: { activity: Buil
     <div className="create-scroll">
       <div className="create-landing">
         <h1>what should we build?</h1>
-        <form onSubmit={(event) => { event.preventDefault(); if (!missingLogin) void build.start(); }} aria-busy={build.pending}>
+        {missingLogin && <p data-testid="login-hint">no model login found. if builds fail, run <code>{missingLogin}</code> in a terminal or sign in on <a href={surfaceHref("/accounts")}>accounts</a>.</p>}
+        <form onSubmit={(event) => { event.preventDefault(); void build.start(); }} aria-busy={build.pending}>
           <textarea ref={prompt} aria-label="describe your page" aria-describedby="create-build-status" value={build.draft}
             readOnly={build.pending || build.locked} placeholder="a page to track…" onChange={(event) => build.setDraft(event.target.value)} />
           <div className="create-form-actions">
             <span data-testid="build-facts">create on · runs in a new chat · {build.approvalMode === "ask" ? "ask before running tools" : build.approvalMode === "allow" ? "auto-approve tools" : "checking approval mode…"}</span>
-            {!missingLogin && <button ref={submit} type="submit" aria-disabled={build.unavailable || !build.draft.trim()} aria-busy={build.unavailable || undefined}>{build.unavailable ? "starting…" : build.error ? "retry build" : "build page"}</button>}
+            <button ref={submit} type="submit" aria-disabled={build.unavailable || !build.draft.trim()} aria-busy={build.unavailable || undefined}>{build.unavailable ? "starting…" : build.error ? "retry build" : "build page"}</button>
           </div>
           <div id="create-build-status" className="create-build-status" role={build.error ? "alert" : "status"}>
-            {missingLogin ? <>no model login yet. run <code>{missingLogin}</code> in a terminal, or sign in on <a href={surfaceHref("/accounts")}>accounts</a>, then reload.</>
-              : build.error ?? (build.pending ? "starting your build chat…" : null)}
+            {build.error ?? (build.pending ? "starting your build chat…" : null)}
           </div>
         </form>
         <div className="create-starters" aria-label="starter prompts">

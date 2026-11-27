@@ -46,3 +46,21 @@ test("a page that moves to a new revision while open reloads its frame, so recor
     globalThis.fetch = originalFetch;
   }
 });
+
+test("switching to another page at the same revision drops the old page's error line", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({})) as typeof fetch;
+  const view = render(createElement(PageFrame, { pageId: "a", credential: "c", revision: 1 }));
+  try {
+    const frame = view.container.querySelector("iframe")!;
+    await act(async () => {
+      dispatchEvent(new MessageEvent("message", { origin: "null", source: frame.contentWindow, data: { pageId: "a", revision: 1, runtimeError: "boom" } }));
+    });
+    await waitFor(() => expect(view.container.querySelector(".page-error")).not.toBeNull(), { timeout: 1000 });
+    await act(async () => { view.rerender(createElement(PageFrame, { pageId: "b", credential: "c", revision: 1 })); });
+    expect(view.container.querySelector(".page-error")?.textContent ?? null).toBeNull();
+  } finally {
+    view.unmount();
+    globalThis.fetch = originalFetch;
+  }
+});
