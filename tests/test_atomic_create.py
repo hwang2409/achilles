@@ -999,11 +999,11 @@ def test_create_page_file_failure_leaves_no_rows_or_files(creation_client, monke
     root, _store, client, headers = creation_client
     before = state(root)
 
-    def fail_write(_self, path, content):
+    def fail_write(path, content):
         path.write_bytes(content)
         raise OSError("synthetic write failure")
 
-    monkeypatch.setattr(PageStore, "_atomic_private_write", fail_write)
+    monkeypatch.setattr(pages, "atomic_private_write", fail_write)
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
     error = json.loads(result["content"][0]["text"])
     assert result["isError"] is True

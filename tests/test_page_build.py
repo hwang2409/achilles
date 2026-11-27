@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import http.server
 import io
 import json
@@ -14,6 +15,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import achilles.page_build as page_build
+import achilles.pages as pages_module
 from achilles import web
 from achilles.page_build import PageBuildError, build_page
 from achilles.pages import PageStore
@@ -73,11 +75,7 @@ def _build_outputs(
     """Fake install, bundle and collector outputs of one page build."""
     resolved = {"react": "19.0.0", "react-dom": "19.0.0"}
     install = {"lockfile": lockfile, "resolved_dependencies": resolved, "install_scripts": []}
-    collected = {
-        "artifact": base64.b64encode(artifact).decode(),
-        "lockfile": lockfile,
-        "resolved_dependencies": resolved,
-    }
+    collected = {"artifact": base64.b64encode(artifact).decode()}
     return [(json.dumps(install).encode(), b""), (b"", b""), (json.dumps(collected).encode(), b"")]
 
 
@@ -301,6 +299,107 @@ def test_failed_install_is_not_cached(monkeypatch, tmp_path: Path) -> None:
     result = build_page(tmp_path, "home", "export default 1", {})
     assert len(calls) == 4, "the retry must install again, not reuse the failed build"
     assert (tmp_path / "bundles" / f"{result['digest']}.js").read_bytes() == b"safe bundle"
+
+
+def test_install_script_names_are_bounded(monkeypatch, tmp_path: Path) -> None:
+    outputs = _build_outputs()
+    install = json.loads(outputs[0][0])
+    install["install_scripts"] = ["x" * 5000 + "@1.0.0"] * 60
+    outputs[0] = (json.dumps(install).encode(), b"")
+    _fake_containers(monkeypatch, outputs)
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+
+    scripts = build_page(tmp_path, "home", "export default 1", {})["install_scripts"]
+    assert len(scripts) == 50 and {len(name) for name in scripts} == {200}
+
+
+def test_build_cache_keeps_no_lock_files_and_only_the_newest_entries(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _fake_containers(monkeypatch, _build_outputs())
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+    monkeypatch.setattr(page_build, "_MAX_CACHE_ENTRIES", 2, raising=False)
+
+    entries = []
+    for source in ("export default 1", "export default 2", "export default 3"):
+        build_page(tmp_path, "home", source, {})
+        entries.append({path.name for path in (tmp_path / "build-cache").glob("*.json")})
+    cache = tmp_path / "build-cache"
+    assert not list(cache.glob("*.lock")), "a lock file must not outlive its build"
+    assert len(entries[-1]) == 2 and not entries[0] & entries[-1], "the oldest entry goes first"
+
+
+def _missing_bundle_revision(root: Path) -> None:
+    """The active home revision, whose bundle file is gone: a frame GET rebuilds it."""
+    store = PageStore(root)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+            "artifact_size,created_at) VALUES(?,?,?,?,?,?,?)",
+            (
+                "home",
+                1,
+                "export default 1",
+                "{}",
+                hashlib.sha256(b"safe bundle").hexdigest(),
+                11,
+                "2025-01-01",
+            ),
+        )
+        db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+
+
+def test_frame_does_not_wait_for_a_running_rebuild(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    _missing_bundle_revision(tmp_path / "achilles")
+    calls, _ = _fake_containers(monkeypatch, _build_outputs())
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+    fake_popen, started, release = page_build.subprocess.Popen, threading.Event(), threading.Event()
+
+    def held_popen(command, **kwargs):
+        if not started.is_set():
+            started.set()
+            release.wait(10)
+        return fake_popen(command, **kwargs)
+
+    monkeypatch.setattr(page_build.subprocess, "Popen", held_popen)
+    statuses: list[int] = []
+    with TestClient(web.create_app()) as client:
+        running = threading.Thread(
+            target=lambda: statuses.append(client.get("/api/pages/home/frame").status_code)
+        )
+        running.start()
+        try:
+            assert started.wait(10)
+            # the release timer only unblocks a base that waits; it must not be needed
+            threading.Timer(5, release.set).start()
+            second = client.get("/api/pages/home/frame")
+            launched_while_running = len(calls)
+        finally:
+            release.set()
+            running.join(10)
+    assert second.status_code == 404, "a frame GET must not wait for a running rebuild"
+    assert launched_while_running == 0 and statuses == [200] and len(calls) == 3
+
+
+def test_failed_rebuild_is_remembered_for_a_while(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    _missing_bundle_revision(tmp_path / "achilles")
+    calls, _ = _fake_containers(monkeypatch, _build_outputs(), exit_codes=(1, 1, 1))
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+
+    with TestClient(web.create_app()) as client:
+        first = client.get("/api/pages/home/frame").status_code
+        again = client.get("/api/pages/home/frame").status_code
+        launched = len(calls)
+        # the retry window has passed
+        monkeypatch.setattr(pages_module, "REBUILD_RETRY_SECONDS", 0, raising=False)
+        later = client.get("/api/pages/home/frame").status_code
+    assert (first, again, later) == (404, 404, 404)
+    assert launched == 1, "a recently failed rebuild must not run again"
+    assert len(calls) == 2, "after the retry window the rebuild runs again"
 
 
 # real container builds with a local package; no package registry is contacted

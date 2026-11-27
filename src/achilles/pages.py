@@ -7,6 +7,7 @@ import secrets
 import shutil
 import sqlite3
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,6 +62,7 @@ _RESTORE_ARGS_SCHEMA = {
     "required": ["version", "expected_version"],
 }
 STALE_BUILD = "build started at revision"
+REBUILD_RETRY_SECONDS = 60
 PAGE_FILES = ("src/Page.tsx", "package.json")
 READ_PAGE_FILE_SCHEMA = {
     "type": "object",
@@ -382,6 +384,7 @@ def _drop_block_model(db: sqlite3.Connection, database: Path) -> None:
 class PageStore:
     def __init__(self, root: Path):
         self.root = root
+        self._failed_rebuilds: dict[tuple[str, str], float] = {}
         for directory in (root, root / "pages", root / "bundles", root / "credentials"):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             directory.chmod(0o700)
@@ -510,8 +513,6 @@ class PageStore:
             if path.exists():
                 path.chmod(0o600)
 
-    _atomic_private_write = staticmethod(atomic_private_write)
-
     def ensure_credential(self, page_id: str) -> str:
         with self.transaction() as db:
             row = db.execute("SELECT credential_hash FROM page WHERE id=?", (page_id,)).fetchone()
@@ -523,7 +524,7 @@ class PageStore:
             token = secrets.token_urlsafe(32)
             digest = hashlib.sha256(token.encode()).hexdigest()
             db.execute("UPDATE page SET credential_hash=? WHERE id=?", (digest, page_id))
-            self._atomic_private_write(path, token.encode())
+            atomic_private_write(path, token.encode())
             return token
 
     def authenticate(self, token: str) -> sqlite3.Row | None:
@@ -1055,7 +1056,7 @@ class PageStore:
             created_paths.add(workspace.parent)
             credential = self.root / "credentials" / page_id
             created_paths.add(credential)
-            self._atomic_private_write(credential, token.encode())
+            atomic_private_write(credential, token.encode())
             with self.transaction() as db:
                 principal = db.execute(
                     "SELECT create_mode FROM page WHERE id=?", (principal_id,)
@@ -1068,7 +1069,7 @@ class PageStore:
                 # is released, another committed call may own the same file
                 for bundle in bundles:
                     path = self.root / "bundles" / f"{bundle_digest(bundle)}.json"
-                    self._atomic_private_write(path, (canonical_bundle(bundle) + "\n").encode())
+                    atomic_private_write(path, (canonical_bundle(bundle) + "\n").encode())
                 hook = getattr(self, "before_create_commit", None)
                 if hook is not None:
                     hook()
@@ -1201,7 +1202,7 @@ class PageStore:
                         "SELECT COALESCE(MAX(version), 0) + 1 FROM tool_version WHERE tool_id=?",
                         (tool_id,),
                     ).fetchone()[0]
-                self._atomic_private_write(
+                atomic_private_write(
                     self.root / "bundles" / f"{digest}.json", (encoded + "\n").encode()
                 )
                 db.execute(
@@ -1516,15 +1517,25 @@ class PageStore:
         code = self.page_code(page_id)
         if code is None or (self.root / "bundles" / f"{code['digest']}.js").is_file():
             return
-        built = build_page(
-            self.root,
-            page_id,
-            code["source"],
-            json.loads(code["dependencies"]),
-            code["lockfile"] or None,
-        )
-        if built["digest"] != code["digest"]:
-            raise PageBuildError("the rebuilt artifact differs from the saved revision")
+        # a frame GET must not hold a worker thread on a running or recently failed rebuild
+        failed = (page_id, code["digest"])
+        failed_at = self._failed_rebuilds.get(failed)
+        if failed_at is not None and time.monotonic() - failed_at < REBUILD_RETRY_SECONDS:
+            raise PageBuildError("the last rebuild of this revision failed; try again later")
+        try:
+            built = build_page(
+                self.root,
+                page_id,
+                code["source"],
+                json.loads(code["dependencies"]),
+                code["lockfile"] or None,
+                wait=False,
+            )
+            if built["digest"] != code["digest"]:
+                raise PageBuildError("the rebuilt artifact differs from the saved revision")
+        except PageBuildError:
+            self._failed_rebuilds[failed] = time.monotonic()
+            raise
 
     def set_runtime_error(self, page_id: str, revision: int, error: str) -> None:
         with self.transaction() as db:

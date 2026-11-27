@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -20,6 +21,7 @@ _MAX_RESULT_BYTES = 16 * 1024 * 1024
 _MAX_DIAGNOSTIC_BYTES = 16 * 1024
 _STEP_TIMEOUT_SECONDS = 180
 _BUILD_LABEL = "achilles.page-build"
+_MAX_CACHE_ENTRIES = 100
 
 
 class PageBuildError(ValueError):
@@ -206,7 +208,8 @@ def _install(
     return {
         "lockfile": lockfile,
         "resolved_dependencies": resolved,
-        "install_scripts": scripts,
+        # a package name has no length limit; inspect_page must stay within its size bound
+        "install_scripts": [value[:200] for value in scripts[:50]],
         "warnings": _warnings(result.stderr),
     }
 
@@ -279,11 +282,14 @@ def build_page(
     source: str,
     dependencies: dict[str, str],
     lockfile: str | None = None,
+    *,
+    wait: bool = True,
 ) -> dict[str, Any]:
     """Bundle a browser page in a disposable container with only source and package cache.
 
     A lockfile pins the install to it. Identical (source, dependencies, lockfile) builds share
-    one result: concurrent ones wait for the first, and only a complete build is cached."""
+    one result: concurrent ones wait for the first (or fail at once when not `wait`), and only a
+    complete build is cached."""
     if not isinstance(source, str) or not source.strip():
         raise PageBuildError("src/Page.tsx:1:1: page source is empty")
     if not isinstance(dependencies, dict) or any(
@@ -309,16 +315,54 @@ def build_page(
     key = hashlib.sha256(
         json.dumps([source, package["dependencies"], lockfile], sort_keys=True).encode()
     ).hexdigest()
-    with open(build_cache / f"{key}.lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        entry = build_cache / f"{key}.json"
-        if entry.is_file():
+    entry = build_cache / f"{key}.json"
+    with _key_lock(build_cache / f"{key}.lock", wait):
+        try:
             cached = json.loads(entry.read_text())
-            if (root / "bundles" / f"{cached['digest']}.js").is_file():
-                return cached
+        except FileNotFoundError:  # never built, or pruned
+            cached = None
+        if cached and (root / "bundles" / f"{cached['digest']}.js").is_file():
+            return cached
         result = _build(docker, root, source, package, lockfile)
         atomic_private_write(entry, json.dumps(result, sort_keys=True).encode())
-        return result
+    _prune_cache(build_cache)
+    return result
+
+
+@contextlib.contextmanager
+def _key_lock(path: Path, wait: bool):
+    """One build per key at a time. The lock file exists only while a build holds it, so a
+    waiter that wakes on a deleted file tries again on the current one."""
+    while True:
+        with open(path, "a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+            except BlockingIOError:
+                raise PageBuildError(
+                    "an identical page build is already running", "build_unavailable"
+                ) from None
+            try:
+                current = os.stat(path).st_ino
+            except FileNotFoundError:
+                current = None
+            if current == os.fstat(lock.fileno()).st_ino:
+                try:
+                    yield
+                finally:
+                    path.unlink(missing_ok=True)
+                return
+
+
+def _prune_cache(build_cache: Path) -> None:
+    """Keep the newest cache entries; an evicted one only costs a rebuild."""
+    entries = []
+    for path in build_cache.glob("*.json"):
+        try:
+            entries.append((path.stat().st_mtime, path))
+        except FileNotFoundError:  # another build pruned it
+            pass
+    for _, path in sorted(entries)[:-_MAX_CACHE_ENTRIES]:
+        path.unlink(missing_ok=True)
 
 
 def _build(

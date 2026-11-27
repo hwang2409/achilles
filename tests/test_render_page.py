@@ -12,6 +12,7 @@ import httpx
 import pytest
 from test_web import running_http_app
 
+import achilles.render_page as render_page_module
 import achilles.web as web
 from achilles.pages import PageStore
 from achilles.render_page import render_page
@@ -47,6 +48,17 @@ window.achilles.records.insert("items", { title: "should not save" }).catch(() =
 POLLING = """
 document.getElementById("root").innerHTML = "<h1>polling</h1>";
 setInterval(() => fetch(location.href).catch(() => {}), 100);
+"""
+# random noise does not compress: the screenshot is far larger than one 64 KiB pipe buffer
+NOISE = """
+const canvas = document.createElement("canvas");
+canvas.width = 1440; canvas.height = 900;
+document.body.style.margin = "0";
+document.getElementById("root").append(canvas);
+const pixels = canvas.getContext("2d").createImageData(1440, 900);
+for (let i = 0; i < pixels.data.length; i++)
+  pixels.data[i] = i % 4 === 3 ? 255 : Math.random() * 256;
+canvas.getContext("2d").putImageData(pixels, 0, 0);
 """
 HUNG = "document.getElementById('root').textContent = 'spin'; for (;;) {}"
 
@@ -162,6 +174,36 @@ def test_polling_page_times_out_with_a_fallback_screenshot(served, tmp_path) -> 
     assert result["ready"] is False and result["timed_out"] is True
     assert "network-idle" in result["note"]
     assert base64.b64decode(result["screenshot"])[:2] == b"\xff\xd8"
+
+
+def test_large_screenshot_reaches_the_caller_whole(served, tmp_path) -> None:
+    store = _home_with_code(tmp_path / "achilles", NOISE)
+    token = store.ensure_credential("home")
+    with served(web.create_app()) as port:
+        result = render_page(f"http://127.0.0.1:{port}", "home", token)
+    image = base64.b64decode(result["screenshot"])
+    assert result["ready"] is True and len(image) > 64 * 1024 and image[-2:] == b"\xff\xd9"
+
+
+def test_deadline_note_is_absent_when_the_screenshot_is_omitted(
+    served, monkeypatch, tmp_path
+) -> None:
+    # the real runner with only its image bound lowered, so both jpeg qualities are too large
+    runner = render_page_module._RUNNER
+    text = runner.read_text()
+    small = text.replace("const MAX_IMAGE = 1024 * 1024;", "const MAX_IMAGE = 1;").replace(
+        '"../apps/web/', f'"{runner.parents[1]}/apps/web/'
+    )
+    assert small.count("MAX_IMAGE = 1;") == 1 and small.count(str(runner.parents[1])) == 1
+    (tmp_path / "render-page.ts").write_text(small)
+    monkeypatch.setattr(render_page_module, "_RUNNER", tmp_path / "render-page.ts")
+    store = _home_with_code(tmp_path / "achilles", POLLING)
+    token = store.ensure_credential("home")
+    with served(web.create_app()) as port:
+        result = render_page(f"http://127.0.0.1:{port}", "home", token, timeout=3)
+    assert result["timed_out"] is True and "screenshot" not in result
+    assert "omitted" in result["screenshot_note"]
+    assert "note" not in result, result["note"]
 
 
 def _processes() -> dict[int, tuple[int, str]]:
