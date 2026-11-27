@@ -560,7 +560,7 @@ async function gateSameChatReadOnly(browser: Browser, a: Page) {
     if (!await c.getByRole("button", { name: "new chat", exact: true }).first().isEnabled()) throw new Error("tab c's new chat is off");
     // try again while tab a still holds the chat: zeta refuses again, and the notice says the chat is still held
     await c.getByRole("button", { name: "try again", exact: true }).click(wait);
-    await c.getByText("this chat is still open in another tab. you can read it here.", { exact: true }).waitFor(wait);
+    await c.getByText("still open in another tab. you can read it here.", { exact: true }).waitFor(wait);
     if (await field.isEditable()) throw new Error("tab c's try again made the held chat writable");
     const composer = a.getByRole("textbox", { name: "message", exact: true });
     await composer.fill("after tab c joined", wait);
