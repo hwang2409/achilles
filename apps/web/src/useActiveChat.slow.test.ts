@@ -1611,11 +1611,11 @@ test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zet
   const landed = row.entry === "select" ? "target" : "fresh";
   if (row.zeta !== "parks") {
     expect([...new Set(shown)], "the shown chat was replaced while zeta refused the swap").toEqual(["chat"]);
-    expect(active.busy?.limit, "the notice says which limit").toBe(row.zeta === "resident_limit" ? "resident" : "parked");
-    expect(active.busy?.parked?.map((entry) => entry.sessionId)).toEqual(["p1", "p2", "p3"]);
     expect(location.search, "a refused swap changed the url").toBe("?chat=chat");
     expect(pushes, "a refused swap added a history entry").toEqual([]);
     expect(active.selectedId).toBe("chat");
+    expect(active.busy?.limit, "the notice says which limit").toBe(row.zeta === "resident_limit" ? "resident" : "parked");
+    expect(active.busy?.parked?.map((entry) => entry.sessionId)).toEqual(["p1", "p2", "p3"]);
     shown.splice(0);
     if (row.then === "stop") { await act(async () => { await active.stopAndRetry(); }); await settle(); }
     if (row.then === "stay") { await act(async () => { await active.stay(); }); await settle(); }
