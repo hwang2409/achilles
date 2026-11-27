@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { createRunStore } from "@fulcrum/core";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { wrapTab } from "../keyboard";
@@ -32,11 +32,18 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
   const { report, refreshing, warning } = snapshot;
   const rows = report?.rows ?? [];
   const id = chosenRun ? rowKey(sessionId, chosenRun) : undefined;
-  // the transcript row of the chosen run adds its waiting state and reply, and says when the run ended after the report
-  const liveId = `sub-agent:${chosenRun}`;
-  const liveItem = useSyncExternalStore(useCallback((fn: () => void) => store && chosenRun ? store.subscribe(liveId, fn) : () => {}, [store, liveId]),
-    () => chosenRun ? store?.getItem(liveId) : undefined);
-  const live = liveItem?.type === "sub_agent" ? liveItem : undefined;
+  // each run's transcript row adds its waiting state and reply (in the list too, not only for the chosen run), and says
+  // when the chosen run ended after the report
+  const [, liveChanged] = useReducer((count: number) => count + 1, 0);
+  const watched = [...new Set([...rows.map((row) => row.runId), ...(chosenRun ? [chosenRun] : [])])].join(" ");
+  useEffect(() => {
+    if (!store || !watched) return;
+    const stops = watched.split(" ").map((runId) => store.subscribe(`sub-agent:${runId}`, liveChanged));
+    liveChanged(); // a change between the render and these subscriptions
+    return () => { for (const stop of stops) stop(); };
+  }, [store, watched]);
+  const liveOf = (runId: string | undefined) => { const item = runId ? store?.getItem(`sub-agent:${runId}`) : undefined; return item?.type === "sub_agent" ? item : undefined; };
+  const live = liveOf(chosenRun);
   const reported = rows.find((row) => row.runId === chosenRun);
   const chosen = reported && withLiveRow(reported, live);
   const liveEnded = !!live && ["done", "error", "canceled"].includes(live.status);
@@ -59,7 +66,7 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
         {warning && <p role="status">{warning}</p>}
         {report && (rows.length ? <ul className="chat-agents-runs">{rows.map((row) => <li key={row.runId}>
           <button type="button" className="agents-row" aria-current={row.runId === chosenRun ? "true" : undefined} onClick={() => choose(row.runId)}>
-            <span className="agents-row-copy"><span className="agents-row-title"><b>{row.agentType ?? "agent"}</b>{row.description ? ` ${row.description}` : ""}</span><small><StateTag row={row.runId === chosenRun && chosen ? chosen : row} /></small></span>
+            <span className="agents-row-copy"><span className="agents-row-title"><b>{row.agentType ?? "agent"}</b>{row.description ? ` ${row.description}` : ""}</span><small><StateTag row={withLiveRow(row, liveOf(row.runId))} /></small></span>
           </button>
         </li>)}</ul> : <p>no agents in this chat yet.</p>)}
         {id && <AgentRunDetail chosen={chosen} parent={parent} title={title} id={id} client={client} send={send} controls={controls} readOnly={readOnly}
