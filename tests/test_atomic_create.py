@@ -804,6 +804,104 @@ def test_authoring_guidance_and_result_notes_through_public_mcp(creation_client,
         )
 
 
+def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creation_client):
+    root, store, client, headers = creation_client
+    result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    created = json.loads(result["content"][0]["text"])
+    assert created["existing"] is False
+    page_id = created["page_id"]
+    assert [tool["name"] for tool in store.page_tools(page_id)] == ["add_book"]
+    assert store.page_code(page_id)["source"] == request()["package"]["source"]
+    assert not store.page(page_id)["create_mode"]
+    with store.transaction() as db:
+        actions = db.execute("SELECT action FROM audit WHERE page_id=? ORDER BY id", (page_id,))
+        assert [row[0] for row in actions] == ["create_page", "create_tool"]
+    page_headers = initialize(client, store.ensure_credential(page_id), 3)
+    catalog = mcp(client, page_headers, 4, "tools/list", {})
+    assert [tool["name"] for tool in catalog["tools"]] == ["inspect_page", "add_book"]
+    inserted = mcp(
+        client,
+        page_headers,
+        5,
+        "tools/call",
+        {"name": "add_book", "arguments": {"title": "Synthetic Book"}},
+    )
+    assert json.loads(inserted["content"][0]["text"])["title"] == "Synthetic Book"
+    assert store.records(page_id, "books")[1] == 1
+    assert len(list((root / "bundles").glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize(
+    "arguments,code,path",
+    [
+        (
+            request(tools=[bundle(operation="delete")]),
+            "invalid_input",
+            "/tools/0/implementation/operation",
+        ),
+        (request(tools=[bundle(), bundle()]), "create_failed", ""),
+    ],
+)
+def test_create_page_failures_leave_no_rows_or_files(creation_client, arguments, code, path):
+    root, _store, client, headers = creation_client
+    before = state(root)
+    result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": arguments})
+    error = json.loads(result["content"][0]["text"])
+    assert result["isError"] is True
+    assert {key: error[key] for key in ("code", "expected", "path")} == {
+        "code": code,
+        "expected": error["expected"],
+        "path": path,
+    }
+    assert state(root) == before
+
+
+def test_simultaneous_identical_create_page_calls_are_idempotent(creation_client):
+    root, store, client, headers = creation_client
+    barrier = threading.Barrier(2)
+    results = [None, None]
+    errors = []
+    concurrent_headers = [
+        initialize(client, store.ensure_credential("home"), 10),
+        initialize(client, store.ensure_credential("home"), 11),
+    ]
+
+    def call(index):
+        try:
+            barrier.wait(timeout=10)
+            results[index] = mcp(
+                client,
+                concurrent_headers[index],
+                20 + index,
+                "tools/call",
+                {"name": "create_page", "arguments": request()},
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=call, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for index, thread in enumerate(threads):
+        thread.join(timeout=10)
+        assert not thread.is_alive(), f"concurrent create caller {index} hung"
+    assert not errors, errors
+    values = [json.loads(result["content"][0]["text"]) for result in results]
+    assert sorted(value["existing"] for value in values) == [False, True]
+    assert len({value["page_id"] for value in values}) == 1
+    counts, files = state(root)
+    assert counts == {
+        "page": 2,
+        "code_revision": 1,
+        "tool": 1,
+        "tool_version": 1,
+        "page_tool": 1,
+        "audit": 2,
+    }
+    assert len([path for path in files if path.startswith("bundles/")]) == 1
+    assert store.page_tools(values[0]["page_id"])[0]["name"] == "add_book"
+
+
 def test_create_page_file_failure_leaves_no_rows_or_files(creation_client, monkeypatch):
     root, _store, client, headers = creation_client
     before = state(root)
@@ -884,6 +982,101 @@ def _restore(client, headers, arguments):
 
 def _active_tool_version(store):
     return store.page_tools("home")[0]["version"]
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["code", "tool", "stale_code", "stale_tool", "other_page", "unknown_version", "route_bad_json"],
+)
+def test_restore_version_guards_over_public_interfaces(creation_client, monkeypatch, case):
+    root, store, client, headers = creation_client
+    store.create_tool("home", bundle())
+    store.create_tool("home", {**bundle(), "description": "insert books v2"})
+    store.write_page("home", "first", {}, None)
+    store.write_page("home", "second", {}, 1)
+    store.create_page("/other", "other")
+    notified = []
+
+    async def record_list_changed(session):
+        notified.append(session)
+
+    monkeypatch.setattr(
+        "mcp.server.session.ServerSession.send_tool_list_changed", record_list_changed
+    )
+    mcp(client, headers, 80, "tools/list", {})
+    before = state(root)
+    if case == "code":
+        error, value = _restore(
+            client, headers, {"kind": "code", "version": 1, "expected_version": 2}
+        )
+        assert not error, value
+        assert (value["revision"], value["restored_from"]) == (3, 1)
+        assert store.page_code("home")["source"] == "first"
+        after = state(root)[0]
+        assert after["code_revision"] == before[0]["code_revision"] + 1
+        assert after["audit"] == before[0]["audit"] + 1
+        return
+    if case == "tool":
+        error, value = _restore(
+            client,
+            headers,
+            {"kind": "tool", "name": "add_book", "version": 1, "expected_version": 2},
+        )
+        assert not error, value
+        assert value == {"kind": "tool", "name": "add_book", "version": 3, "restored_from": 1}
+        assert _active_tool_version(store) == 3
+        assert notified, "tools/list_changed was not sent"
+        assert state(root)[0]["audit"] == before[0]["audit"] + 1
+        return
+    if case == "route_bad_json":
+        raw = TestClient(
+            web.create_app(),
+            base_url="http://127.0.0.1:8000",
+            client=("127.0.0.1", 1234),
+            raise_server_exceptions=False,
+        )
+        response = raw.post(
+            "/api/pages/home/tools/add_book/rollback",
+            headers={
+                "authorization": f"Bearer {store.ensure_credential('home')}",
+                "origin": "http://127.0.0.1:8000",
+                "content-type": "application/json",
+            },
+            content=b"{",
+        )
+        assert response.status_code == 400
+        assert state(root) == before
+        return
+    arguments, code, path = {
+        "stale_code": (
+            {"kind": "code", "version": 1, "expected_version": 1},
+            "conflict",
+            "/expected_version",
+        ),
+        "stale_tool": (
+            {"kind": "tool", "name": "add_book", "version": 1, "expected_version": 1},
+            "conflict",
+            "/expected_version",
+        ),
+        "other_page": (
+            {"kind": "code", "route": "/other", "version": 1, "expected_version": 1},
+            "forbidden",
+            "/route",
+        ),
+        "unknown_version": (
+            {"kind": "code", "version": 99, "expected_version": 2},
+            "not_found",
+            "/version",
+        ),
+    }[case]
+    error, value = _restore(client, headers, arguments)
+    assert error, value
+    assert (value["code"], value["path"]) == (code, path)
+    if case == "other_page":
+        assert value["hint"] == "To change another page, open that page's chat."
+    assert state(root) == before
+    assert store.page_code("home")["source"] == "second"
+    assert _active_tool_version(store) == 2
 
 
 def test_page_code_lifecycle_through_real_mcp_requests(monkeypatch, tmp_path):

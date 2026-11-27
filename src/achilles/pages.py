@@ -261,6 +261,10 @@ def _suggest_filter_field(
     )
 
 
+class _RouteTaken(Exception):
+    """A concurrent create_page committed the same route first."""
+
+
 def _drop_block_model(db: sqlite3.Connection, database: Path) -> None:
     """Migrate v1-v3 to v4: back up the database once, then drop the block layout model."""
     backup = Path(str(database) + ".pre-block-model-v3.backup")
@@ -929,12 +933,6 @@ class PageStore:
             credential = self.root / "credentials" / page_id
             created_paths.add(credential)
             self._atomic_private_write(credential, token.encode())
-            for bundle in bundles:
-                path = self.root / "bundles" / f"{bundle_digest(bundle)}.json"
-                existed = path.exists()
-                if not existed:
-                    created_paths.add(path)
-                self._atomic_private_write(path, (canonical_bundle(bundle) + "\n").encode())
             with self.transaction() as db:
                 principal = db.execute(
                     "SELECT create_mode FROM page WHERE id=?", (principal_id,)
@@ -942,7 +940,14 @@ class PageStore:
                 if principal is None or not principal[0]:
                     raise PermissionError("forbidden: create mode is off")
                 if db.execute("SELECT 1 FROM page WHERE route=?", (route,)).fetchone():
-                    raise ValidationError("/route", "unused route", "conflict")
+                    raise _RouteTaken
+                # bundle files are shared by digest: write them under the write lock, so a failed
+                # concurrent call cannot remove a file that another call just committed
+                for bundle in bundles:
+                    path = self.root / "bundles" / f"{bundle_digest(bundle)}.json"
+                    if not path.exists():
+                        created_paths.add(path)
+                    self._atomic_private_write(path, (canonical_bundle(bundle) + "\n").encode())
                 hook = getattr(self, "before_create_commit", None)
                 if hook is not None:
                     hook()
@@ -999,6 +1004,16 @@ class PageStore:
                         "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",  # noqa: E501
                         (page_id, "create_tool", digest, stamp),
                     )
+        except _RouteTaken:
+            self._cleanup_create_paths(created_paths)
+            # another call took the route while this one built: answer as that page now decides
+            return self.create_page(route, title, package, principal_id, tools)
+        except (ValidationError, PermissionError):
+            self._cleanup_create_paths(created_paths)
+            raise
+        except Exception as exc:
+            self._cleanup_create_paths(created_paths)
+            raise ValidationError("", "atomic page creation", "create_failed") from exc
         except BaseException:
             self._cleanup_create_paths(created_paths)
             raise
