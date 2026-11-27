@@ -13,8 +13,8 @@ const idle = () => () => {};
 const none = { refreshing: false } as ReturnType<ReturnType<typeof createAgentRunsReader>["snapshot"]>;
 
 // this chat's child runs: spawn, the run list, and the chosen run's detail with cancel and send. every write targets sessionId.
-export function ChatAgents({ client, sessionId, title, controls, send, initialRun, opener, onClose }: {
-  client: ZetaClient | null; sessionId: string; title: string; controls: ChildControls; send: ChildSendOwner;
+export function ChatAgents({ client, sessionId, title, controls, send, readOnly, initialRun, opener, onClose }: {
+  client: ZetaClient | null; sessionId: string; title: string; controls: ChildControls; send: ChildSendOwner; readOnly?: string;
   initialRun?: string; opener: HTMLElement | null; onClose(): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -41,14 +41,14 @@ export function ChatAgents({ client, sessionId, title, controls, send, initialRu
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="chat-agents-title">agents in this chat</h2></div>
         <div><button type="button" disabled={!reader || refreshing} onClick={refresh}>{refreshing ? "refreshing…" : "refresh"}</button><button type="button" onClick={onClose}>close</button></div></div>
       <div className="settings-content">
-        <AgentSpawn client={client} owner={controls} refresh={refresh} sessionId={sessionId} />
+        <AgentSpawn client={client} owner={controls} refresh={refresh} sessionId={sessionId} readOnly={readOnly} />
         {warning && <p role="status">{warning}</p>}
         {report && (rows.length ? <ul className="chat-agents-runs">{rows.map((row) => <li key={row.runId}>
           <button type="button" className="agents-row" aria-current={row.runId === chosenRun ? "true" : undefined} onClick={() => choose(row.runId)}>
             <span className="agents-row-copy"><span className="agents-row-title"><b>{row.agentType ?? "agent"}</b>{row.description ? ` ${row.description}` : ""}</span><small><StateTag row={row} /></small></span>
           </button>
         </li>)}</ul> : <p>no agents in this chat yet.</p>)}
-        {id && <AgentRunDetail chosen={chosen} parent={parent} title={title} id={id} client={client} send={send} controls={controls}
+        {id && <AgentRunDetail chosen={chosen} parent={parent} title={title} id={id} client={client} send={send} controls={controls} readOnly={readOnly}
           reportedAt={report?.reportedAt ?? 0} refreshing={refreshing} refresh={refresh} />}
       </div>
     </div>

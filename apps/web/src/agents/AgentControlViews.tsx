@@ -6,11 +6,12 @@ import { supportsFeature } from "../zeta/connection";
 import { controlFeature, displayControl as display, isTerminal, newerControls, readControlParent, runDisplayId, type ChildControls, type ControlParent } from "./childControls";
 import type { AgentRun } from "./reads";
 
-type Props = { client: ZetaClient | null; owner: ChildControls; refresh: () => void };
+// readOnly: why this tab cannot write (an observer tab); the controls stay visible but disabled.
+type Props = { client: ZetaClient | null; owner: ChildControls; refresh: () => void; readOnly?: string };
 const reason = (client: ZetaClient | null) => !client ? "connect to zeta to make changes." : !supportsFeature(client, controlFeature) ? newerControls : undefined;
 
 // sessionId: the chat on screen; spawn refuses a parent that is not that chat.
-export function AgentSpawn({ client, owner, refresh, sessionId }: Props & { sessionId?: string }) {
+export function AgentSpawn({ client, owner, refresh, sessionId, readOnly }: Props & { sessionId?: string }) {
   const [open, setOpen] = useState(false);
   const [parent, setParent] = useState<ControlParent | null>();
   const [name, setName] = useState("");
@@ -19,7 +20,7 @@ export function AgentSpawn({ client, owner, refresh, sessionId }: Props & { sess
   const [note, setNote] = useState("");
   const [activity, setActivity] = useState<HTMLDivElement | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const unavailable = reason(client);
+  const unavailable = readOnly ?? reason(client);
   useEffect(() => {
     if (!open || !client || unavailable) return;
     const stop = new AbortController();
@@ -67,13 +68,13 @@ export function AgentSpawn({ client, owner, refresh, sessionId }: Props & { sess
   </section>;
 }
 
-export function AgentCancel({ client, owner, refresh, row, title, parent, elapsed }: Props & {
+export function AgentCancel({ client, owner, refresh, row, title, parent, elapsed, readOnly }: Props & {
   row?: AgentRun; title?: string; parent?: AgentRun; elapsed: string;
 }) {
   const [review, setReview] = useState<{ id: number; row: AgentRun; title?: string; parent?: AgentRun; elapsed: string }>();
   const [activity, setActivity] = useState<HTMLDivElement | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const unavailable = reason(client) ?? (row && isTerminal(row.status) ? "this run is already terminal." : undefined);
+  const unavailable = readOnly ?? reason(client) ?? (row && isTerminal(row.status) ? "this run is already terminal." : undefined);
   return <>
     {row && <div className="agents-cancel">
       <button ref={opener} type="button" disabled={!!unavailable} data-write-surface={WRITE_SURFACE.agentsCancel}

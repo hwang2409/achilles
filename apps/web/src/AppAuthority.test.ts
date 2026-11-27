@@ -6,7 +6,7 @@ import type { RenderResult } from "@testing-library/react";
 import { isMac } from "./keyboard";
 import { draftStore } from "./draftStore";
 import { getSettings, SETTINGS_KEY, updateSettings } from "./settings";
-import { WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
+import { READ_ONLY_REASON, WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
 
 const { fireEvent, render } = await import("@testing-library/react");
 
@@ -628,6 +628,14 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
     const before = roles.length;
     const written = writes.length;
     expect(roles.at(-1)).toBe(authority);
+    if (authority === "observer") {
+      // a read-only tab shows the control disabled with the read-only reason and writes nothing
+      const control = spawning ? app.getByRole("button", { name: "+ spawn agent" }) : await app.findByRole("button", { name: "cancel run" });
+      expect(disabled(control)).toBe(true);
+      expect(app.getAllByText(READ_ONLY_REASON).length).toBeGreaterThan(0);
+      expect(writes.slice(written)).toEqual([]);
+      return;
+    }
     if (spawning) {
       await click(app.getByRole("button", { name: "+ spawn agent" }));
       await app.findByRole("option", { name: "fixture-profile" });
@@ -643,13 +651,9 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
     else await change(app.getByRole("textbox", { name: /type fixture-profile · ture-run to confirm/ }), "fixture-profile · ture-run");
     expect(confirm.disabled).toBe(false);
     await act(async () => { fireEvent.submit(confirm.form!); });
-    if (authority === "observer") {
-      expect(app.getByRole("alert").textContent).toMatch(/^zeta is still full at .+\.$/);
-    } else {
-      expect(await app.findByText(spawning ? /spawned fixture-profile as/ : /cancellation requested\./)).toBeTruthy();
-      expect(writes.slice(written)).toEqual([method]);
-      expect(roles.slice(before)).toEqual([]);
-    }
+    expect(await app.findByText(spawning ? /spawned fixture-profile as/ : /cancellation requested\./)).toBeTruthy();
+    expect(writes.slice(written)).toEqual([method]);
+    expect(roles.slice(before)).toEqual([]);
   } };
 }
 
@@ -691,13 +695,12 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(control.textContent).toBe("send to fixture-profile");
     expect(disabled(control)).toBe(true);
     await change(field, "fixture follow-up");
-    expect(disabled(control)).toBe(false);
+    expect(disabled(control)).toBe(authority === "observer");
     expect(writes.slice(written)).toEqual([]);
-    await click(control);
     if (authority === "observer") {
-      expect(await app.findByText(/^zeta is still full at .+\.$/)).toBeTruthy();
-      expect(field.value).toBe("fixture follow-up");
+      expect(app.getAllByText(READ_ONLY_REASON).length).toBeGreaterThan(0);
     } else {
+      await click(control);
       expect(await app.findByText("message accepted by zeta.")).toBeTruthy();
       didWrite(writes, "child_run_send");
       expect((app.getByRole("textbox", { name: "message fixture-profile" }) as HTMLTextAreaElement).value).toBe("");

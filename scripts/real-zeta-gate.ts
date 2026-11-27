@@ -11,6 +11,7 @@ import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, 
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
+import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
@@ -3635,7 +3636,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),

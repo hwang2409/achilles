@@ -446,7 +446,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
       error: active.approvalChange?.error }} />;
   const content = <>
     {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
-    {ready && agents && <ChatAgents key={ready.sessionId} client={client} sessionId={ready.sessionId} title={title} controls={childControls} send={childSend} initialRun={agents.run} opener={agents.opener} onClose={() => setAgents(null)} />}
+    {ready && agents && <ChatAgents key={ready.sessionId} client={client} sessionId={ready.sessionId} title={title} controls={childControls} send={childSend} readOnly={canWrite ? undefined : readOnlyReason} initialRun={agents.run} opener={agents.opener} onClose={() => setAgents(null)} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}

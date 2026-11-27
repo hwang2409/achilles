@@ -18,10 +18,10 @@ export function StateTag({ row }: { row: AgentRun }) {
   return <span className="agents-state" data-status={row.status}>{row.status}</span>;
 }
 
-export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follow, client, send, controls, reportedAt, refreshing, refresh }: {
+export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follow, client, send, controls, readOnly, reportedAt, refreshing, refresh }: {
   chosen?: AgentRun; parent?: AgentRun; title?: string; id?: string; invalid?: boolean;
   back?: Ref<HTMLAnchorElement>; follow?: (event: MouseEvent<HTMLAnchorElement>) => void;
-  client: ZetaClient | null; send?: ChildSendOwner; controls?: ChildControls; reportedAt: number; refreshing: boolean; refresh: () => void;
+  client: ZetaClient | null; send?: ChildSendOwner; controls?: ChildControls; readOnly?: string; reportedAt: number; refreshing: boolean; refresh: () => void;
 }) {
   return <section className="agents-detail" aria-label="agent run detail">
     <div className="agents-detail-scroll">
@@ -30,11 +30,11 @@ export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follo
         : <ModuleState kind="empty" title={id || invalid ? "run not in this view" : "select a run"}
           detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
       {chosen && !controls && <p className="agents-cancel">control this run from its chat.</p>}
-      {controls && <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh}
+      {controls && <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh} readOnly={readOnly}
         elapsed={chosen?.elapsedSeconds === undefined ? "elapsed unavailable" : `${duration(chosen.elapsedSeconds)} at last refresh`} />}
       {chosen && <RunActivity client={client} row={chosen} />}
     </div>
-    {chosen && send && <ChildComposer key={id} client={client} row={chosen} owner={send} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
+    {chosen && send && <ChildComposer key={id} client={client} row={chosen} owner={send} readOnly={readOnly} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
   </section>;
 }
 
