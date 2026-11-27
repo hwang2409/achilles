@@ -312,8 +312,9 @@ def create_app() -> Starlette:
             )
         except KeyError as exc:
             raise HTTPException(404, "chat not found") from exc
-        except ChatChanged as exc:
-            raise HTTPException(409, "chat changed") from exc
+        except ChatChanged:
+            # an expected race (the holder wrote first), not an error: answer the row as it is now
+            row = await anyio.to_thread.run_sync(store.chat, request.path_params["session_id"])
         return JSONResponse(row)
 
     async def page_tools(request):

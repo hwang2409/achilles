@@ -104,7 +104,7 @@ export class StopError extends Error {}
  * Stops one of this tab's parked chats. zeta has no stop for a parked chat, so: `resume` it (one's own parked chat never
  * meets parked_limit; the shown chat parks in its place), then `abort` it (its turn, approvals and background children;
  * not background tasks). The stopped chat is then zeta's attached session; the caller repeats its swap, which closes it.
- * Its row keeps its last state: it may still hold work, and the chat list check corrects it once zeta closed it.
+ * Its row reads idle once the abort lands (a chat that still holds work parks again, and its parked row says so).
  * `bindingOf` gives the chat's page binding, or null when achilles no longer lists the chat. Returns false when the
  * chat had already left (nothing to abort); throws StopError when abort fails (the parked list is read again first).
  */
@@ -120,6 +120,8 @@ export async function stopParked(client: ZetaClient, sessionId: string, bindingO
     await refreshParked(client).catch(() => null);
     throw new StopError(caught instanceof Error ? caught.message : String(caught));
   }
+  // stored before it leaves the parked list, so its row never falls back to the "running" stored while it was parked
+  await writeRowState(sessionId, rowState(undefined, { from: "closed" }).write);
   await refreshParked(client).catch(() => null);
   return true;
 }

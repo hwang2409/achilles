@@ -8,6 +8,7 @@ import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { useActiveChat } from "./useActiveChat";
 import { TOO_MANY_CHATS } from "./zeta/session";
+import { parkedRows, takeParkedEvent } from "./zeta/parked";
 import type { Chat } from "./surface/AgentNavAdapter";
 
 
@@ -257,14 +258,15 @@ test("a failed tool refresh on the first send keeps the new chat with a retry no
   expect(requests.at(-1)).toBe("send");
 });
 
-test("a failed tool refresh on the new chat button keeps its notice across the chat's own re-attach", async () => {
+test("a failed tool refresh on the new chat button keeps its notice, and the new chat is attached once", async () => {
   const harness = await refreshFailureHarness(1);
   const { requests, lastRefresh } = harness;
   await act(async () => { await harness.active.toggle(); });
   await act(async () => { await harness.active.newChat(); });
-  // publishReady selects the new chat, so the attach effect runs again for it and resumes it.
-  await flushUntil(() => harness.active.selectedId === "fresh" && requests.filter((method) => method === "resume").length === 2 && harness.active.state.phase === "ready");
+  // publishReady selects the new chat; the attach effect does not resume it a second time
+  await flushUntil(() => harness.active.selectedId === "fresh" && harness.active.state.phase === "ready");
   for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  expect(requests.filter((method) => method === "resume")).toHaveLength(1);
   let active = harness.active;
   expect(active.creationError).toBeNull();
   expect(active.toggleError).toContain("zeta could not refresh page tools: MCP tools/list timed out after 10s");
@@ -1325,29 +1327,34 @@ const TURN_ENDED = "the turn ended before zeta read it.";
 
 // "stop the oldest parked chat and try again": one owner (stopAndRetry) for both refusals of a new chat, parked_limit
 // (this tab keeps 3 chats running) and resident_limit (zeta is full). After the stop, the stopped chat is zeta's
-// attached session, not a parked one; a refused retry while zeta still has it says "still stopping" and never offers
-// to stop a second chat.
+// attached session, not a parked one; a refused retry while zeta still has it (it still holds work) is "still
+// stopping": the chat the user was on opens again (so the stopped chat parks again and the shown chat is no parked
+// row), and when zeta closes the stopped chat the swap runs once more by itself. It never offers to stop a second chat.
+type Answer = "ok" | { attached?: boolean; listed?: boolean };
 type StopRow = {
   name: string;
   // the answer to the repeated new_session: "ok", or a refusal; `attached`: zeta keeps the stopped chat attached;
   // `listed`: the refusal (parked_limit) or status (resident_limit) lists it
-  retry?: "ok" | { attached?: boolean; listed?: boolean };
-  // zeta's read of the stopped chat: it still holds work (a running child), or none
-  work?: boolean;
+  retry?: Answer;
   fail?: "resume" | "abort";
   move?: "away" | "double";
   outcome: "switched" | "still_stopping" | "refused_other" | "stop_failed" | "none";
+  // still stopping, then: zeta closes the stopped chat (the swap runs by itself, answered `again`), "try again", or "stay"
+  then?: "closes" | "try_again" | "stay";
+  again?: Answer;
 };
 const stopRows: StopRow[] = [
   { name: "the retry switches", retry: "ok", outcome: "switched" },
-  { name: "the stopped chat is still attached, with a running child", retry: { attached: true }, work: true, outcome: "still_stopping" },
-  { name: "the stopped chat is still attached, with no work", retry: { attached: true }, work: false, outcome: "still_stopping" },
-  { name: "the stopped chat is still listed", retry: { listed: true }, work: true, outcome: "still_stopping" },
+  { name: "still stopping, then the stopped chat closes: the switch runs by itself", retry: { attached: true }, outcome: "still_stopping", then: "closes", again: "ok" },
+  { name: "still stopping, then the stopped chat closes, refused again: the notice", retry: { attached: true }, outcome: "still_stopping", then: "closes", again: {} },
+  { name: "still stopping (listed), then the stopped chat closes", retry: { listed: true }, outcome: "still_stopping", then: "closes", again: "ok" },
+  { name: "still stopping, then try again", retry: { attached: true }, outcome: "still_stopping", then: "try_again", again: { attached: true } },
+  { name: "still stopping, then stay", retry: { listed: true }, outcome: "still_stopping", then: "stay" },
   { name: "other chats hold the slots", retry: {}, outcome: "refused_other" },
   { name: "the stop fails at resume", fail: "resume", outcome: "stop_failed" },
   { name: "the stop fails at abort", fail: "abort", outcome: "stop_failed" },
   { name: "the user opens another chat mid-stop", move: "away", outcome: "none" },
-  { name: "a double click", retry: { attached: true }, work: true, move: "double", outcome: "still_stopping" },
+  { name: "a double click", retry: { attached: true }, move: "double", outcome: "still_stopping", then: "stay" },
 ];
 const stopCases = (["parked_limit", "resident_limit"] as const).flatMap((limit) => stopRows.map((row) => ({ ...row, limit })));
 
@@ -1394,19 +1401,18 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
         zeta.newSessions += 1;
         // the first new chat is refused (the tab keeps 3 chats running, or zeta is full); the retry answers per row
         if (zeta.newSessions === 1) throw refusal(zeta.parked);
-        const answer = row.retry ?? {};
+        const answer = (zeta.newSessions === 2 ? row.retry : row.again) ?? {};
         if (answer === "ok") { zeta.parked = zeta.parked.filter((id) => id !== zeta.attached); zeta.attached = "fresh"; return { session: { session_id: "fresh" } }; }
         // after the stop zeta has p1 attached and p2, p3, chat parked. attached: p1 still holds work, so zeta keeps it
         // attached; listed: it parked again; neither: p1 closed, and "other" (another tab's chat... here a new
         // parked one) holds the slot
         if (answer.listed) { zeta.parked = ["p1", "p2", "p3"]; zeta.attached = "chat"; }
         else if (!answer.attached) { zeta.parked = ["p2", "p3", "other"]; zeta.attached = "chat"; }
+        // still attached (refused): zeta changed nothing; still parked (a later retry): it stays listed
+        else if (zeta.attached !== "p1" && !zeta.parked.includes("p1")) throw new Error("p1 is gone");
         throw refusal(zeta.parked);
       }
-      if (method === "state_session") {
-        const collection = (params as { collection?: string }).collection;
-        return { session: { status: "idle" }, items: row.work && collection === "agents" ? [{ status: "running" }] : [] };
-      }
+      if (method === "state_session") return { session: { status: "idle" } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       throw new Error(`unexpected ${method}`);
@@ -1448,9 +1454,9 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
       expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
       break;
     case "still_stopping":
-      // "background work" only when zeta shows the stopped chat holding some
-      expect(active.stop, "the stopped chat is named as still stopping").toEqual({ sessionId: "p1", from: "chat", phase: "still_stopping", work: row.work! });
+      expect(active.stop, "the stopped chat is named as still stopping").toMatchObject({ sessionId: "p1", from: "chat", phase: "still_stopping" });
       expect(active.busy, "the notice stays").toMatchObject({ limit: row.limit === "parked_limit" ? "parked" : "resident" });
+      stillStopping();
       break;
     case "refused_other":
       expect(active.stop).toBeNull();
@@ -1466,21 +1472,56 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
       expect(active.stop).toBeNull();
       break;
   }
-  if (row.outcome === "still_stopping") {
-    // "try again" stays a retry of that stop: refused again, it still names p1 and never aborts a second chat
-    calls.splice(0);
-    await act(async () => { active.retryStopped(); });
-    await settle();
-    expect(sent("abort")).toEqual([]);
-    expect(sent("new_session")).toHaveLength(1);
-    expect(active.stop).toEqual({ sessionId: "p1", from: "chat", phase: "still_stopping", work: row.work! });
-    // "stay" keeps the chat the user was on, which zeta has again; never the stopped chat
-    await act(async () => { await active.stay(); });
-    await settle();
+  // still stopping: zeta has the chat the user was on attached again, the stopped chat is one of this tab's parked chats
+  // (its row says so), and the shown chat is no parked row
+  function stillStopping() {
     expect(active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
-    expect(zeta.attached, "zeta kept the stopped chat attached after stay").toBe("chat");
-    expect(active.busy).toBeNull();
-    expect(active.stop).toBeNull();
+    expect(zeta.attached, "zeta kept the stopped chat attached while the screen shows the user's chat").toBe("chat");
+    const rows = parkedRows(client).map((entry) => entry.session_id);
+    expect(rows, "the shown chat still has a parked row").not.toContain("chat");
+    expect(rows, "the stopped chat is not one of this tab's parked chats").toContain("p1");
+  }
+  if (row.then) {
+    calls.splice(0);
+    if (row.then === "closes") {
+      // zeta closes the stopped chat (its work ended): no click, no timer
+      zeta.parked = zeta.parked.filter((id) => id !== "p1");
+      await act(async () => { takeParkedEvent(client, JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "parked_session_changed", session_id: "p1", data: { state: "closed" } } })); });
+      await settle();
+      expect(sent("new_session"), "the switch did not run by itself when the stopped chat closed").toHaveLength(1);
+      expect(sent("abort")).toEqual([]);
+      if (row.again === "ok") {
+        expect(active.stop).toBeNull();
+        expect(active.busy).toBeNull();
+        expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
+      } else {
+        // refused again by itself: the normal notice, with this tab's chats as they are now
+        expect(active.stop).toBeNull();
+        expect(active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
+        expect(active.busy?.parked?.map((entry) => entry.sessionId)).toEqual(["p2", "p3", "other"]);
+        // once only: nothing runs again
+        calls.splice(0);
+        await settle();
+        expect(sent("new_session")).toEqual([]);
+      }
+    } else if (row.then === "try_again") {
+      // "try again" stays a retry of that stop: refused again, it still names p1 and never aborts a second chat
+      await act(async () => { active.retryStopped(); });
+      await settle();
+      expect(sent("abort")).toEqual([]);
+      expect(sent("new_session")).toHaveLength(1);
+      expect(active.stop).toMatchObject({ sessionId: "p1", from: "chat", phase: "still_stopping" });
+      stillStopping();
+    } else {
+      // "stay" keeps the chat the user was on, which zeta has again; never the stopped chat, and no second resume
+      await act(async () => { await active.stay(); });
+      await settle();
+      expect(active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
+      expect(zeta.attached, "zeta kept the stopped chat attached after stay").toBe("chat");
+      expect(sent("resume"), "stay opened the shown chat again").toEqual([]);
+      expect(active.busy).toBeNull();
+      expect(active.stop).toBeNull();
+    }
   }
 });
 
@@ -1599,7 +1640,9 @@ test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zet
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
   const shown: string[] = [];
-  const Harness = () => { active = useActiveChat(client as never, true, clock as never, true); shown.push(active.state.phase === "ready" ? active.state.sessionId : active.state.phase); return null; };
+  // a new chat in progress over a shown chat: the "creating chat…" pane and a read-only composer would hide and lock it
+  let creatingOverKept = false;
+  const Harness = () => { active = useActiveChat(client as never, true, clock as never, true); shown.push(active.state.phase === "ready" ? active.state.sessionId : active.state.phase); if (active.creatingChat && active.state.phase === "ready") creatingOverKept = true; return null; };
   const settle = async () => { for (let flush = 0; flush < 30; flush += 1) { await act(async () => {}); clock.advance(1_000); } };
   await act(async () => { mounted = render(createElement(Harness)); });
   await flushUntil(() => active.state.phase === "ready");
@@ -1608,6 +1651,7 @@ test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zet
 
   await act(async () => { if (row.entry === "select") active.selectChat(listed.find((entry) => entry.session_id === "target")!); else void active.newChat(); });
   await settle();
+  expect(creatingOverKept, "the kept chat was covered by \"creating chat…\" and locked while zeta answered").toBe(false);
   const landed = row.entry === "select" ? "target" : "fresh";
   if (row.zeta !== "parks") {
     expect([...new Set(shown)], "the shown chat was replaced while zeta refused the swap").toEqual(["chat"]);
@@ -1629,6 +1673,8 @@ test.each(swapRows)("a swap keeps the shown chat until zeta answers: $entry, zet
     expect(active.busy).toBeNull();
     expect(active.stop).toBeNull();
     if (row.then === "stop") expect(calls.filter((call) => call.startsWith("abort")), "the oldest parked chat is stopped once").toEqual(["abort p1"]);
+    // the new chat is attached once (its page binding); selecting it after does not resume it again
+    if (row.entry === "new") expect(calls.filter((call) => call === "resume fresh"), "the new chat was resumed again after it attached").toHaveLength(1);
   } else {
     expect(shown.filter((id) => id !== "chat"), "the kept chat was replaced").toEqual([]);
     expect(active.state).toMatchObject({ phase: "ready", sessionId: "chat" });

@@ -717,7 +717,7 @@ const rows: Record<WriteSurfaceId, Row> = {
   } },
   "create.retry": creationAction("retry"),
   "create.discard": creationAction("discard"),
-  // this tab already keeps a chat running and zeta refuses to park one more: "stop ... and switch" stops it, then retries
+  // this tab already keeps a chat running and zeta refuses to park one more: "stop ... and open new chat" stops it, then retries
   "busy.retry": { kind: "visible", absent: true, options: { extraChat: { ...chat, session_id: "parked", title: "Parked chat" }, rpc: {
     new_session: (_params, requests) => requests.includes("abort") ? undefined as never : { error: { code: -32004, message: "parked limit", data: { reason: "parked_limit", parked: ["parked"] } } },
     status: () => ({ result: { session: { session_id: "session" }, state: "idle", parked_sessions: [{ session_id: "parked", state: "running", pending_approvals: 0 }] } }),
@@ -728,7 +728,7 @@ const rows: Record<WriteSurfaceId, Row> = {
       await keydown(select(app, '[data-part="composer"]'), "Enter");
     } else {
       const control = await waitFor(() => select(app, tag("busy.retry")), { timeout: 4000 });
-      expect(control.textContent).toBe('stop "Parked chat" and switch');
+      expect(control.textContent).toBe('stop "Parked chat" and open new chat');
       expect(disabled(control)).toBe(false);
       const before = writes.length;
       await click(control);
@@ -1267,10 +1267,10 @@ const refusal = { error: { code: -32014, message: "session is controlled by anot
 const heldElsewhere = (extra: Options = {}): Options => ({ attached: true, ...extra, rpc: { ...extra.rpc, resume: () => refusal } });
 const pendingApproval = { joined: { messages: [userMessage], status: { state: "tool", session: { session_id: "session" }, pending_approvals: [{ request_id: "waiting", delegated: false, tool_call: { id: "tool", name: "fixture", arguments: {} } }] } } };
 const chatWrites = (writes: string[]) => writes.filter((write) => write !== "resume");
-const chatOff = (selector: string) => async (app: RenderResult, writes: string[]) => {
+const chatOff = (selector: string, reason = controlledReason) => async (app: RenderResult, writes: string[]) => {
   const control = select(app, selector);
   expect(disabled(control)).toBe(true);
-  expect(control.getAttribute("title") ?? document.getElementById(control.getAttribute("aria-describedby") ?? "")?.textContent ?? app.container.textContent).toContain(controlledReason);
+  expect(control.getAttribute("title") ?? document.getElementById(control.getAttribute("aria-describedby") ?? "")?.textContent ?? app.container.textContent).toContain(reason);
   await click(control);
   expect(chatWrites(writes)).toEqual([]);
 };
@@ -1278,11 +1278,11 @@ test.each([
   ["composer.send", heldElsewhere({ joined: { messages: [userMessage] } }), async (app: RenderResult, writes: string[]) => {
     expect(app.container.querySelector(`button${tag("composer.send")}`)).toBeNull();
     const field = select(app, '[data-part="composer"] textarea');
-    expect(field.getAttribute("placeholder")).toBe("read-only: this chat is open or kept running in another tab");
+    expect(field.getAttribute("placeholder")).toBe("read-only");
     await keydown(field, "Enter");
     expect(chatWrites(writes)).toEqual([]);
   }],
-  ["approval.approve", heldElsewhere(pendingApproval), chatOff('[data-part="approval"] button[data-action="approve"]')],
+  ["approval.approve", heldElsewhere(pendingApproval), chatOff('[data-part="approval"] button[data-action="approve"]', "approve it in the tab that has this chat.")],
   ["composer.auto-approve", heldElsewhere(), chatOff(tag("composer.auto-approve"))],
   ["composer.create-mode", heldElsewhere(), chatOff(tag("composer.create-mode"))],
   ["page.chat", heldElsewhere({ page: { layout: { blocks: [{ type: "list", title: "Books", collection: "books" }] } } }), async (app: RenderResult, writes: string[]) => {

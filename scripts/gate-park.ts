@@ -62,11 +62,11 @@ export async function gateParkedChats(browser: Browser, origin: string, discover
     await tab.setViewportSize({ width: 1440, height: 900 });
     await notice.getByRole("button", { name: "stay", exact: true }).click();
     await waitFor(async () => urlChat() === ids[3] && await shown() === ids[3] && await notice.count() === 0, "stay keeps the shown chat");
-    // stop the oldest and switch: resume it, abort it, then the refused swap again
+    // stop the oldest and open the new chat: resume it, abort it, then the refused swap again
     await newChat.click();
     await notice.waitFor({ timeout: 30_000 });
     const beforeStop = frames.length;
-    await notice.getByRole("button", { name: 'stop "park hold 1" and switch', exact: true }).click();
+    await notice.getByRole("button", { name: 'stop "park hold 1" and open new chat', exact: true }).click();
     // the shown chat stays under the notice until the swap lands: wait for the new chat itself, its id in the url, the notice gone
     await waitFor(async () => !ids.includes(urlChat() ?? ids[0]!) && await notice.count() === 0, "stop-oldest opened the new chat");
     const stopFrames = sentSince(beforeStop);

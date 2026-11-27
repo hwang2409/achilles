@@ -44,9 +44,10 @@ describe("parked owner", () => {
     expect(parkedRows(client)).toEqual([{ session_id: "a", state: "running", pending_approvals: 1 }, { session_id: "c", state: "running", pending_approvals: 0 }]);
     expect(notified).toBe(4);
     // only a change of the shown state writes the chat's last_state, for every tab's sidebar
-    expect(patches).toEqual(['/api/chats/c {"last_state":"running"}', '/api/chats/a {"last_state":"approval"}']);
+    expect(patches).toEqual(['/api/chats/c {"last_state":"running"}', '/api/chats/a {"last_state":"approval"}', '/api/chats/b {"last_state":"idle"}']);
+    // parked and idle: zeta keeps it for its work (a background agent), so the row reads running, never blank
     takeParkedEvent(client, event("a", { state: "idle", pending_approvals: 0 }));
-    expect(patches.at(-1)).toBe('/api/chats/a {"last_state":"idle"}');
+    expect(patches.at(-1)).toBe('/api/chats/a {"last_state":"running"}');
   });
 
   test("each connection has its own rows", () => {
@@ -79,8 +80,8 @@ describe("stopParked", () => {
     const { sent, client } = zeta();
     expect(await stopParked(client as never, "a", async () => binding, () => true)).toBe(true);
     expect(sent).toEqual(["resume a", "abort a", "status"]);
-    // the row keeps its state: the chat may still hold work, and the chat list check corrects it once zeta closed it
-    expect(patches).toEqual([]);
+    // its row reads idle before it leaves the parked list (no "running" flash); if it still holds work, it parks again
+    expect(patches).toEqual(['/api/chats/a {"last_state":"idle"}']);
   });
 
   test.each([

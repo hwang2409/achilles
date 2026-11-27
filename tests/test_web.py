@@ -720,7 +720,8 @@ def test_a_compare_and_set_state_write_never_overwrites_the_holders_newer_state(
     client.patch("/api/chats/c", json={"last_state": "idle"})
     client.patch("/api/chats/c", json={"last_state": "running"})
     late = client.patch("/api/chats/c", json={"last_state": "idle", **expected})
-    assert late.status_code == 409
+    # a lost race answers the current row (no 409: the browser logs every 4xx as a console error)
+    assert late.status_code == 200 and late.json()["last_state"] == "running"
     assert client.get("/api/chats?include=c").json()["chats"][0]["last_state"] == "running"
     # unchanged since the read: the stale state is corrected
     seen = client.get("/api/chats?include=c").json()["chats"][0]

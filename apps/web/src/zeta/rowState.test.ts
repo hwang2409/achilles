@@ -3,7 +3,7 @@ import { parkedRows, refreshParked, takeParkedEvent } from "./parked";
 import { rowState, subscribeRowWrites, verifyChatStates, writeShownState, type RowState } from "./rowState";
 
 // achilles' chat rows as the server keeps them: an active state that changes moves updated_at, and a write with an
-// expected row is a compare-and-set (409 when the row changed), as in PageStore.update_chat
+// expected row is a compare-and-set (the row unchanged when it changed since the read), as in PageStore.update_chat
 type Row = { last_state: RowState | null; updated_at: string };
 let server = new Map<string, Row>();
 let clock = 0;
@@ -17,7 +17,7 @@ beforeEach(() => {
     const body = JSON.parse(String(init?.body)) as { last_state: RowState; expected_last_state?: RowState | null; expected_updated_at?: string };
     const row = server.get(id);
     if (!row) return new Response(null, { status: 404 });
-    if (body.expected_updated_at !== undefined && (row.last_state !== body.expected_last_state || row.updated_at !== body.expected_updated_at)) return new Response(null, { status: 409 });
+    if (body.expected_updated_at !== undefined && (row.last_state !== body.expected_last_state || row.updated_at !== body.expected_updated_at)) { stored += 1; return Response.json(row); }
     const moves = body.last_state !== "idle" && body.last_state !== row.last_state;
     server.set(id, { last_state: body.last_state, updated_at: moves ? `t${++clock}` : row.updated_at });
     stored += 1;
@@ -37,7 +37,7 @@ type Step =
 type RowCase = { name: string; stored: RowState | null; parkedAtStart?: boolean; steps: Step[]; shown: (RowState | null)[]; reads?: number };
 const rows: RowCase[] = [
   { name: "the shown chat runs, then goes idle", stored: null, steps: [{ attached: "running" }, { attached: "idle" }], shown: ["running", "idle"] },
-  { name: "a parked chat runs, goes idle, then closes", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "idle" } }, { parked: { state: "closed" } }], shown: ["idle", "idle"] },
+  { name: "a parked chat goes idle (only a background agent works), then closes", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "idle" } }, { parked: { state: "closed" } }], shown: ["running", "idle"] },
   { name: "a parked chat that closes while it runs", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "closed" } }], shown: ["idle"] },
   { name: "a parked chat needs you, then runs on", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "running", pending_approvals: 1 } }, { parked: { state: "running" } }], shown: ["approval", "running"] },
   { name: "the stale row of a closed tab", stored: "running", steps: [{ verify: "idle" }], shown: ["idle"] },
@@ -76,7 +76,7 @@ test.each(rows)("a chat row's state: $name", async (row) => {
   expect(shown, "the row's state after each step").toEqual(row.shown);
   expect(server.get("c")!.last_state, "the stored state every tab reads").toBe(row.shown.at(-1)!);
   if (row.reads !== undefined) expect(reads).toHaveLength(row.reads);
-  // each stored state loads every sidebar's list again, so no row waits for a reload
+  // each answered write (stored, or a lost compare-and-set) loads every sidebar's list again, so no row waits for a reload
   expect(reloads, "a stored state did not reload the chat list").toBe(stored);
   unsubscribe();
 });

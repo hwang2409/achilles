@@ -45,6 +45,8 @@ export const PageChatCatalog = createContext<{
   clearSearch: () => void;
   builds: readonly BuildRow[];
   onScreen: (id: string, shown: boolean) => void;
+  // this tab's parked chats: their rows read the live state (rowState)
+  parked?: readonly ParkedRow[];
 } | null>(null);
 
 // The views tell the build owner which build rows are on screen; the owner decides what to read. Returns a callback ref.
@@ -297,6 +299,7 @@ export function useAgentNavAdapter({ parked = [], sessionId, waiting, canWrite, 
         error: !search && Boolean(chatList.error), next: search ? null : chatList.next,
         reload: () => void chatListOwner.current!.reload(search), more: () => void chatListOwner.current!.more(),
         clearSearch: () => { setQuery(""); setSearch(""); },
+        parked,
       },
   };
 }

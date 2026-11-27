@@ -10,8 +10,8 @@ import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { applyApprovalMode, ChatBusyError, CONTROLLED_RETRIES, creationApprovalMode, loadSession, openHomeSession, pageBinding, ParkedLimitError, runningSession, SessionControlledError, SessionNotFoundError, TOO_MANY_CHATS } from "./zeta/session";
-import { holdAttached, parkedRows, reclaimHeld, refreshParked, stopParked } from "./zeta/parked";
-import { stoppedChatWork, writeShownState, type RowState } from "./zeta/rowState";
+import { holdAttached, parkedRows, reclaimHeld, refreshParked, stopParked, subscribeParked } from "./zeta/parked";
+import { writeShownState, type RowState } from "./zeta/rowState";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
@@ -31,10 +31,12 @@ type BusyChat = { sessionId: string | null; chat: Chat | null; retry: "attach" |
 /**
  * "stop the oldest parked chat, then the refused swap again" (parked_limit or resident_limit), one at a time:
  * stopping, then retrying until the swap's answer settles it. A switch clears it; a refusal while the stopped chat is
- * still zeta's (attached, or listed) is still_stopping (work: zeta still shows it holding work); another refusal clears
- * it (the notice lists the chats again); failed: the stop itself failed. from: the chat the user was on ("stay").
+ * still zeta's (attached, or listed: it still holds work) is still_stopping: the chat the user was on opens again, so
+ * the stopped chat parks again, and when zeta closes it the swap runs once more by itself (auto; a refusal then shows
+ * the notice again). Another refusal clears it (the notice lists the chats again); failed: the stop itself failed.
+ * from: the chat the user was on ("stay"). lease: the shown chat's lease when zeta refused (its next one is the reopen).
  */
-export type StopState = { sessionId: string; from: string | null } & ({ phase: "stopping" | "retrying" } | { phase: "still_stopping"; work: boolean } | { phase: "failed"; error: string });
+export type StopState = { sessionId: string; from: string | null } & ({ phase: "stopping" } | { phase: "retrying"; auto?: true } | { phase: "still_stopping"; lease: SessionLease | null } | { phase: "failed"; error: string });
 // the one swap attempt (select a chat, new chat, try again); kept: the chat shown when it began
 type Swap = { retry: "attach" | "new"; target: Chat | null; replace: boolean; kept: string | null };
 type Refusal = { kind: "busy"; sessionId: string | null } | { kind: "parked"; parked: string[] } | { kind: "resident" };
@@ -650,19 +652,18 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [applyActive]);
 
   // the answer to a swap repeated after a stop (see StopState): still_stopping while the stopped chat is still zeta's
-  // (attached, or listed). zeta's read of it decides the notice's words, and stores its row
-  const settleStop = useCallback(async (attached: string | null, listed: readonly string[]) => {
+  // (attached, or listed); the automatic repeat is never still_stopping again
+  const settleStop = useCallback((attached: string | null, listed: readonly string[]) => {
     const run = stopRef.current;
-    if (run?.phase !== "retrying" || !client) return;
-    const still = attached === run.sessionId || listed.includes(run.sessionId);
-    const work = await stoppedChatWork(client, run.sessionId, undefined);
-    if (stopRef.current === run) setStop(still ? { sessionId: run.sessionId, from: run.from, phase: "still_stopping", work: work !== false } : null);
-  }, [client, setStop]);
+    if (run?.phase !== "retrying") return;
+    const still = !run.auto && (attached === run.sessionId || listed.includes(run.sessionId));
+    setStop(still ? { sessionId: run.sessionId, from: run.from, phase: "still_stopping", lease: lastSnapshot.current?.ready.lease ?? null } : null);
+  }, [setStop]);
   // a stop's repeated swap that ends in an error: resident_limit asks whether the stopped chat is still zeta's; any other ends the run
   const stopRetryFailed = useCallback((resident: boolean) => {
     if (!client || stopRef.current?.phase !== "retrying") return;
     if (!resident) return setStop(null);
-    void refreshParked(client).catch(() => null).then((attached) => settleStop(attached, parkedRows(client).map((row) => row.session_id)));
+    void refreshParked(client).catch(() => null).then((attached) => { if (stopRef.current?.phase === "retrying") settleStop(attached, parkedRows(client).map((row) => row.session_id)); });
   }, [client, setStop, settleStop]);
 
   // The one owner of a swap attempt (select a chat, new chat, try again, stay): the shown chat, its composer and draft
@@ -680,6 +681,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (attempt) swap.current = null;
     if (refusal.kind === "busy") {
       const chat = refusal.sessionId ? await findChat(refusal.sessionId).catch(() => null) : null;
+      if (!owner.current.current(token)) return;
       applyActive(token, { kind: "busy", busy: { sessionId: refusal.sessionId, chat, retry } });
     } else {
       const attached = client ? await refreshParked(client).catch(() => null) : null;
@@ -690,8 +692,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       const targetId = attempt ? null : retry === "attach" ? selectedFromUrl() : null;
       const [target, ...chats] = await Promise.all([targetId ? findChat(targetId).catch(() => null) : attempt?.target ?? null, ...order.map((id) => findChat(id).catch(() => null))]);
       if (!owner.current.current(token)) return;
-      await settleStop(attached, order);
-      if (!owner.current.current(token)) return;
+      settleStop(attached, order);
       applyActive(token, { kind: "busy", busy: { sessionId: null, chat: null, retry, limit: refusal.kind, target, parked: order.map((id, at) => ({ sessionId: id, chat: chats[at] ?? null, finishing: !rows.includes(id) })) } });
     }
     // the kept chat stays on screen; its lease went with the attempt (and a stop may have left zeta another chat
@@ -707,7 +708,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     return { ...ready, page: { ...ready.page, create_mode: result.createMode ?? !enabled } };
   }, [client]);
 
-  const publishReady = useCallback((ready: ReadyState, token: number, readAt: number, replace = false, focus = false, select = true) => {
+  const attachedSelection = useRef<string | null>(null);
+  // select "attached": the chat is attached under its own attempt (new chat), so the attach effect skips the selection
+  const publishReady = useCallback((ready: ReadyState, token: number, readAt: number, replace = false, focus = false, select: boolean | "attached" = true) => {
     requireCurrent(owner.current, token);
     if (!applyActive(token, { kind: "snapshot", state: ready, readAt })) return;
     missingCreation.current = null;
@@ -716,14 +719,17 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const route = routeWithChat(ready.page.route === "/" ? "/" : ready.page.route, ready.sessionId);
     if (replace) history.replaceState({}, "", route); else history.pushState({}, "", route);
     if (focus) setFocusSessionId(ready.sessionId);
-    if (select) setSelectedId(ready.sessionId);
+    // one resume per new chat: the attach effect skips the selection it causes
+    if (select) setSelectedId((current) => { if (select === "attached" && current !== ready.sessionId) attachedSelection.current = ready.sessionId; return ready.sessionId; });
   }, [applyActive]);
 
   useEffect(() => {
     // read before the offline return: a retry clicked while offline must not stay set for a later, unrelated attach
     const retrying = retryingCreation.current; retryingCreation.current = false;
     refusedCreate.current = null;
+    const justPublished = attachedSelection.current; attachedSelection.current = null;
     if (!client || !connected) return;
+    if (justPublished !== null && justPublished === selectedId && lastSnapshot.current?.ready.sessionId === selectedId) return;
     const landing = location.pathname === createPath;
     const continuing = !landing && !!selectedId && location.hash === continueChatIntent;
     const startFresh = !landing && createAfterLoad.current && location.hash === newChatIntent;
@@ -767,7 +773,13 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (caught instanceof StaleAttachment || !owner.current.current(token)) return;
       // zeta is full: a switch keeps the shown chat under the notice
       if (tooMany(caught) && swap.current?.retry === "attach" && swap.current.kept) return void refused(token, "attach", { kind: "resident" });
+      // the screen shows this attach's error: the url names its chat, so a reload opens the same one
+      const attempt = swap.current;
       swap.current = null;
+      if (attempt?.retry === "attach" && attempt.target) {
+        const url = routeWithChat(location.pathname, attempt.target.session_id);
+        if (attempt.replace) history.replaceState({}, "", url); else history.pushState({}, "", url);
+      }
       stopRetryFailed(tooMany(caught));
       if (caught instanceof PendingCreationError && owner.current.current(token)) {
         setCreationPageId(caught.input.pageId);
@@ -840,7 +852,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     beginSwap(token, { retry: "new", target: null, replace }, state.phase !== "empty" && state.phase !== "busy" ? { phase: "loading" } : { phase: "empty", page: state.page, serverApprovalMode: state.serverApprovalMode, credential: state.credential, newChat: true });
     const kept = swap.current?.kept;
     try {
-      const next = await attachPage(client, key, null, owner.current, creation.current, token, true, canWrite ? applyPendingCreateMode : undefined, (ready) => publishReady(ready, token, readAt, replace, focusClaim.owns()), true, canWrite);
+      const next = await attachPage(client, key, null, owner.current, creation.current, token, true, canWrite ? applyPendingCreateMode : undefined, (ready) => publishReady(ready, token, readAt, replace, focusClaim.owns(), "attached"), true, canWrite);
       if (swap.current?.retry === "new" && next.phase === "ready") swap.current = null;
       // zeta refused the new chat: say why. with no chat shown, the new chat's box stays; text typed there was written
       // for a new chat, so it must never go to the running chat
@@ -896,15 +908,13 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (retry === "new") void newChat(); else if (target) goTo(target); else retryAttachment();
   }, [busy, canWrite, goTo, newChat, retryAttachment]);
   const openBusyChat = useCallback(() => { if (busy?.chat) selectChat(busy.chat); }, [busy, selectChat]);
-  // "stay" after a refused swap: the shown chat stayed (and zeta has it back). with none shown (zeta was full), open the
-  // chat the user was on before a stop, else the chat zeta has attached (after a reload too)
+  // "stay" after a refused swap: the shown chat stayed (and zeta has it back: `refused` opened it again). with none shown
+  // (zeta was full), open the chat the user was on before a stop, else the chat zeta has attached (after a reload too)
   const stay = useCallback(async () => {
-    const run = stopRef.current, from = run?.from ?? null;
+    const from = stopRef.current?.from ?? null;
     setBusy(null);
     setStop(null);
-    if (!client) return;
-    // a stop may have left zeta another chat attached: open the shown one again
-    if (state.phase === "ready") { if (run) setRouteRefresh((value) => value + 1); return; }
+    if (!client || state.phase === "ready") return;
     const status = from ? null : await client.request("status", {}).catch(() => null) as { session?: { session_id?: unknown } | null } | null;
     const id = from ?? status?.session?.session_id;
     const chat = typeof id === "string" ? await findChat(id).catch(() => null) : null;
@@ -936,13 +946,30 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setStop({ sessionId: oldest, from, phase: "retrying" });
     repeatSwap();
   }, [canWrite, client, repeatSwap, setStop, state]);
-  // "try again" while the stopped chat is still stopping: the swap again, still answered as that stop's retry
-  const retryStopped = useCallback(() => {
+  // "try again" while the stopped chat is still stopping (auto: zeta closed it): the swap again, answered as that stop's retry
+  const retryStopped = useCallback((auto = false) => {
     const run = stopRef.current;
     if (run?.phase !== "still_stopping") return;
-    setStop({ sessionId: run.sessionId, from: run.from, phase: "retrying" });
+    setStop({ sessionId: run.sessionId, from: run.from, phase: "retrying", ...(auto ? { auto: true } as const : {}) });
     repeatSwap();
   }, [repeatSwap, setStop]);
+  // still stopping: once the chat the user was on is open again (its next lease), the stopped chat is one of this tab's
+  // parked chats; when it leaves the parked list (zeta closed it), the swap runs once more by itself. no timer: zeta's
+  // parked_session_changed (closed) drives it, and one fresh read covers a close before the subscription
+  const stuck = stop?.phase === "still_stopping" ? stop : null;
+  const shownLease = state.phase === "ready" ? state.lease : null;
+  useEffect(() => {
+    if (!client || !stuck || !shownLease || shownLease === stuck.lease) return;
+    let fresh = false, done = false;
+    const check = () => {
+      if (done || !fresh || stopRef.current !== stuck || parkedRows(client).some((row) => row.session_id === stuck.sessionId)) return;
+      done = true;
+      retryStopped(true);
+    };
+    const unsubscribe = subscribeParked(client, check);
+    void refreshParked(client).catch(() => null).then(() => { fresh = true; check(); });
+    return () => { done = true; unsubscribe(); };
+  }, [client, retryStopped, shownLease, stuck]);
   useEffect(() => {
     if (!canWrite || !createAfterLoad.current) return;
     // "new chat" clicked while a missing page loaded: make the chat on home instead
@@ -1184,12 +1211,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
 
   // the chat this tab shows is zeta's attached session: remember it for a reload, and read the parked list again (the
   // chat left behind may have parked; a chat returned to is no longer parked, and zeta sends no event for that)
+  // (each attach: the chat opened again after a refused swap stays the same id, but leaves the parked list)
   const heldSessionId = state.phase === "ready" && canWrite && !state.controlledElsewhere ? state.sessionId : null;
+  const heldLease = heldSessionId && state.phase === "ready" ? state.lease : null;
   useEffect(() => {
     if (!client || !heldSessionId) return;
     holdAttached(heldSessionId);
     void refreshParked(client).catch(() => {});
-  }, [client, heldSessionId]);
+  }, [client, heldSessionId, heldLease]);
 
   // The notice for a running chat clears itself when that turn ends; a blocked attach of another chat then retries.
   const openSessionId = state.phase === "ready" ? state.sessionId : null;
@@ -1214,5 +1243,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [canWrite, state]);
 
   const approvalMode = "page" in state ? creationApprovalMode(state.page.approval_mode, autoApproveDefault) : null;
-  return { build: { approvalMode, draft: buildDraft, setDraft: setBuildDraft, pending: startingChat === "build", unavailable: startingChat !== null, error: buildError, locked: Boolean(buildTarget.current?.deliveryId), start: buildPage }, state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat: startingChat === "new", startingChat: startingChat !== null, focusSessionId, retrySaving, discardCreation, retryAttachment, retryLimit, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat, stay, stop, stopAndRetry, retryStopped };
+  return { build: { approvalMode, draft: buildDraft, setDraft: setBuildDraft, pending: startingChat === "build", unavailable: startingChat !== null, error: buildError, locked: Boolean(buildTarget.current?.deliveryId), start: buildPage }, state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat: startingChat === "new" && state.phase !== "ready", startingChat: startingChat !== null, focusSessionId, retrySaving, discardCreation, retryAttachment, retryLimit, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat, stay, stop, stopAndRetry, retryStopped };
 }

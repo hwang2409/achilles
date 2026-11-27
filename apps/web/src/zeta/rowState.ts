@@ -16,15 +16,14 @@ export type Live =
   // zeta's status of a chat this tab does not hold; null: zeta has no such session
   | { from: "zeta"; status: unknown };
 
-// a chat that does no work: idle, unless its last turn failed
-const settled = (stored: RowState | null) => stored === "failed" ? "failed" : "idle";
-function liveState(stored: RowState | null, live: Live): RowState | null {
+function liveState(live: Live): RowState | null {
   switch (live.from) {
     case "attached": return live.state;
-    case "parked": return live.row.pending_approvals > 0 ? "approval" : live.row.state === "idle" ? settled(stored) : "running";
-    case "closed": return settled(stored);
+    // parked means zeta keeps it for its work (an idle chat with only a background agent too): it always reads running
+    case "parked": return live.row.pending_approvals > 0 ? "approval" : "running";
+    case "closed": return "idle";
     case "zeta":
-      if (live.status === null || live.status === "idle") return settled(stored);
+      if (live.status === null || live.status === "idle") return "idle";
       return live.status === "running" || live.status === "tool" ? "running" : live.status === "approval" || live.status === "failed" ? live.status : null;
   }
 }
@@ -34,7 +33,7 @@ function liveState(stored: RowState | null, live: Live): RowState | null {
  * shows and the state to store (null: no write; an unknown live status changes nothing).
  */
 export function rowState(stored: RowState | null | undefined, live?: Live): { shown: RowState | null; write: RowState | null } {
-  const next = live ? liveState(stored ?? null, live) : null;
+  const next = live ? liveState(live) : null;
   return { shown: next ?? stored ?? null, write: next !== null && next !== stored ? next : null };
 }
 
@@ -47,7 +46,8 @@ export function subscribeRowWrites(listener: () => void) {
 
 /**
  * Stores a row's state. `expected` (the row as read) makes it a compare-and-set: a tab that does not hold the chat never
- * overwrites a newer state of the tab that does (achilles answers 409, and nothing changes).
+ * overwrites a newer state of the tab that does (achilles answers the row as it is, and nothing changes; the list
+ * loads again either way).
  */
 export async function writeRowState(sessionId: string, state: RowState | null, expected?: { last_state: RowState | null; updated_at: string }, fetchFn: typeof fetch = fetch): Promise<boolean> {
   if (state === null) return false;
@@ -63,17 +63,17 @@ export async function writeRowState(sessionId: string, state: RowState | null, e
 /** This tab's shown chat changed state (its header): only this tab holds it, so the state is stored as is. */
 export const writeShownState = (sessionId: string, state: RowState) => writeRowState(sessionId, rowState(undefined, { from: "attached", state }).write);
 
-type ZetaRead = { session?: { status?: unknown } | null; items?: Array<{ status?: unknown }> } | null;
+type ZetaRead = { session?: { status?: unknown } | null } | null;
 const notFound = (caught: unknown) => {
   const error = caught as { code?: unknown; data?: { code?: unknown } | null } | null;
   return error?.code === -32602 && error.data?.code === "session_not_found";
 };
-// zeta's status of a chat (null: no such session; undefined: the read failed) and the items of one collection
-async function readChat(client: ZetaClient, sessionId: string, collection: string, limit = 200): Promise<{ status: unknown; items: Array<{ status?: unknown }> }> {
+// zeta's status of a chat (null: no such session; undefined: the read failed)
+async function readStatus(client: ZetaClient, sessionId: string): Promise<unknown> {
   try {
-    const read = await client.request("state_session", { session_id: sessionId, collection, limit }) as ZetaRead;
-    return { status: read?.session?.status, items: Array.isArray(read?.items) ? read.items : [] };
-  } catch (caught) { return { status: notFound(caught) ? null : undefined, items: [] }; }
+    const read = await client.request("state_session", { session_id: sessionId, collection: "attention", limit: 1 }) as ZetaRead;
+    return read?.session?.status;
+  } catch (caught) { return notFound(caught) ? null : undefined; }
 }
 
 type ListedChat = { session_id: string; last_state?: RowState | null; updated_at?: string };
@@ -85,26 +85,10 @@ type ListedChat = { session_id: string; last_state?: RowState | null; updated_at
 export async function verifyChatStates(client: ZetaClient, chats: readonly ListedChat[], held: ReadonlySet<string>, fetchFn: typeof fetch = fetch): Promise<number> {
   const stale = chats.filter((chat) => (chat.last_state === "running" || chat.last_state === "approval") && !held.has(chat.session_id));
   const changed = await Promise.all(stale.map(async (chat) => {
-    const { status } = await readChat(client, chat.session_id, "attention", 1);
+    const status = await readStatus(client, chat.session_id);
     if (status === undefined) return false;
     const stored = chat.last_state ?? null;
     return writeRowState(chat.session_id, rowState(stored, { from: "zeta", status }).write, chat.updated_at ? { last_state: stored, updated_at: chat.updated_at } : undefined, fetchFn);
   }));
   return changed.filter(Boolean).length;
-}
-
-/**
- * A chat this tab just stopped: does zeta still show it holding work (its turn or an approval, a running or finishing
- * child, a running background task)? Stores the state zeta shows for its row (this tab holds it). null: unknown.
- */
-export async function stoppedChatWork(client: ZetaClient, sessionId: string, stored: RowState | null | undefined): Promise<boolean | null> {
-  const [agents, tasks] = await Promise.all([readChat(client, sessionId, "agents"), readChat(client, sessionId, "background_tasks")]);
-  if (agents.status === undefined) return null;
-  const work = agents.status === "running" || agents.status === "approval" || agents.status === "tool"
-    || agents.items.some((item) => item.status === "running" || item.status === "waiting")
-    || tasks.items.some((item) => item.status === "running");
-  // a chat that still holds work reads "running" (as a parked one does), even when its own turn ended
-  const status = work && agents.status !== "approval" ? "running" : agents.status;
-  void writeRowState(sessionId, rowState(stored, { from: "zeta", status }).write);
-  return work;
 }
