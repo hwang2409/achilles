@@ -614,13 +614,15 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   const name = (sessionId: string) => nameOf(chatOf(sessionId));
   const oldest = parked.find((entry) => !entry.finishing);
   const stuck = stop?.phase === "still_stopping";
-  const running = stop?.phase === "stopping" ? "stopping…" : stop?.phase === "retrying" ? "trying again…" : null;
+  // one line for the whole run, the stop and the repeated swap, until zeta answers
+  const running = stop?.phase === "stopping" || stop?.phase === "retrying";
   const verb = kind === "resident" ? "try again" : busy?.retry === "new" ? "open new chat" : "switch";
   const target = busy?.retry === "new" ? "open a new chat" : busy?.target ? `open ${nameOf(busy.target)}` : "open that chat";
   const failed = stop?.phase === "failed" ? `${stop.error}. ` : "";
   const list = <>{parked.map((entry, at) => <span key={entry.sessionId}>{at > 0 && ", "}{entry.chat ? <button type="button" className="link-button" onClick={() => onOpen(entry.chat!)}>{name(entry.sessionId)}</button> : name(entry.sessionId)}{entry.finishing && " (finishing)"}</span>)}</>;
   // a refused swap after a stop: the stopped chat still holds work (it is parked), or zeta has not closed it yet
-  const text = stop?.phase === "stopping" ? <>stopping {name(stop.sessionId)}…</>
+  const stopped = stop ? chatOf(stop.sessionId) : null;
+  const text = running ? <>stopping {stopped ? <button type="button" className="link-button" onClick={() => onOpen(stopped)}>{name(stop.sessionId)}</button> : name(stop.sessionId)}…</>
     : stuck ? stop.working ? <>{name(stop.sessionId)} is still finishing its background work. try again when it is done.</> : <>zeta has not freed {name(stop.sessionId)} yet. try again in a moment, or stay.</>
     : kind === "parked" ? <>{failed}this tab already keeps {parked.length === 1 ? "1 chat" : `${parked.length} chats`} running: {list}. zeta allows 3 per tab. stop one to {target} here, or stay.</>
     // resident: only this tab's own chats are named; the rest are other tabs' (or recently closed ones), which it cannot see
@@ -629,7 +631,7 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
   return <div ref={element} className={className} role="alert" tabIndex={-1}>
     <p>{text}</p>
     <span className="chat-held-actions">
-      {running ? <button type="button" className="ui-button" disabled>{running}</button>
+      {running ? <button type="button" className="ui-button" disabled>stopping…</button>
         : stuck ? <button type="button" className="ui-button" onClick={() => onRetryStopped()}>try again</button>
         : <>{onRetry && <button type="button" className="ui-button" onClick={onRetry}>try again</button>}
           {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop <span className="limit-title">{name(oldest.sessionId)}</span> and {verb}</button>}</>}

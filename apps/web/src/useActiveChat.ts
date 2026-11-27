@@ -643,7 +643,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     }
     return true;
   }, [setStop]);
-  // the too-many-chats screen stays while a stop's repeated swap runs (its notice says "trying again…")
+  // the too-many-chats screen stays while a stop's repeated swap runs (its notice still says "stopping …")
   const stopRetryView = (current: State) => current.phase === "error" && current.error === TOO_MANY_CHATS && stopRef.current?.phase === "retrying";
   // the /#new-chat path: this tab opens the page fresh and creates a chat once the page loads
   const openFresh = useCallback((route: string, replace: boolean) => {
@@ -683,7 +683,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const leaveNotice = useCallback(() => { setBusy(null); setStop(null); }, [setStop]);
   const beginSwap = useCallback((token: number, attempt: Omit<Swap, "kept">, fallback: State) => {
     setSwap({ ...attempt, kept: state.phase === "ready" ? state.sessionId : null });
-    // a stop's own repeated swap keeps its run and notice ("trying again…") until zeta answers
+    // a stop's own repeated swap keeps its run and notice ("stopping …") until zeta answers
     if (stopRef.current?.phase !== "retrying") leaveNotice();
     applyActive(token, { kind: "state", update: (current) => current.phase === "ready" ? current : fallback });
   }, [applyActive, leaveNotice, setSwap, state]);

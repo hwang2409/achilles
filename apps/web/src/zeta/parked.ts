@@ -125,7 +125,7 @@ export async function stopParked(client: ZetaClient, sessionId: string, bindingO
   await writeRowState(sessionId, rowState(undefined, { from: "closed" }).write);
   const backBinding = back && back !== sessionId && current() ? await bindingOf(back) : null;
   // a failed resume back leaves the stopped chat attached: the caller's swap then meets the limit and says so
-  if (back && backBinding) await rebindPage(client, back, backBinding).catch(() => null);
+  if (back && backBinding && current()) await rebindPage(client, back, backBinding).catch(() => null);
   await refreshParked(client).catch(() => null);
   return true;
 }

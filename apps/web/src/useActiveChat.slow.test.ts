@@ -1345,7 +1345,7 @@ type StopRow = {
   // another chat of this tab took the freed slot
   other?: true;
   fail?: "resume" | "abort";
-  move?: "away" | "double" | "new_during_wait";
+  move?: "away" | "double" | "new_during_wait" | "during_back";
   limits?: readonly ("parked_limit" | "resident_limit")[];
   outcome: "switched" | "still_working" | "not_freed" | "refused_other" | "stop_failed" | "none" | "new_chat";
   // still stopping, then: "try again", "stay", or the user's New chat while zeta closes the stopped chat
@@ -1364,6 +1364,7 @@ const stopRows: StopRow[] = [
   { name: "the stop fails at resume", fail: "resume", outcome: "stop_failed" },
   { name: "the stop fails at abort", fail: "abort", outcome: "stop_failed" },
   { name: "the user opens another chat mid-stop", move: "away", outcome: "none" },
+  { name: "the user opens another chat while the stop resumes back", move: "during_back", outcome: "none" },
   { name: "a double click", p1: "parks", move: "double", outcome: "still_working", then: "stay" },
 ];
 const stopCases = (["parked_limit", "resident_limit"] as const).flatMap((limit) => stopRows.filter((row) => !row.limits || row.limits.includes(limit)).map((row) => ({ ...row, limit })));
@@ -1379,6 +1380,8 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
     fetch: async (input: string | URL | Request) => {
       const url = String(input);
       if (url === "/api/pages/home") return Response.json(page);
+      // the first credential read after the abort is the stop's binding for the chat it resumes back
+      if (url === "/api/pages/home/credential" && zeta.aborted && row.move === "during_back" && !backRead) { backRead = true; await backGate.promise; }
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
       if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
       if (url === "/api/pages/home/session") return Response.json({ session_id: "fresh" });
@@ -1393,6 +1396,8 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
   const leave = (id: string) => { if (parks(id)) zeta.parked = [...zeta.parked, id]; else if (row.counted) zeta.closing.push(id); };
   const calls: string[] = [];
   const midStop = deferred<void>();
+  const backGate = deferred<void>();
+  let backRead = false;
   const userNewChat = deferred<void>();
   const refusal = (parkedIds: string[]) => row.limit === "parked_limit"
     ? Object.assign(new Error("parked limit"), { code: -32004, data: { reason: "parked_limit", parked: parkedIds } })
@@ -1453,6 +1458,7 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
   expect(active.busy).toMatchObject({ limit: row.limit === "parked_limit" ? "parked" : "resident" });
   expect(active.busy?.parked?.map((entry) => entry.sessionId)).toEqual(["p1", "p2", "p3"]);
   calls.splice(0);
+  const sent = (method: string) => calls.filter((call) => call.startsWith(method));
 
   await act(async () => { void active.stopAndRetry(); if (row.move === "double") void active.stopAndRetry(); });
   if (row.move === "away") {
@@ -1460,21 +1466,29 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
     await act(async () => { active.selectChat(listed.find((entry) => entry.session_id === "other")!); });
     midStop.resolve();
   }
+  if (row.move === "during_back") {
+    await settle();
+    expect(sent("abort"), "the stop did not reach its resume back").toEqual(["abort p1"]);
+    await act(async () => { active.selectChat(listed.find((entry) => entry.session_id === "other")!); });
+    await settle();
+    backGate.resolve();
+  }
   await settle();
-  const sent = (method: string) => calls.filter((call) => call.startsWith(method));
   if (row.p1 === "parks" && !row.fail) {
     // p1 still holds work: the stop waits for zeta to close it, and nothing is repeated yet
     expect(active.stop, "the stop does not wait for zeta to close p1").toMatchObject({ sessionId: "p1", phase: "stopping" });
     expect(sent("new_session"), "the swap was repeated before zeta closed p1").toEqual([]);
     if (row.move === "new_during_wait") {
+      // zeta answers the New chat first (refused: p1 still holds its slot), then closes p1: the ended wait must not
+      // repeat the stop's swap
       let created!: Promise<void>;
       await act(async () => { created = active.newChat(); });
       expect(active.stop, "the user's New chat did not end the wait").toBeNull();
-      await closeP1();
-      await settle();
       await act(async () => { userNewChat.resolve(); await created; });
       await settle();
-      expect(active.state, "the user's New chat did not open").toMatchObject({ phase: "ready", sessionId: "fresh" });
+      expect(active.busy, "the user's New chat got no answer of its own").toMatchObject({ limit: row.limit === "parked_limit" ? "parked" : "resident" });
+      await closeP1();
+      await settle();
       expect(sent("new_session"), "the stop repeated its swap after the user's New chat").toHaveLength(1);
       expect(active.stop).toBeNull();
       return;
@@ -1491,7 +1505,12 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
 
   expect(sent("resume p1"), "the oldest parked chat (zeta's order) is resumed once").toHaveLength(1);
   expect(sent("abort"), "one chat is aborted at most").toEqual(row.fail === "resume" || row.move === "away" ? [] : ["abort p1"]);
-  expect(sent("new_session"), "the refused new chat is repeated once, after the stop").toHaveLength(row.fail || row.move === "away" ? 0 : 1);
+  expect(sent("new_session"), "the refused new chat is repeated once, after the stop").toHaveLength(row.fail || row.move === "away" || row.move === "during_back" ? 0 : 1);
+  if (row.move === "during_back") {
+    expect(calls.slice(calls.indexOf("resume other")), "the stop resumed the chat the user left after the user opened another").not.toContain("resume chat");
+    expect(zeta.attached, "zeta and the screen disagree on the open chat").toBe("other");
+    expect(active.state).toMatchObject({ phase: "ready", sessionId: "other" });
+  }
   switch (row.outcome) {
     case "switched":
       expect(active.stop).toBeNull();
