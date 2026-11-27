@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
 import { useBuildActivity, type BuildActivity } from "../create/buildActivity";
 import { AppShell, type AppShellProps } from "../AppShell";
@@ -63,7 +63,6 @@ export function SurfaceRouter() {
   const [childSend] = useState(() => createChildSendOwner(connection));
   const [mcpOwner] = useState(() => createMcpOwner({
     live: () => connection.client,
-    liveObserver: () => connection.state.phase === "connected" && connection.state.authority === "observer" ? connection.client : null,
     acquire: async () => await connection.takeControl() === null && connection.state.phase === "connected"
       && connection.state.authority === "controller" ? connection.client : null,
   }));
@@ -93,7 +92,7 @@ export function SurfaceRouter() {
       continuing.current = false;
     }
   };
-  const observerBanner = observer && route?.id !== "accounts" && <ObserverBanner connection={connection} />;
+  const observerBanner = observer && <ObserverBanner connection={connection} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!catalog) {
     return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} childControls={childControls} childSend={childSend} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
@@ -114,7 +113,7 @@ export function SurfaceRouter() {
   } else if (route.id === "agents") {
     content = <AgentsModule client={client} connecting={connecting} retry={() => connection.retryNow()} />;
   } else if (route.id === "connections") {
-    content = <McpModule client={client} observer={connectionState.phase === "connected" && connectionState.authority === "observer"} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
+    content = <McpModule client={client} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
   } else if (route.id === "settings") {
     content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
   } else if (route.id === "accounts") {
@@ -122,8 +121,11 @@ export function SurfaceRouter() {
   } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
-  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}
-    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow(), continueSession } : undefined}>{content}{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
+  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={observerBanner}
+    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow(), continueSession } : undefined}>
+    {/* keyed on the tab's role: a tab that takes control (or falls back to observer) mounts every module fresh, so each
+        reads again with its new authority instead of keeping an observer-era error */}
+    <Fragment key={observer ? "observer" : "controller"}>{content}</Fragment>{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
 }
 
 // library_read_v1 path when hello granted it; each exact method is checked, so a catalog can work without its read.
@@ -169,11 +171,11 @@ function ObserverBanner({ connection }: { connection: Connection }) {
     setFeedback(reason);
   };
   return <aside className="observer-banner" aria-label="observer mode">
-    <div>
-      <strong>zeta is full</strong>
-      <span id="tab-authority-description">this tab is read-only and stays live: too many tabs control zeta, or another app does.</span>
-    </div>
-    <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
+    <p>
+      <strong>zeta is full.</strong>{" "}
+      <span id="tab-authority-description">this tab is read-only and shows updates. close another zeta tab, then take control.</span>
+    </p>
+    <div className="observer-action"><button type="button" className="primary" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button></div>
     {/* its own full-width row under the text and the button, so a long refusal does not squeeze the text */}
     <span id="take-control-feedback" role="status">{feedback}</span>
   </aside>;

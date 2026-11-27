@@ -69,7 +69,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   const landing = useRef<TelemetryState | null>(null);
   const reread = useCallback(() => {
     const mine = ++generation.current;
-    // the live client: a reread asked for by a borrowed write runs after control went back
+    // the live client: a write that took control replaced the socket this page read with
     readHomeSettings(live() ?? client).then(
       (settings) => { if (mine === generation.current) setLoad({ kind: "ready", settings }); },
       (error) => { if (mine === generation.current) setLoad({ kind: "failed", unsafe: (error as { data?: { code?: unknown } })?.data?.code === "settings_unsafe" }); });

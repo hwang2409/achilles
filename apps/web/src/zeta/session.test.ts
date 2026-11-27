@@ -81,7 +81,7 @@ describe("openHomeSession", () => {
 
   // -32004 has two meanings in multi-controller mode: this tab's own turn runs, or zeta holds all the chats it allows
   test.each([
-    ["resident_limit -> too many chats, not busy", { reason: "resident_limit" }, TooManyChatsError, "zeta has too many open chats. close a chat tab or wait, then try again.", ["resume"]],
+    ["resident_limit -> too many chats, not busy", { reason: "resident_limit" }, TooManyChatsError, "zeta has too many open chats. a closed tab keeps its chat open for about 90 s, so wait a minute or close a chat tab, then try again.", ["resume"]],
     ["no reason, this tab's turn runs -> busy", undefined, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
     ["another reason -> busy", { reason: "future_reason" }, ChatBusyError, "this tab's chat is still running, so zeta could not open another chat here", ["resume", "status"]],
   ] as const)("a -32004 resume refusal: %s", async (_name, data, kind, message, sent) => {

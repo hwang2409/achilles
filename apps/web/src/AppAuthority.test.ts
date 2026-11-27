@@ -15,10 +15,10 @@ const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: n
 const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "mcp_auth_status", "agent_run_catalog", "list_sessions", "state_sessions", "state_session"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
-// `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
+// `path`: the route to open (default the chats route).
 // `slot`: like zeta, one controller at a time across every socket (a second controller hello gets -32001); `roles`
 // records each hello role.
-type Options = { path?: string; observerBanner?: false; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
+type Options = { path?: string; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   options.roles?.splice(0);
@@ -91,14 +91,14 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
     const { SurfaceRouter } = await import("./surface/SurfaceRouter");
     app = render(createElement(SurfaceRouter));
     await act(async () => {});
+    // an observer connects after a refused controller hello: give that fallback a few turns to land
+    for (let turn = 0; turn < 20 && authority === "observer" && !app.container.querySelector(".observer-banner"); turn++) await act(async () => {});
     const banner = app.container.querySelector(".observer-banner");
-    if (options.observerBanner === false) {
-      expect(banner).toBeNull();
-    } else if (authority === "observer") {
-      expect(banner?.textContent).toContain("this tab is read-only and stays live: too many tabs control zeta, or another app does.");
+    if (authority === "observer") {
+      expect(banner?.textContent).toContain("this tab is read-only and shows updates. close another zeta tab, then take control.");
       expect(banner?.getAttribute("hidden")).toBeNull();
     } else {
-      expect(banner).toBeNull();
+      expect(banner === null, "a controller tab showed the observer banner").toBe(true);
       expect(requests).toContain("hello");
     }
     await check(app, writes, requests, emit);
@@ -132,7 +132,7 @@ const select = (app: RenderResult, selector: string) => {
 };
 
 const sessionDetail = (metadata: object = {}): Options => ({
-  path: "/sessions/session", observerBanner: false,
+  path: "/sessions/session",
   rpc: { status: () => ({ result: { session: null, state: "idle" } }), list_sessions: () => ({ result: { sessions: [{ session_id: "session", name: "Fixture session", project_id: "other-project", parent_session_id: null, in_use: false, ...metadata }], next_offset: null } }) },
 });
 
@@ -177,7 +177,7 @@ const composer = (action: "send" | "steer" | "abort", options: Options = { attac
   const control = app.container.querySelector<HTMLElement>(`button${tag(`composer.${action}`)}`);
   if (authority === "observer") {
     expect(Boolean(control)).toBe(false);
-    expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("Read-only");
+    expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("read-only");
     await keydown(field ?? select(app, '[data-part="composer"]'), "Enter");
   } else {
     expect(Boolean(control) && !disabled(control!), `${action}: ${field?.outerHTML}; ${control?.outerHTML}`).toBe(true);
@@ -223,7 +223,7 @@ const pendingKey = "achilles-pending-chats";
 const sha256 = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 // The skills route with library_read_v1, and library_write_v1 + skill_write when `writes` (each part can be withheld).
 // Like zeta, hello lists a controller-write method only to a controller.
-const library = (writes: boolean, feature = writes, method = writes): Options => ({ path: "/skills", observerBanner: false, rpc: {
+const library = (writes: boolean, feature = writes, method = writes): Options => ({ path: "/skills", rpc: {
   hello: (params) => ({ result: { protocol_version: "1.2", capabilities: {
     features: (params.features as string[]).filter((name) => name !== "library_write_v1" || feature),
     requests: ["skill_catalog", "skill_read", ...(method && params.role === "controller" ? ["skill_write"] : [])],
@@ -236,7 +236,7 @@ const libraryFile: Options = { ...library(true), rpc: { ...library(true).rpc,
   skill_catalog: () => ({ result: { revision: "r", data: { items: [{ name: "fixture-skill", description: "synthetic skill", keywords: [], source: "home", scope: "home", editable: true, diagnostics: [] }] } } }),
   skill_read: async () => ({ result: { revision: await sha256(fixtureFile), data: { name: "fixture-skill", frontmatter: {}, body: "body\n", source: "home", editable: true, redacted: false, document: fixtureFile } } }),
 } };
-const homeSettings: Options = { path: "/settings", observerBanner: false, rpc: {
+const homeSettings: Options = { path: "/settings", rpc: {
   hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: params.role === "controller" ? ["home_settings_get", "home_settings_update"] : ["home_settings_get"] } } }),
   // a read after the update sees it: the borrow reconnects, and each new socket reads again
   home_settings_get: (_params, requests) => ({ result: { revision: `sha256:${(requests.includes("home_settings_update") ? "b" : "a").repeat(64)}`, settings: { telemetry: requests.includes("home_settings_update") ? { enabled: true, source: "builtin", editable: true } : { enabled: false, source: "off", editable: true } }, settings_malformed: false } }),
@@ -371,14 +371,15 @@ test("chat account switch busy refusal permits one retry; a dropped reply is set
 
 const browserLogin = (cancel: boolean): Row => {
   const sentinel = "https://signin.invalid/browser-only-fixture";
-  return { kind: "visible", options: { path: "/accounts", observerBanner: false, rpc: {
+  return { kind: "visible", options: { path: "/accounts", rpc: {
     account_list: () => ({ result: { revision: "a".repeat(64), data: { accounts: [] } } }),
     login_start: () => ({ result: { state: "pending", authorization_url: sentinel } }),
     login_status: () => ({ result: { state: "pending" } }),
     login_cancel: () => ({ result: { state: "succeeded" } }),
   } }, check: async (app, authority, writes, requests) => {
     if (authority === "observer") {
-      expect(await app.findByText(/too many tabs control it, or another app does/)).toBeTruthy();
+      // an observer waits for the banner's take control: no automatic take control, no red read error
+      expect(await app.findByText("this tab cannot read this while zeta is full.")).toBeTruthy();
       expect(requests).not.toContain("account_list");
       expect(app.container.querySelector(tag("accounts.login"))).toBeNull();
       expect(app.container.querySelector(tag("accounts.login-cancel"))).toBeNull();
@@ -423,7 +424,7 @@ function mcpAdd(): Row {
   const after = { revision: "b".repeat(64), data: { items: [{ name: "fixture-user", scope: "user", enabled: true,
     trusted: true, status: "configured", auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } }] } };
   let applied = false;
-  return { kind: "visible", options: { path: "/connections", observerBanner: false, roles, rpc: {
+  return { kind: "visible", options: { path: "/connections", roles, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
     mcp_server_list: ({ scope }) => ({ result: applied && scope !== "project" ? after : before }),
@@ -470,7 +471,7 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test",
     auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } };
   const view = (items: object[] = [fixture]) => ({ revision: "a".repeat(64), data: { items } });
   const roles: string[] = [];
-  return { kind: "visible", options: { path: "/connections/project/fixture-project", observerBanner: false, roles, rpc: {
+  return { kind: "visible", options: { path: "/connections/project/fixture-project", roles, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
     mcp_server_list: ({ scope }) => ({ result: view(scope === "user" ? [] : [fixture]) }),
@@ -508,7 +509,7 @@ function mcpOAuth(action: "start" | "cancel" | "logout", changed = false): Row {
   let edited = false;
   const fixture = { name, scope: "user", enabled: true, trusted: true, status: "configured", auth: "none", tool_count: 0,
     config: { transport: "streamable-http", url: "<redacted-url>", auth: { type: "oauth" } } };
-  return { kind: "visible", options: { path: `/connections/user/${name}`, observerBanner: false, roles, rpc: {
+  return { kind: "visible", options: { path: `/connections/user/${name}`, roles, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", "mcp_auth_status", ...(params.role === "controller" ? ["mcp_auth_start", "mcp_auth_cancel", "mcp_auth_logout"] : [])] } } }),
     mcp_server_list: ({ scope }) => {
@@ -643,7 +644,7 @@ function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
     expect(confirm.disabled).toBe(false);
     await act(async () => { fireEvent.submit(confirm.form!); });
     if (authority === "observer") {
-      expect(app.getByRole("alert").textContent).toContain("zeta had no free control slot");
+      expect(app.getByRole("alert").textContent).toMatch(/^zeta is still full at .+\.$/);
     } else {
       expect(await app.findByText(spawning ? /spawned fixture-profile as/ : /cancellation requested\./)).toBeTruthy();
       expect(writes.slice(written)).toEqual([method]);
@@ -665,7 +666,7 @@ test("spawn from a chat refuses a parent that is not the chat on screen", async 
 });
 
 test("/agents is read-only: no agent write surface, and a run says where to control it", async () => {
-  await withApp("controller", { ...agentOptions(["child_run_spawn", "child_run_cancel", "child_run_send"], "idle"), attached: false, path: "/agents/session/fixture-run", observerBanner: false }, async (app) => {
+  await withApp("controller", { ...agentOptions(["child_run_spawn", "child_run_cancel", "child_run_send"], "idle"), attached: false, path: "/agents/session/fixture-run" }, async (app) => {
     await app.findByRole("heading", { name: /fixture task/ });
     expect(app.getByText("control this run from its chat.")).toBeTruthy();
     expect(app.container.querySelector('[data-write-surface^="agents."]')).toBeNull();
@@ -694,7 +695,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(writes.slice(written)).toEqual([]);
     await click(control);
     if (authority === "observer") {
-      expect(await app.findByText(/zeta had no free control slot/)).toBeTruthy();
+      expect(await app.findByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(field.value).toBe("fixture follow-up");
     } else {
       expect(await app.findByText("message accepted by zeta.")).toBeTruthy();
@@ -751,7 +752,7 @@ const rows: Record<WriteSurfaceId, Row> = {
       await keydown(field, "Enter");
     };
     if (authority === "observer") {
-      expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("Read-only");
+      expect(select(app, '[data-part="composer"] textarea').getAttribute("placeholder")).toBe("read-only");
       expect(requests).not.toContain("account_list");
       return;
     }
@@ -831,7 +832,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     // library tabs start as observers either way; "+ new" takes control only if the controller slot is free.
     await click(select(app, tag("library.create")));
     if (authority === "observer") {
-      expect(app.getByText(/zeta had no free control slot: too many tabs control it, or another app does\. close one, then try again\.$/)).toBeTruthy();
+      expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
@@ -847,7 +848,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(app.getByText("show skill text", { selector: "button", exact: true }));
     await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
     if (authority === "observer") {
-      expect(app.getByText(/zeta had no free control slot: too many tabs control it, or another app does\. close one, then try again\.$/)).toBeTruthy();
+      expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
@@ -865,7 +866,7 @@ const rows: Record<WriteSurfaceId, Row> = {
   "mcp.auth-logout": mcpOAuth("logout"),
   "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
-    // the settings place browses as an observer; confirming the change borrows control for the one update.
+    // a controller tab sends the one update; a fallback observer tab (zeta full) is refused before it sends.
     await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
     const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
     await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
@@ -908,7 +909,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(action);
     expect(rows["sessions.continue"].options!.roles).toEqual(authority === "observer" ? [...opened, "controller"] : opened);
     if (authority === "observer") {
-      expect(await app.findByText(/^at .+ zeta had no free control slot: too many tabs control it, or another app does\. close one, then try again\.$/)).toBeTruthy();
+      expect(await app.findByText(/^zeta is still full at .+\.$/)).toBeTruthy();
       expect(location.pathname).toBe("/sessions/session");
       expect(document.activeElement).toBe(action);
       expect(writes).toEqual([]);
@@ -1044,15 +1045,15 @@ test("a library take-control refusal still shows after the observer socket is re
   const hello = base.rpc!.hello!;
   const options: Options = { ...base, sockets: sockets as EventTarget[], rpc: { ...base.rpc, hello: async (params, requests) => {
     if (params.role !== "controller") return hello(params, requests);
-    sockets[0]!.close(); // the observer drops while the controller handshake is in flight
+    if (sockets.length > 1) sockets.at(-2)!.close(); // after load: the observer drops while the controller handshake is in flight
     return { error: { code: -32001, message: "controller occupied" } };
   } } };
   await withApp("observer", options, async (app) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
-    expect(await app.findByText(/zeta had no free control slot: too many tabs control it, or another app does\. close one, then try again\.$/, {}, { timeout: 3_000 })).toBeTruthy();
+    expect(await app.findByText(/^zeta is still full at .+\.$/, {}, { timeout: 3_000 })).toBeTruthy();
     expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
-    expect(app.getByText(/zeta had no free control slot: too many tabs control it, or another app does\. close one, then try again\.$/)).toBeTruthy();
+    expect(app.getByText(/^zeta is still full at .+\.$/)).toBeTruthy();
   });
 });
 

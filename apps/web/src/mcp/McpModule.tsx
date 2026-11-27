@@ -20,8 +20,8 @@ const detailOf = (path: string) => {
   catch { return null; }
 };
 
-export function McpModule({ client, observer, owner, pathname, connecting, retryConnection }: {
-  client: ZetaClient | null; observer: boolean; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
+export function McpModule({ client, owner, pathname, connecting, retryConnection }: {
+  client: ZetaClient | null; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
 }) {
   const { reads } = owner;
   const snapshot = useSyncExternalStore(reads.subscribe, reads.snapshot);
@@ -36,11 +36,11 @@ export function McpModule({ client, observer, owner, pathname, connecting, retry
   const connected = client !== null;
   const supported = client !== null && canReadMcp(client);
   useLayoutEffect(() => {
-    const update = () => owner.auth.observe(observer ? client : null, !document.hidden, Boolean(client));
+    const update = () => owner.auth.observe(client, !document.hidden, Boolean(client));
     update();
     document.addEventListener("visibilitychange", update);
     return () => document.removeEventListener("visibilitychange", update);
-  }, [owner, client, observer]);
+  }, [owner, client]);
   useLayoutEffect(() => () => owner.auth.observe(null, false, false), [owner]);
   useEffect(() => {
     if (!client) return;

@@ -239,7 +239,7 @@ describe("message delivery tracking", () => {
       if (reply instanceof Error) throw reply;
       return reply;
     }};
-    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id === "d1" ? "d1" : "fresh"}`));
+    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id === "d1" ? "d1" : "fresh"}`), async () => undefined);
     if (error) await expect(delivery).rejects.toThrow(error);
     else await delivery;
     expect(log).toEqual(expected);
@@ -724,7 +724,7 @@ describe("chat creation lifecycle", () => {
           onDraftChange() {}, onDraftSubmit() {},
           onSubmit: async (text, intent, track) => {
             const target = box === "owned-session" ? { sessionId: box } : await pageOwner.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }) })!;
-            await deliverChatMessage(client as never, target.sessionId, text, `delivery-${reloadAt}`, pageDeliverySteer("empty", intent), track);
+            await deliverChatMessage(client as never, target.sessionId, text, `delivery-${reloadAt}`, pageDeliverySteer("empty", intent), track, async () => undefined);
           },
         });
         const detach = delivery.attach();
@@ -770,7 +770,7 @@ describe("chat creation lifecycle", () => {
         onDraftSubmit() {},
         onSubmit: async (text, intent, track) => {
           const attached = await run();
-          await deliverChatMessage(client, attached.sessionId, text, "one-delivery-id", pageDeliverySteer("empty", intent), track);
+          await deliverChatMessage(client, attached.sessionId, text, "one-delivery-id", pageDeliverySteer("empty", intent), track, async () => undefined);
         },
       });
       await Promise.all([delivery.submit(), delivery.submit()]);

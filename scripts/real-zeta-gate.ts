@@ -6,16 +6,15 @@ import { pathToFileURL } from "node:url";
 import type { CDPSession, Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
 import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateAccountsPlace, gateCreatePlace, gateShell, gateStablePlace } from "./gate-shell";
-import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
+import { gateReloadMidTurn, gateTranscript, gateTwoChatsAtOnce, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
-import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
-import { gateMcpOAuth, mcpOAuthArtifacts, oauthFixture, refuseMcpOAuth } from "./gate-mcp-oauth";
+import { gateMcpOAuth, mcpOAuthArtifacts, oauthFixture, mcpOAuthBesideRunningChat } from "./gate-mcp-oauth";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
 import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
@@ -262,6 +261,7 @@ try {
   };
   await restartAuth(false);
   const authPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  let accountChatUrl = "";
   try {
     const sentinel = "https://provider.invalid/fixture-browser-sign-in";
     await authPage.context().route(sentinel, route => route.fulfill({ body: "synthetic provider sign-in" }));
@@ -341,12 +341,11 @@ try {
     const id = await authPage.locator("[data-session-id]").getAttribute("data-session-id");
     if (!id) throw new Error("switch-then-reply chat has no session id");
     const chatUrl = authPage.url();
+    accountChatUrl = chatUrl;
     const pin = async () => JSON.parse(await Bun.file(join(authHome, "sessions", id, "meta.json")).text()).selected_accounts.anthropic;
     if (await pin() !== "anthropic:failed") throw new Error("switch-then-reply chat did not start pinned to anthropic:failed");
     await capture("auth-card-1440", card);
     await card.getByRole("link", { name: "/accounts", exact: true }).click();
-    const occupied = authPage.getByText(/another tab had control/, { selector: "#account-switch-reason" });
-    if (await authPage.getByRole("button", { name: "try again", exact: true }).isVisible()) await authPage.getByRole("button", { name: "try again", exact: true }).click();
     await authPage.getByRole("button", { name: "sign in again to anthropic:failed", exact: true }).click();
     const login = authPage.getByRole("dialog", { name: "review browser sign-in" });
     await login.getByRole("checkbox").check();
@@ -363,8 +362,10 @@ try {
     if (pageData.includes(sentinel) || log.some(line => line.includes(sentinel))) throw new Error("authorization URL escaped the popup");
     if (JSON.stringify(loginRequests) !== '[{"provider":"claude","account":"anthropic:failed"}]') throw new Error("browser sign-in did not name the failed account");
     await capture("named-sign-in-1440", authPage.getByText(/^signed in at/));
-    const toWorking = authPage.getByRole("button", { name: "switch active chat to anthropic:working" });
-    await toWorking.click();
+    // /accounts has no "active chat" in multi-controller mode: a chat switches its own account, from its own tab.
+    await authPage.goto(chatUrl);
+    await composer.fill("/accounts anthropic:working");
+    await composer.press("Enter");
     await review.waitFor();
     await capture("page-review-1440", review);
     await authPage.setViewportSize({ width: 390, height: 844 });
@@ -381,22 +382,9 @@ try {
     await confirm("anthropic:working", title);
     await authPage.getByText(/switched to anthropic:working/).waitFor();
     await capture("page-receipt-1440-200pct", authPage.getByText(/switched to anthropic:working/), cdp);
-    if (await pin() !== "anthropic:working") throw new Error("/accounts did not switch the active session");
+    if (await pin() !== "anthropic:working") throw new Error("/accounts anthropic:working did not switch the chat");
     await cdp.send("Emulation.clearDeviceMetricsOverride");
     await cdp.detach();
-    const other = await browser.newPage();
-    try {
-      await other.goto(chatUrl);
-      await other.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 10_000 });
-      await authPage.getByRole("button", { name: "switch active chat to anthropic:failed" }).click();
-      await confirm("anthropic:failed", title);
-      await review.getByText(/another tab had control/).waitFor();
-      await review.getByRole("button", { name: "keep current account" }).click();
-      await occupied.waitFor();
-      if (await authPage.getByRole("button", { name: "switch active chat to anthropic:failed" }).isEnabled() || switches.length !== 1)
-        throw new Error("/accounts did not disable switching after control refusal");
-      await capture("controller-refusal-1440", occupied);
-    } finally { await other.close(); }
     await authPage.goto(chatUrl);
     await composer.fill("/accounts anthropic:failed");
     await composer.press("Enter");
@@ -424,6 +412,7 @@ try {
   } finally {
     await authPage.close();
   }
+  await gateTwoChatsAtOnce(browser, origin, accountChatUrl);
   await stop(authZeta);
   await stop(authApp);
   if (process.env.ACCOUNTS_PROOF_ONLY === "1") {
@@ -567,7 +556,7 @@ with _database() as db:
     }
   }
   console.log("metric strips fit at 320px, 360px, 390px, 1440px and effective 200% zoom");
-  // before any chat tab opens: a chat tab keeps control, and the settings change borrows it
+  // every tab is its own zeta controller: the settings tab writes without borrowing a chat tab's control
   await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
   const mcpWriteSurfaceIds = await gateMcpWrites(browser, origin, zetaHome, cwd, screenshotDir);
   const mcpTestSurfaceId = await gateMcpTest(browser, origin, zetaHome, cwd, screenshotDir);
@@ -786,9 +775,7 @@ with _database() as db:
 
   };
   try {
-    // On the old build the first assertion fails. Free the slot so the banner is still tested with a controller present.
-    const takeControl = telemetryChatPage.getByRole("button", { name: "take control", exact: true });
-    if (telemetryFailures.length) await takeControl.click({ timeout: 10_000 });
+    if (telemetryFailures.length) throw new Error(telemetryFailures.join("\n"));
     await waitFor(async () => await telemetryChatPage.getByRole("button", { name: "new chat" }).isEnabled(), "chat controller for telemetry banner check");
     const observerTelemetry = await browser.newPage({ viewport: { width: 390, height: 844 } });
     try {
@@ -796,7 +783,8 @@ with _database() as db:
       await observerTelemetry.goto(`${origin}/telemetry`);
       await waitFor(async () => await observerTelemetry.getByText("telemetry · needs a newer zeta", { exact: true }).isVisible(), "observer telemetry connected");
       const banner = observerTelemetry.getByRole("complementary", { name: "observer mode" });
-      if (!await banner.getByText("this page is read-only", { exact: true }).isVisible()) telemetryFailures.push("telemetry opened with a chat controller did not show the read-only banner");
+      // every tab is its own controller: a telemetry tab next to a chat tab is not read-only
+      if (await banner.count()) telemetryFailures.push("telemetry opened next to a chat controller showed the observer banner");
       if (await observerTelemetry.getByRole("button", { name: "take control", exact: true }).count()) telemetryFailures.push("telemetry offered take control");
       if (telemetryFailures.length) throw new Error(telemetryFailures.join("\n"));
       const captureRecovery = async (size: string) => {
@@ -808,7 +796,6 @@ with _database() as db:
       for (const viewport of [{ width: 360, height: 740 }, { width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
         const size = `${viewport.width}x${viewport.height}`;
         await observerTelemetry.setViewportSize(viewport);
-        if (!await banner.isVisible()) throw new Error(`telemetry recovery ${size}: read-only banner is hidden`);
         await observerTelemetry.evaluate(() => document.fonts.ready.then(() => undefined));
         const notice = observerTelemetry.locator(".telemetry-placeholder");
         if (await notice.evaluate(element => element.scrollTop) !== 0) throw new Error("telemetry recovery must be tested without scrolling");
@@ -829,12 +816,13 @@ with _database() as db:
             const row = element.querySelector(".telemetry-actions")!.getBoundingClientRect();
             return { scrollTop: element.scrollTop, stepTop: step.top, stepBottom: step.bottom, rowTop: row.top, visible: step.top >= Math.max(0, pane.top) && step.bottom <= Math.min(innerHeight, pane.bottom, row.top) };
           });
-          if (viewport.width === 360 && (!geometry.visible || (viewport.height === 740 && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
+          // no observer banner above it now (the tab controls zeta), so at 360x740 the steps can fit without scrolling.
+          if (viewport.width === 360 && !geometry.visible) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
           await captureRecovery(`${size}-bottom`);
           await notice.evaluate(element => { element.scrollTop = 0; });
         }
       }
-      console.log("telemetry observer: chat can control zeta, read-only banner visible, no take-control button");
+      console.log("telemetry next to a chat tab: both control zeta, no observer banner, no take-control button");
     } finally { await observerTelemetry.close(); }
   } finally { await telemetryChatPage.close(); }
   const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
@@ -1492,7 +1480,7 @@ with _database() as db:
     const oauth = oauthFixture();
     try {
       await Bun.write(mcpConfigPath, JSON.stringify({ ...config, servers: { ...config.servers, ...oauth.config.servers } }));
-      await refuseMcpOAuth(browser, origin);
+      await mcpOAuthBesideRunningChat(browser, origin);
     } finally {
       oauth.stop();
       await writeFile(mcpConfigPath, baselineMcp);
@@ -1543,6 +1531,17 @@ with _database() as db:
     await oneChat(page, "controller");
     const oneChatObserver = await browser.newPage();
     try {
+      // the observer view is the cap safety net: refuse this tab's controller hello like a full zeta would.
+      await oneChatObserver.routeWebSocket((url) => url.hostname === "127.0.0.1", (socket) => {
+        const server = socket.connectToServer();
+        socket.onMessage((payload) => {
+          const frame = JSON.parse(String(payload));
+          if (frame.method === "hello" && frame.params?.role === "controller") {
+            socket.send(JSON.stringify({ jsonrpc: "2.0", id: frame.id, error: { code: -32001, message: "another client is already connected" } }));
+            void socket.close();
+          } else server.send(payload);
+        });
+      });
       await oneChatObserver.goto(readingUrl);
       await gateWait.playwright(oneChatObserver.locator(".observer-banner"), "waitFor");
       await oneChat(oneChatObserver, "observer");
@@ -3341,6 +3340,18 @@ with _database() as db:
   console.log("s2 page chat header switch/create/modes/rename verified at 1440 and 390");
   const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
+  // gate step 4: zeta admits four multi controllers. fill the free slots with catalog tabs (each its own controller, no
+  // chat), so the observer page is the fifth controller tab: it must fall back to a live, read-only observer.
+  const capFillers: Page[] = [];
+  for (let opened = 0; opened < 4; opened++) {
+    const filler = await browser.newPage();
+    await filler.goto(`${origin}/skills`);
+    await gateWait.playwright(filler.locator('.surface-connection[data-connected="true"]'), "waitFor", { state: "attached" });
+    if (await filler.locator(".observer-banner").count()) { await filler.close(); break; }
+    capFillers.push(filler);
+  }
+  if (!capFillers.length) throw new Error("no catalog tab connected as a controller before the cap step");
+  console.log(`cap step: ${capFillers.length} catalog controller tabs opened next to the chat tab`);
   const observerPage = await browser.newPage();
   const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId, mcpTestSurfaceId, ...mcpOAuthSurfaceIds, ...agentWriteSurfaceIds]);
   const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
@@ -3385,7 +3396,10 @@ with _database() as db:
   const observerBanner = observerPage.locator(".observer-banner");
   await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
   await recordRenderedWriteSurfaces(observerPage);
-  if (!(await observerBanner.innerText()).includes("another tab controls zeta") || !(await observerBanner.innerText()).includes("live and read-only")) throw new Error("observer banner did not explain the live read-only state");
+  const observerBannerText = await observerBanner.innerText();
+  if (!observerBannerText.includes("zeta is full") || !observerBannerText.includes("shows updates")) throw new Error(`observer banner did not explain the cap: ${observerBannerText}`);
+  const fifthHello = observerSockets.find((row) => row.direction === "received" && row.method === "hello");
+  if (fifthHello?.helloAccepted !== false) throw new Error("the fifth controller hello was not refused by zeta");
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   await gateWait.playwright(dockHead(observerPage).locator('[data-write-surface="page-chat.new"]:disabled'), "waitFor");
   for (const name of ["auto-approve", "create mode"] as const) {
@@ -3543,7 +3557,7 @@ with _database() as db:
   const takeControl = observerBanner.getByRole("button", { name: "take control", exact: true });
   const helloRoles = () => observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(",");
   await takeControl.click();
-  const takeoverReason = observerPage.getByText(/^at .{1,15} another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/);
+  const takeoverReason = observerPage.getByText(/^zeta is still full at .{1,15}\.$/);
   await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
   if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });
@@ -3568,6 +3582,8 @@ with _database() as db:
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-takeover-no-reload-1440x900.png") });
   await waitFor(async () => observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed"), "promoted controller released its observer socket");
   if (helloRoles() !== "controller,observer,controller,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles()}`);
+  await Promise.all(capFillers.map((filler) => filler.close()));
+  console.log("cap step: the fifth controller tab showed the observer banner, stayed live, and took control once a tab closed");
   await observerPage.reload({ waitUntil: "domcontentloaded" });
   await gateWait.playwright(observerPage.locator(`[data-session-id="${controllerChat}"]`), "waitFor", { state: "attached" });
   const restoredMutation = "restored controller mutation";
@@ -3619,7 +3635,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),

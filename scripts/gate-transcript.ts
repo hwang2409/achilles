@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { type GateWait, writeControl } from "./gate-diagnostics";
 
 export async function waitForIdleTurn(
@@ -418,6 +418,11 @@ export async function gateReloadMidTurn(
       return attached !== undefined;
     }, "resume reply after reload");
     if (attached?.result?.attached !== "live_turn") throw new Error(`reload did not attach to the kept turn: ${JSON.stringify(attached?.error ?? attached?.result ?? null)}`);
+    // gate step 3: the url named this tab's chat (`?chat=`), so the reload reclaimed the same session, not the page's newest.
+    if (new URL(page.url()).searchParams.get("chat") !== sessionId || await page.locator("[data-session-id]").first().getAttribute("data-session-id") !== sessionId)
+      throw new Error(`reload mid-turn did not reclaim session ${sessionId}: ${page.url()}`);
+    const helloAfter = requests().slice(framesBeforeReload).findLast((frame) => frame.result?.capabilities?.features);
+    if (!helloAfter?.result?.capabilities?.features?.includes("multi_controller")) throw new Error("reloaded tab's hello did not echo multi_controller");
     // the kept turn is still streaming (line 079 lands seconds later): the page shows it running, steerable, and stoppable
     const composer = page.locator('[data-part="composer"]');
     const turnEnded = async () => (await messages.filter({ hasText: "reload line 079" }).count()) > 0;
@@ -445,6 +450,7 @@ export async function gateReloadMidTurn(
     if (missing.length || repeated.length) throw new Error(`reply after reload lost lines ${JSON.stringify(missing)} and repeated lines ${JSON.stringify(repeated)}`);
     const prompts = await page.locator(".transcript").getByText("stream across a reload", { exact: true }).count();
     if (prompts !== 1) throw new Error(`reload showed the prompt ${prompts} times: ${(await page.locator(".transcript").innerText()).slice(-1500)}`);
+    if (requests().slice(framesBeforeReload).some((frame) => JSON.stringify(frame).includes("session_controlled"))) throw new Error("reload mid-turn was refused as session_controlled");
     const cancelled = requests().slice(framesBeforeReload).some((frame) => JSON.stringify(frame).includes('"reason":"disconnect"'));
     if (cancelled) throw new Error("zeta cancelled the turn on reload (reason disconnect)");
     if (await page.getByRole("alert").count()) throw new Error(`reload mid-turn showed a notice: ${await page.getByRole("alert").first().innerText()}`);
@@ -452,4 +458,81 @@ export async function gateReloadMidTurn(
   } finally {
     page.off("dialog", onDialog);
   }
+}
+
+/**
+ * gate step 1: every tab is its own zeta controller. tab A starts a new chat; tab B opens another chat by its url.
+ * both send in the same moment: zeta accepts both and runs both turns, and each tab shows only its own reply.
+ */
+export async function gateTwoChatsAtOnce(browser: Browser, origin: string, otherChatUrl: string) {
+  if (!new URL(otherChatUrl).searchParams.get("chat")) throw new Error(`two-chat step needs a chat url: ${otherChatUrl}`);
+  const tabs = [await browser.newPage(), await browser.newPage()] as const;
+  const features: string[][] = [[], []];
+  const sends: { tab: number; id: unknown; at: number }[] = [];
+  const replies: { tab: number; id: unknown; accepted: boolean }[] = [];
+  const firstReplyAt: number[] = [];
+  const controlled: number[] = [0, 0];
+  tabs.forEach((tab, index) => tab.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      try { const frame = JSON.parse(String(payload)); if (frame.method === "send") sends.push({ tab: index, id: frame.id, at: performance.now() }); } catch { /* not json */ }
+    });
+    socket.on("framereceived", ({ payload }) => {
+      try {
+        const frame = JSON.parse(String(payload));
+        if (Array.isArray(frame.result?.capabilities?.features)) features[index]!.push(...frame.result.capabilities.features);
+        if (frame.error?.data?.code === "session_controlled") controlled[index] = (controlled[index] ?? 0) + 1;
+        const send = sends.find((row) => row.tab === index && row.id === frame.id && frame.method === undefined);
+        if (send) replies.push({ tab: index, id: frame.id, accepted: Object.hasOwn(frame, "result") });
+        if (frame.method === "event" && String(payload).includes("you said: together") && firstReplyAt[index] === undefined) firstReplyAt[index] = performance.now();
+      } catch { /* not json */ }
+    });
+  }));
+  const [a, b] = tabs;
+  const field = (tab: Page) => tab.getByRole("textbox", { name: "message", exact: true });
+  const wait = { timeout: 20_000 };
+  try {
+    await a.goto(origin);
+    // let tab a's default attach settle first: a click while it loads used to be dropped, leaving tab a on the other chat
+    await a.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait });
+    const newChat = a.getByRole("button", { name: "new chat", exact: true });
+    await newChat.and(a.locator(":enabled")).waitFor(wait);
+    await newChat.click(wait);
+    await field(a).fill("first message in tab a", wait);
+    await field(a).press("Enter", wait);
+    await a.getByText("you said: first message in tab a", { exact: true }).waitFor(wait);
+    // the other chat's tab closed just before this step, and zeta may not have handled that socket close yet.
+    // shortcut: the gate reloads on `session_controlled`; slice 3 replaces this with the app's own bounded retry.
+    for (let attempt = 0; ; attempt++) {
+      const seen = controlled[1]!;
+      await b.goto(otherChatUrl);
+      let settled = false;
+      const attached = b.locator("[data-session-id]").first().waitFor({ state: "attached", ...wait }).then(() => true, (error) => { if (settled) return false; throw error; });
+      const refused = (async () => { while (!settled && controlled[1] === seen) await Bun.sleep(50); return false; })();
+      const ok = await Promise.race([attached, refused]).finally(() => { settled = true; });
+      if (ok) break;
+      if (attempt === 4) throw new Error("tab b's chat stayed session_controlled after 5 loads");
+      await Bun.sleep(500);
+    }
+    if (controlled[1]) console.log(`two tabs: tab b's first load met session_controlled ${controlled[1]} time(s) while zeta released the closed tab; it reloaded`);
+    await field(b).waitFor(wait);
+    if (!await field(b).isEditable()) throw new Error("tab b opened its chat read-only");
+    const chats = await Promise.all(tabs.map((tab) => tab.locator("[data-session-id]").first().getAttribute("data-session-id")));
+    if (!chats[0] || !chats[1] || chats[0] === chats[1]) throw new Error(`two tabs did not open two chats: ${JSON.stringify(chats)}`);
+    await field(a).fill("together from a", wait);
+    await field(b).fill("together from b", wait);
+    const before = sends.length;
+    await Promise.all(tabs.map((tab) => field(tab).press("Enter", wait)));
+    await Promise.all([a.getByText("you said: together from a", { exact: true }).waitFor(wait), b.getByText("you said: together from b", { exact: true }).waitFor(wait)]);
+    const together = sends.slice(before);
+    const accepted = together.map((send) => replies.find((reply) => reply.tab === send.tab && reply.id === send.id)?.accepted);
+    if (together.length !== 2 || new Set(together.map((send) => send.tab)).size !== 2 || accepted.some((value) => value !== true))
+      throw new Error(`both sends were not accepted: ${JSON.stringify({ together, accepted })}`);
+    // each scripted turn takes at least 100 ms, so both sends going out before either reply means the turns overlapped.
+    const lastSend = Math.max(...together.map((send) => send.at));
+    if (firstReplyAt.length !== 2 || lastSend > Math.min(...firstReplyAt)) throw new Error(`the two turns did not run at once: ${JSON.stringify({ sends: together.map((send) => send.at), firstReplyAt })}`);
+    if (await a.getByText("together from b").count() || await b.getByText("together from a").count()) throw new Error("a tab showed the other tab's chat");
+    const missing = features.map((list, index) => list.includes("multi_controller") ? null : index).filter((index) => index !== null);
+    if (missing.length) throw new Error(`hello did not echo multi_controller for tab ${missing.join(", ")}`);
+    console.log("two tabs: two chats sent at once, zeta ran both turns, each tab showed only its own reply, both hellos echoed multi_controller");
+  } finally { await Promise.all(tabs.map((tab) => tab.close())); }
 }
