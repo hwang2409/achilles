@@ -2185,8 +2185,8 @@ with _database() as db:
   await mcp(credential, 3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
   const invalid = await mcp(credential, 5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", package: { source: "", dependencies: {} } } });
   if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid page package published");
-  const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", package: { source: "export default function Page(){return <main>cross</main>}", dependencies: {} } } });
-  if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
+  const reconnectCreatedPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", package: { source: "export default function Page(){return <main>cross</main>}", dependencies: {} } } });
+  if (reconnectCreatedPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 200) throw new Error("reconnected MCP client could not create a code page");
   console.log("reconnect refresh asserted: achilles restarted mid-session; create mode and the next turn used the refreshed catalog without restarting zeta");
 
   await homeMcp(14, "tools/list", {});
