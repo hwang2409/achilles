@@ -427,7 +427,8 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   // rows that say "running" or "needs you" for a chat this tab does not hold (a closed tab, a zeta restart): check them
   // with zeta once per list load, and store what zeta says
   const listedChats = nav.catalog.chats;
-  const heldIds = [ready?.sessionId, active.stop?.sessionId, ...parked.map((row) => row.session_id)].filter((id): id is string => Boolean(id)).join(" ");
+  // (a chat a stop left attached has no other writer, so the check covers it too)
+  const heldIds = [ready?.sessionId, ...parked.map((row) => row.session_id)].filter((id): id is string => Boolean(id)).join(" ");
   useEffect(() => {
     if (!client || !connected || !canWrite || !listedChats.length) return;
     void verifyChatStates(client, listedChats, new Set(heldIds.split(" ")));
