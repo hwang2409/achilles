@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -142,19 +143,75 @@ def _check_step(result, source: str) -> None:
     raise PageBuildError(f"{source}:1:1: {detail}")
 
 
-def _install(docker: str, workspace: Path, cache: Path) -> None:
+# runs before any package script, so the lock, versions and script list are bun's own output
+_INSTALL_REPORT = """import {readFileSync,readdirSync,existsSync} from 'node:fs';
+const read=path=>JSON.parse(readFileSync(path,'utf8'));
+const scripts=new Set();
+const walk=dir=>{if(!existsSync(dir))return;for(const name of readdirSync(dir)){
+ if(name.startsWith('.'))continue;const path=`${dir}/${name}`;
+ if(name.startsWith('@')){walk(path);continue;}
+ try{const p=read(`${path}/package.json`);const s=p.scripts||{};
+  if(s.preinstall||s.install||s.postinstall)scripts.add(`${p.name}@${p.version}`);}catch{}
+ walk(`${path}/node_modules`);}};
+walk('node_modules');
+console.log(JSON.stringify({
+ lockfile:readFileSync('bun.lock','utf8'),
+ resolved_dependencies:Object.fromEntries(JSON.parse(process.argv[1]).map(
+  name=>[name,read(`node_modules/${name}/package.json`).version])),
+ install_scripts:[...scripts].sort().slice(0,50)
+}));
+"""
+
+
+def _warnings(*outputs: str) -> list[str]:
+    lines = [line.strip()[:300] for text in outputs for line in text.splitlines()]
+    return [line for line in lines if "warn" in line.lower()][:20]
+
+
+def _install(
+    docker: str, workspace: Path, cache: Path, dependencies: list[str], frozen: bool
+) -> dict[str, Any]:
+    install = "bun install --ignore-scripts" + (" --frozen-lockfile" if frozen else "")
     result = _run_container(
         docker,
         workspace,
         cache,
-        ["bun", "install", "--ignore-scripts"],
+        [
+            "sh",
+            "-c",
+            f'{install} >&2 && bun -e "$0" "$1"',
+            _INSTALL_REPORT,
+            json.dumps(dependencies),
+        ],
         network="bridge",
         step="package install",
     )
     _check_step(result, "package.json")
+    try:
+        report = json.loads(result.stdout)
+        lockfile = report["lockfile"]
+        resolved = report["resolved_dependencies"]
+        scripts = report["install_scripts"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise PageBuildError("package install returned an invalid result") from exc
+    if (
+        not isinstance(lockfile, str)
+        or not isinstance(resolved, dict)
+        or set(resolved) != set(dependencies)
+        or any(not isinstance(value, str) for value in resolved.values())
+        or not isinstance(scripts, list)
+        or any(not isinstance(value, str) for value in scripts)
+    ):
+        raise PageBuildError("package install returned an invalid result")
+    return {
+        "lockfile": lockfile,
+        "resolved_dependencies": resolved,
+        "install_scripts": scripts,
+        "warnings": _warnings(result.stderr),
+    }
 
 
-def _bundle(docker: str, workspace: Path) -> None:
+def _bundle(docker: str, workspace: Path) -> list[str]:
     result = _run_container(
         docker,
         workspace,
@@ -170,46 +227,27 @@ def _bundle(docker: str, workspace: Path) -> None:
         step="page bundle",
     )
     _check_step(result, "src/Page.tsx")
+    return _warnings(result.stdout, result.stderr)
 
 
-def _collect(docker: str, workspace: Path, dependencies: list[str]) -> dict[str, Any]:
-    script = """import {readFileSync} from 'node:fs';
-const names=JSON.parse(process.argv[1]);
-const resolved=Object.fromEntries(names.map(name=>{
- const path=`node_modules/${name}/package.json`;
- return [name,JSON.parse(readFileSync(path,'utf8')).version];
-}));
-const value=JSON.stringify({
- artifact:readFileSync('page.js').toString('base64'),
- lockfile:readFileSync('bun.lock','utf8'),
- resolved_dependencies:resolved
-});
-console.log(value);
-"""
+def _collect(docker: str, workspace: Path) -> bytes:
+    script = (
+        "const artifact=require('node:fs').readFileSync('page.js').toString('base64');"
+        "console.log(JSON.stringify({artifact}))"
+    )
     result = _run_container(
         docker,
         workspace,
         None,
-        ["bun", "-e", script, json.dumps(dependencies)],
+        ["bun", "-e", script],
         network="none",
         step="page result collector",
     )
     _check_step(result, "page build result")
     try:
-        value = json.loads(result.stdout)
-        artifact = base64.b64decode(value["artifact"], validate=True)
-        lockfile = value["lockfile"]
-        resolved = value["resolved_dependencies"]
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return base64.b64decode(json.loads(result.stdout)["artifact"], validate=True)
+    except (KeyError, TypeError, ValueError) as exc:
         raise PageBuildError("page build returned an invalid result") from exc
-    if (
-        not isinstance(lockfile, str)
-        or not isinstance(resolved, dict)
-        or set(resolved) != set(dependencies)
-        or any(not isinstance(value, str) for value in resolved.values())
-    ):
-        raise PageBuildError("page build returned an invalid result")
-    return {"artifact": artifact, "lockfile": lockfile, "resolved_dependencies": resolved}
 
 
 def effective_dependencies(dependencies: dict[str, str]) -> dict[str, str]:
@@ -217,10 +255,35 @@ def effective_dependencies(dependencies: dict[str, str]) -> dict[str, str]:
     return {"react": "19.0.0", "react-dom": "19.0.0", **dependencies}
 
 
+def atomic_private_write(path: Path, content: bytes) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def build_page(
-    root: Path, page_id: str, source: str, dependencies: dict[str, str]
+    root: Path,
+    page_id: str,
+    source: str,
+    dependencies: dict[str, str],
+    lockfile: str | None = None,
 ) -> dict[str, Any]:
-    """Bundle a browser page in a disposable container with only source and package cache."""
+    """Bundle a browser page in a disposable container with only source and package cache.
+
+    A lockfile pins the install to it. Identical (source, dependencies, lockfile) builds share
+    one result: concurrent ones wait for the first, and only a complete build is cached."""
     if not isinstance(source, str) or not source.strip():
         raise PageBuildError("src/Page.tsx:1:1: page source is empty")
     if not isinstance(dependencies, dict) or any(
@@ -237,37 +300,67 @@ def build_page(
             "page build isolation is unavailable: docker was not found", "build_unavailable"
         )
     build_cache = root / "build-cache"
-    package_cache = root / "package-cache"
     build_cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-    package_cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-    workspace = Path(tempfile.mkdtemp(prefix="page-build-", dir=build_cache)).resolve()
-    package_cache = package_cache.resolve()
     package = {
         "private": True,
         "type": "module",
         "dependencies": effective_dependencies(dependencies),
     }
+    key = hashlib.sha256(
+        json.dumps([source, package["dependencies"], lockfile], sort_keys=True).encode()
+    ).hexdigest()
+    with open(build_cache / f"{key}.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        entry = build_cache / f"{key}.json"
+        if entry.is_file():
+            cached = json.loads(entry.read_text())
+            if (root / "bundles" / f"{cached['digest']}.js").is_file():
+                return cached
+        result = _build(docker, root, source, package, lockfile)
+        atomic_private_write(entry, json.dumps(result, sort_keys=True).encode())
+        return result
+
+
+def _build(
+    docker: str, root: Path, source: str, package: dict[str, Any], lockfile: str | None
+) -> dict[str, Any]:
+    workspace = Path(tempfile.mkdtemp(prefix="page-build-", dir=root / "build-cache")).resolve()
+    # a saved lockfile names its own download sources, so it gets a cache no other build reads
+    if lockfile is None:
+        package_cache = root / "package-cache"
+        package_cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+    else:
+        package_cache = Path(f"{workspace}-cache")
+        package_cache.mkdir(mode=0o700)
     try:
         (workspace / "src").mkdir()
         (workspace / "src/Page.tsx").write_text(source, encoding="utf-8")
         (workspace / "package.json").write_text(
             json.dumps(package, sort_keys=True), encoding="utf-8"
         )
-        _install(docker, workspace, package_cache)
-        _bundle(docker, workspace)
-        result = _collect(docker, workspace, list(package["dependencies"]))
-        artifact = result.pop("artifact")
+        if lockfile is not None:
+            (workspace / "bun.lock").write_text(lockfile, encoding="utf-8")
+        installed = _install(
+            docker,
+            workspace,
+            package_cache.resolve(),
+            list(package["dependencies"]),
+            frozen=lockfile is not None,
+        )
+        warnings = installed.pop("warnings") + _bundle(docker, workspace)
+        artifact = _collect(docker, workspace)
         digest = hashlib.sha256(artifact).hexdigest()
         destination = root / "bundles" / f"{digest}.js"
-        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if not destination.exists():
-            destination.write_bytes(artifact)
-            destination.chmod(0o600)
+        if not destination.is_file():
+            atomic_private_write(destination, artifact)
         return {
             "digest": digest,
             "size": len(artifact),
             "dependencies": package["dependencies"],
-            **result,
+            **installed,
+            "warnings": warnings[:20],
         }
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
+        if lockfile is not None:
+            shutil.rmtree(package_cache, ignore_errors=True)

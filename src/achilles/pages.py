@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .page_build import PageBuildError, build_page, effective_dependencies
+from .page_build import PageBuildError, atomic_private_write, build_page, effective_dependencies
 from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
 
@@ -149,6 +149,7 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
     if isinstance(code, dict):
         code.pop("source", None)
         code.pop("lockfile", None)
+        code.pop("warnings", None)
         code.pop("revisions", None)
     result["truncated"] = True
     encoded = json.dumps(result, sort_keys=True, separators=(",", ":"))
@@ -160,6 +161,16 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
     if len(encoded.encode()) > INSPECT_MAX_BYTES:
         raise ValidationError("", f"inspectable page <= {INSPECT_MAX_BYTES} bytes", "too_large")
     return result, encoded
+
+
+def _build_report(built: dict[str, Any]) -> str:
+    """What inspect_page reports about a build besides versions and size."""
+    return json.dumps(
+        {
+            "install_scripts": built.get("install_scripts", []),
+            "warnings": built.get("warnings", []),
+        }
+    )
 
 
 _NO_CODE_HINT = "this page has no code yet; write it with write_page."
@@ -393,6 +404,7 @@ class PageStore:
           page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
           source TEXT NOT NULL, dependencies TEXT NOT NULL,
           resolved_dependencies TEXT NOT NULL DEFAULT '{}', lockfile TEXT NOT NULL DEFAULT '',
+          build_report TEXT NOT NULL DEFAULT '{}',
           digest TEXT, artifact_size INTEGER, diagnostics TEXT, runtime_error TEXT,
           created_at TEXT NOT NULL,
           PRIMARY KEY(page_id, version)
@@ -438,6 +450,7 @@ class PageStore:
         ensure_column(db, "page", "active_code_revision", "INTEGER")
         ensure_column(db, "code_revision", "resolved_dependencies", "TEXT NOT NULL DEFAULT '{}'")
         ensure_column(db, "code_revision", "lockfile", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(db, "code_revision", "build_report", "TEXT NOT NULL DEFAULT '{}'")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(db, "chat", "purpose", "TEXT NOT NULL DEFAULT 'chat'")
         ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
@@ -497,22 +510,7 @@ class PageStore:
             if path.exists():
                 path.chmod(0o600)
 
-    def _atomic_private_write(self, path: Path, content: bytes) -> None:
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(content)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, path)
-        except BaseException:
-            try:
-                os.unlink(temporary)
-            except FileNotFoundError:
-                pass
-            raise
+    _atomic_private_write = staticmethod(atomic_private_write)
 
     def ensure_credential(self, page_id: str) -> str:
         with self.transaction() as db:
@@ -595,6 +593,8 @@ class PageStore:
                 "dependencies": json.loads(active["dependencies"]),
                 "resolved_dependencies": json.loads(active["resolved_dependencies"]),
                 "lockfile": active["lockfile"],
+                **json.loads(active["build_report"]),
+                "bundle_size": active["artifact_size"],
                 "digest": active["digest"],
                 "runtime_error": active["runtime_error"],
                 "revisions": [
@@ -1087,8 +1087,8 @@ class PageStore:
                     ),
                 )
                 db.execute(
-                    "INSERT INTO code_revision(page_id,version,source,dependencies,resolved_dependencies,lockfile,digest,artifact_size,diagnostics,runtime_error,created_at) "  # noqa: E501
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO code_revision(page_id,version,source,dependencies,resolved_dependencies,lockfile,build_report,digest,artifact_size,diagnostics,runtime_error,created_at) "  # noqa: E501
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         page_id,
                         1,
@@ -1096,6 +1096,7 @@ class PageStore:
                         json.dumps(built["dependencies"], sort_keys=True),
                         json.dumps(built["resolved_dependencies"], sort_keys=True),
                         built["lockfile"],
+                        _build_report(built),
                         built["digest"],
                         built["size"],
                         None,
@@ -1327,8 +1328,8 @@ class PageStore:
             db.execute(
                 (
                     "INSERT INTO code_revision(page_id,version,source,dependencies,"
-                    "resolved_dependencies,lockfile,digest,artifact_size,diagnostics,"
-                    "runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+                    "resolved_dependencies,lockfile,build_report,digest,artifact_size,"
+                    "diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
                 ),
                 (
                     page_id,
@@ -1337,6 +1338,7 @@ class PageStore:
                     json.dumps(result.get("dependencies", dependencies), sort_keys=True),
                     json.dumps(result.get("resolved_dependencies", {}), sort_keys=True),
                     result.get("lockfile", ""),
+                    _build_report(result),
                     digest,
                     size,
                     diagnostics,
@@ -1470,8 +1472,8 @@ class PageStore:
             ).fetchone()[0]
             stamp = now()
             db.execute(
-                "INSERT INTO code_revision(page_id,version,source,dependencies,resolved_dependencies,lockfile,digest,artifact_size,diagnostics,runtime_error,created_at) "  # noqa: E501
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO code_revision(page_id,version,source,dependencies,resolved_dependencies,lockfile,build_report,digest,artifact_size,diagnostics,runtime_error,created_at) "  # noqa: E501
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     page_id,
                     new_version,
@@ -1479,6 +1481,7 @@ class PageStore:
                     source["dependencies"],
                     source["resolved_dependencies"],
                     source["lockfile"],
+                    source["build_report"],
                     source["digest"],
                     source["artifact_size"],
                     None,
@@ -1507,6 +1510,21 @@ class PageStore:
                 "SELECT * FROM code_revision WHERE page_id=? AND version=?", (page_id, row[0])
             ).fetchone()
         return dict(code) if code else None
+
+    def rebuild_artifact(self, page_id: str) -> None:
+        """Rebuild the active revision's missing bundle from its saved source and lockfile."""
+        code = self.page_code(page_id)
+        if code is None or (self.root / "bundles" / f"{code['digest']}.js").is_file():
+            return
+        built = build_page(
+            self.root,
+            page_id,
+            code["source"],
+            json.loads(code["dependencies"]),
+            code["lockfile"] or None,
+        )
+        if built["digest"] != code["digest"]:
+            raise PageBuildError("the rebuilt artifact differs from the saved revision")
 
     def set_runtime_error(self, page_id: str, revision: int, error: str) -> None:
         with self.transaction() as db:
