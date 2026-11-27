@@ -9,7 +9,7 @@ import { draftStore } from "./draftStore";
 import * as activeChat from "./useActiveChat";
 import { useActiveChat } from "./useActiveChat";
 import { TOO_MANY_CHATS } from "./zeta/session";
-import { parkedRows, takeParkedEvent } from "./zeta/parked";
+import { parkedRows, refreshParked, takeParkedEvent } from "./zeta/parked";
 import type { Chat } from "./surface/AgentNavAdapter";
 
 
@@ -1329,8 +1329,9 @@ const TURN_ENDED = "the turn ended before zeta read it.";
 // "stop the oldest parked chat and try again": one owner (stopAndRetry) for both refusals of a new chat, parked_limit
 // (this tab keeps 3 chats running) and resident_limit (zeta is full). The stop resumes p1, aborts it, and resumes the
 // chat the user was on, so p1 leaves zeta's attached slot: zeta closes it, or parks it again while it still holds work.
-// Then it waits (up to 30 s) until p1 is no parked chat of this tab, and repeats the swap once. zeta's rules here, as in
-// zeta 352442dc: a swap registers its new chat before the outgoing one leaves, so resident_limit counts the outgoing
+// Then, while p1 is parked again, it waits (up to 30 s) for zeta's `closed` event of p1, and repeats the swap once.
+// zeta's rules here, as in zeta dbcb2570: `closed` comes once p1's slot is free (a status read stops listing a closing
+// chat earlier), and a chat that closes at once gets no event; a swap registers its new chat before the outgoing one leaves, so resident_limit counts the outgoing
 // chat, every parked chat, and a closing one (`counted`: zeta has not finished closing p1); parked_limit counts this
 // tab's parked chats when the outgoing one parks. A refused retry is "still stopping": the chat the user was on opens
 // again, and the notice offers "try again" (nothing retries by itself). It never offers to stop a second chat.
@@ -1342,6 +1343,8 @@ type StopRow = {
   closes?: true;
   // zeta still counts the closing p1 (resident_limit only)
   counted?: true;
+  // during the wait, a status read no longer lists the closing p1 before its `closed` event
+  unlisted?: true;
   // another chat of this tab took the freed slot
   other?: true;
   fail?: "resume" | "abort";
@@ -1354,6 +1357,7 @@ type StopRow = {
 const stopRows: StopRow[] = [
   { name: "p1 closes at once: the retry switches", p1: "closes", outcome: "switched" },
   { name: "p1 parks again, then zeta closes it: the switch continues by itself", p1: "parks", closes: true, outcome: "switched" },
+  { name: "status stops listing the closing p1: the wait goes on until zeta's closed", p1: "parks", closes: true, unlisted: true, outcome: "switched" },
   { name: "p1 parks again and zeta never closes it: after 30 s, the background-work text", p1: "parks", outcome: "still_working" },
   { name: "zeta has not finished closing p1: the not-freed text", p1: "closes", counted: true, limits: ["resident_limit"], outcome: "not_freed" },
   { name: "still stopping, then the user's New chat: it opens normally and send works", p1: "parks", outcome: "still_working", then: "new_chat" },
@@ -1492,6 +1496,15 @@ test.each(stopCases)("stop the oldest parked chat and try again, $limit: $name",
       expect(sent("new_session"), "the stop repeated its swap after the user's New chat").toHaveLength(1);
       expect(active.stop).toBeNull();
       return;
+    }
+    if (row.unlisted) {
+      zeta.parked = zeta.parked.filter((id) => id !== "p1");
+      zeta.closing.push("p1");
+      await act(async () => { await refreshParked(client); });
+      await settle();
+      expect(sent("new_session"), "the swap was repeated before zeta's closed event").toEqual([]);
+      expect(active.stop).toMatchObject({ sessionId: "p1", phase: "stopping" });
+      zeta.closing = [];
     }
     if (row.closes) await closeP1();
     else await act(async () => { clock.advance(29_000); });

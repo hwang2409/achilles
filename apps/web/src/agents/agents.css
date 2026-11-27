@@ -37,6 +37,7 @@
 .agents-state::before { content: ""; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: .55ch; display: inline-block; background: currentColor; }
 .agents-state[data-status="running"], .agents-state[data-status="finishing"] { color: var(--fulcrum-accent); }
 .agents-state[data-status="failed"] { color: var(--fulcrum-danger); }
+.agents-state[data-status="completed"]::before { background: var(--fulcrum-ok); border-radius: 50%; }
 /* waiting on the user: the transcript row's warn mark */
 .agents-state[data-waiting]::before, .agents-state[data-status="waiting"]::before { background: var(--fulcrum-warn); }
 .agents-more { margin: 8px 16px; }

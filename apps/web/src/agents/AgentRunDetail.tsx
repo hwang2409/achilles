@@ -13,7 +13,8 @@ import type { AgentRun } from "./reads";
 
 export const short = (id: string) => id.length > 12 ? `${id.slice(0, 7)}…${id.slice(-5)}` : id;
 export const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
-export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
+// the transcript row's format: 19s, 1m 40s, 1h 2m
+export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
 const sessionHref = (id: string) => surfaceHref(`/sessions/${encodeURIComponent(id)}`);
 export function StateTag({ row }: { row: AgentRun }) {
   return <span className="agents-state" data-status={row.status} data-waiting={row.waiting ? "true" : undefined}>{row.waiting ?? stateWord(row.status)}</span>;
@@ -41,7 +42,7 @@ export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follo
           detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
       {chosen && !controls && <p className="agents-note">control this run from <ChatLink sessionId={chosen.sessionId}>its chat</ChatLink>.</p>}
       {controls && <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh} readOnly={readOnly}
-        elapsed={chosen?.elapsedSeconds === undefined ? "elapsed unavailable" : `${duration(chosen.elapsedSeconds)} at last refresh`} />}
+        elapsed={chosen?.elapsedSeconds === undefined ? undefined : `for ${duration(chosen.elapsedSeconds)} at last refresh`} />}
       {chosen && <RunActivity client={client} row={chosen} />}
     </div>
     {chosen && send && <ChildComposer key={id} client={client} row={chosen} owner={send} readOnly={readOnly} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
@@ -55,8 +56,8 @@ function RunDetail({ row, parent, rootTitle }: { row: AgentRun; parent?: AgentRu
     ["started", row.startedAt !== undefined && <time dateTime={new Date(row.startedAt).toISOString()}>{stamp(row.startedAt)}</time>],
     ["finished", row.finishedAt !== undefined && <time dateTime={new Date(row.finishedAt).toISOString()}>{stamp(row.finishedAt)}</time>],
     ["elapsed at last refresh", row.elapsedSeconds === undefined ? undefined : duration(row.elapsedSeconds)],
-    // zeta reports 0 completed turns for a run canceled mid-turn; that reads as "did nothing", so say nothing
-    ["turns", row.status === "canceled" && !row.turnsUsed ? undefined : row.turnsUsed], ["tool calls", row.toolCount],
+    // zeta reports 0 completed turns for a run canceled or failed mid-turn; that reads as "did nothing", so say nothing
+    ["turns", (row.status === "canceled" || row.status === "failed") && !row.turnsUsed ? undefined : row.turnsUsed], ["tool calls", row.toolCount],
     ["current step", isTerminal(row.status) ? undefined : row.currentStep],
     // a canceled or failed run did not reply: its text is zeta's outcome
     [row.status === "completed" ? "reply" : "result", row.reply],

@@ -33,7 +33,7 @@ export type AgentRun = {
   elapsedSeconds?: number;
   background?: boolean;
   acceptsFollowUps?: boolean;
-  /** from the chat's live transcript row, not zeta's report (withLiveRow) */
+  /** reply and waiting come from the chat's live transcript row (withLiveRow) */
   waiting?: "needs approval" | "needs input";
   reply?: string;
 };
