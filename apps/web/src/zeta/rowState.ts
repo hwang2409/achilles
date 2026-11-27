@@ -37,6 +37,10 @@ export function rowState(stored: RowState | null | undefined, live?: Live): { sh
   return { shown: next ?? stored ?? null, write: next !== null && next !== stored ? next : null };
 }
 
+// the state this tab last wrote for each chat: forgotten when another tab writes the chat, or a list load shows another
+const lastWritten = new Map<string, RowState>();
+/** Each test case is a fresh tab. */
+export const forgetRowWrites = () => lastWritten.clear();
 const written = new Set<(remote: boolean) => void>();
 const notify = (remote: boolean) => { for (const listener of [...written]) listener(remote); };
 // the other tabs of this browser hear each chat write here (a post never reaches its own sender); other browsers and
@@ -51,7 +55,7 @@ export function subscribeRowWrites(listener: (remote: boolean) => void) {
   written.add(listener);
   if (!channel && typeof BroadcastChannel !== "undefined") {
     channel = new BroadcastChannel("achilles:chats");
-    channel.addEventListener("message", () => notify(true));
+    channel.addEventListener("message", (event: MessageEvent) => { if (typeof event.data === "string") lastWritten.delete(event.data); notify(true); });
   }
   return () => {
     written.delete(listener);
@@ -62,7 +66,7 @@ export function subscribeRowWrites(listener: (remote: boolean) => void) {
 /** Every chat PATCH: an answered write loads the list again here and in the other tabs of this browser. */
 export async function patchChat(sessionId: string, body: object, fetchFn: typeof fetch = fetch): Promise<Response> {
   const response = await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  if (response.ok) { notify(false); channel?.postMessage("written"); }
+  if (response.ok) { notify(false); channel?.postMessage(sessionId); }
   return response;
 }
 
@@ -73,8 +77,15 @@ export async function patchChat(sessionId: string, body: object, fetchFn: typeof
  */
 export async function writeRowState(sessionId: string, state: RowState | null, { expected }: { expected?: { last_state: RowState | null; state_version: number } } = {}, fetchFn: typeof fetch = fetch): Promise<boolean> {
   if (state === null) return false;
+  // a holder's write of the state it last wrote, with no write by anyone else seen since, changes nothing: skip it
+  // (each write reloads the list in every tab)
+  if (!expected && lastWritten.get(sessionId) === state) return false;
+  if (expected) lastWritten.delete(sessionId); else lastWritten.set(sessionId, state);
   const body = { last_state: state, ...(expected ? { expected_last_state: expected.last_state, expected_state_version: expected.state_version } : {}) };
-  try { return (await patchChat(sessionId, body, fetchFn)).ok; } catch { return false; }
+  let ok = false;
+  try { ok = (await patchChat(sessionId, body, fetchFn)).ok; } catch { /* not stored */ }
+  if (!ok && lastWritten.get(sessionId) === state) lastWritten.delete(sessionId);
+  return ok;
 }
 
 /** This tab's shown chat changed state (its header): only this tab holds it, so the state is stored as is. */
@@ -100,6 +111,7 @@ type ListedChat = { session_id: string; last_state?: RowState | null; state_vers
  * compare-and-set. Returns how many rows changed.
  */
 export async function verifyChatStates(client: ZetaClient, chats: readonly ListedChat[], held: ReadonlySet<string>, fetchFn: typeof fetch = fetch): Promise<number> {
+  for (const chat of chats) if (lastWritten.has(chat.session_id) && lastWritten.get(chat.session_id) !== chat.last_state) lastWritten.delete(chat.session_id);
   const stale = chats.filter((chat) => (chat.last_state === "running" || chat.last_state === "approval") && !held.has(chat.session_id));
   const changed = await Promise.all(stale.map(async (chat) => {
     const status = await readStatus(client, chat.session_id);

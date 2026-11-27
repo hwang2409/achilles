@@ -655,7 +655,7 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
       {running ? <button type="button" className="ui-button" disabled>stopping…</button>
         : stuck ? <button type="button" className="ui-button" onClick={() => onRetryStopped()}>try again</button>
         : <>{onRetry && <button type="button" className="ui-button" onClick={onRetry}>try again</button>}
-          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop <span className="limit-title">{oldestName[0]}</span>{oldestName[1] && <> <span>{oldestName[1].trim()}</span></>} and {verb}</button>}</>}
+          {canWrite && oldest && <button type="button" className="ui-button limit-stop" data-write-surface={WRITE_SURFACE.busyRetry} onClick={onStop}>stop <span className="limit-title">{oldestName[0]}</span>{oldestName[1]} and {verb}</button>}</>}
       <button type="button" className="ui-button" onClick={onStay}>stay</button>
     </span>
   </div>;

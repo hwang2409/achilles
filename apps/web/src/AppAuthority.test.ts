@@ -8,6 +8,7 @@ import { draftStore } from "./draftStore";
 import { getSettings, SETTINGS_KEY, updateSettings } from "./settings";
 import { READ_ONLY_REASON, WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
 import { controlledRetry } from "./zeta/session";
+import { forgetRowWrites } from "./zeta/rowState";
 
 const { fireEvent, render, waitFor } = await import("@testing-library/react");
 // each test is a fresh tab: no chats held from an earlier test for the reload reclaim to take back
@@ -26,6 +27,8 @@ type Options = { freed?: { current: boolean }; path?: string; sockets?: EventTar
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   options.roles?.splice(0);
+  // each app is a fresh tab
+  forgetRowWrites();
   const writes: string[] = [];
   const requests: string[] = [];
   // Happy DOM has no layout; give the real virtual timeline a viewport.

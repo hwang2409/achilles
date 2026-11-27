@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { parkedRows, refreshParked, takeParkedEvent } from "./parked";
-import { rowState, subscribeRowWrites, verifyChatStates, writeShownState, type RowState } from "./rowState";
+import { forgetRowWrites, rowState, subscribeRowWrites, verifyChatStates, writeShownState, type RowState } from "./rowState";
 
 // achilles' chat rows as the server keeps them: each state write adds 1 to state_version, and a write with an expected
 // row is a compare-and-set (the row unchanged when it changed since the read), as in PageStore.update_chat
@@ -10,6 +10,7 @@ let stored = 0;
 const realFetch = globalThis.fetch;
 beforeEach(() => {
   server = new Map(); stored = 0;
+  forgetRowWrites();
   sessionStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const id = decodeURIComponent(String(input).split("/").at(-1)!);
@@ -32,9 +33,10 @@ type Step =
   | { parked: { state: string; pending_approvals?: number } }
   // another tab's chat list load checks the row with zeta (null: session_not_found); `meanwhile` runs while zeta answers
   | { verify: string | null; meanwhile?: Step[] };
-type RowCase = { name: string; stored: RowState | null; parkedAtStart?: boolean; steps: Step[]; shown: (RowState | null)[]; reads?: number };
+type RowCase = { name: string; stored: RowState | null; parkedAtStart?: boolean; steps: Step[]; shown: (RowState | null)[]; reads?: number; writes?: number };
 const rows: RowCase[] = [
   { name: "the shown chat runs, then goes idle", stored: null, steps: [{ attached: "running" }, { attached: "idle" }], shown: ["running", "idle"] },
+  { name: "the holder writes a state it already wrote once", stored: null, steps: [{ attached: "running" }, { attached: "running" }, { attached: "idle" }, { attached: "idle" }], shown: ["running", "running", "idle", "idle"], writes: 2 },
   { name: "a parked chat goes idle (only a background agent works), then closes", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "idle" } }, { parked: { state: "closed" } }], shown: ["running", "idle"] },
   { name: "a parked chat that closes while it runs", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "closed" } }], shown: ["idle"] },
   { name: "a parked chat needs you, then runs on", stored: "running", parkedAtStart: true, steps: [{ parked: { state: "running", pending_approvals: 1 } }, { parked: { state: "running" } }], shown: ["approval", "running"] },
@@ -74,22 +76,29 @@ test.each(rows)("a chat row's state: $name", async (row) => {
   expect(shown, "the row's state after each step").toEqual(row.shown);
   expect(server.get("c")!.last_state, "the stored state every tab reads").toBe(row.shown.at(-1)!);
   if (row.reads !== undefined) expect(reads).toHaveLength(row.reads);
+  if (row.writes !== undefined) expect(stored, "chat writes").toBe(row.writes);
   // each answered write (stored, or a lost compare-and-set) loads every sidebar's list again, so no row waits for a reload
   expect(reloads, "a stored state did not reload the chat list").toBe(stored);
   unsubscribe();
 });
 
-test("another tab's chat write loads this tab's list again, marked remote so the reload checks nothing with zeta", async () => {
+test("this tab's chat write posts to the other tabs; another tab's post reloads this list as remote", async () => {
   server.set("c", { last_state: "idle", state_version: 0 });
   const causes: boolean[] = [];
+  const posts: unknown[] = [];
   const unsubscribe = subscribeRowWrites((remote) => { causes.push(remote); });
   const otherTab = new BroadcastChannel("achilles:chats");
+  otherTab.addEventListener("message", (event) => { posts.push(event.data); });
   try {
     await writeShownState("c", "running");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(posts, "the other tab did not hear this tab's write").toEqual(["c"]);
     expect(causes, "this tab's own write: a local reload, and its post does not come back to it").toEqual([false]);
-    otherTab.postMessage("written");
+    otherTab.postMessage("c");
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(causes, "another tab's post reloads the list as remote").toEqual([false, true]);
-    expect(stored, "a remote reload writes nothing").toBe(1);
+    // the other tab wrote the chat, so this tab's same state is no longer known stored: it writes it again
+    await writeShownState("c", "running");
+    expect(stored, "the write after another tab's write was skipped").toBe(2);
   } finally { otherTab.close(); unsubscribe(); }
 });
