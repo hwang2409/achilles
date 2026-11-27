@@ -336,6 +336,10 @@ try {
       await action.click();
     };
     authPage.setDefaultTimeout(10_000);
+    // this achilles home is unseeded: home without code is the plain chat, not a docked page notice
+    await authPage.goto(origin);
+    await authPage.locator(".page-view").waitFor({ timeout: 20_000 });
+    if (await authPage.locator(".page-view.docked, .page-unsupported").count()) throw new Error("a fresh home without code rendered as a docked page");
     await authPage.goto(`${origin}/not-a-real-page`);
     await authPage.getByRole("button", { name: "new chat", exact: true }).click({ timeout: 20_000 });
     const composer = authPage.getByRole("textbox", { name: "message", exact: true });

@@ -1376,3 +1376,20 @@ def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: P
     assert artifact.headers["access-control-allow-origin"] == "*"
     assert bootstrap.headers["access-control-allow-origin"] == "*"
     assert "window.achilles" in bootstrap.text
+
+
+def test_fresh_home_is_plain_chat_and_a_codeless_page_keeps_the_notice(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("old", "/old", "old block page", "2025-01-01", "2025-01-01"),
+        )
+
+    with TestClient(web.create_app()) as client:
+        home = client.get("/api/pages/home").json()
+        old = client.get("/api/pages/old").json()
+
+    assert home["code"] is None
+    assert home["unsupported_format"] is None
+    assert old["unsupported_format"] == web.EMPTY_PAGE

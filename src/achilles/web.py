@@ -209,7 +209,8 @@ def create_app() -> Starlette:
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
                 "create_mode": bool(row["create_mode"]),
                 "code": code,
-                "unsupported_format": EMPTY_PAGE if not code else None,
+                # create_page always builds code, so only a migrated block page lacks it; home starts empty
+                "unsupported_format": EMPTY_PAGE if not code and row["id"] != "home" else None,
             }
         )
 
