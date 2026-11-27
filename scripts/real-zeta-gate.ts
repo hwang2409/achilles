@@ -2382,10 +2382,10 @@ with _database() as db:
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
   await page.setViewportSize({ width: 1440, height: 900 });
-  const closePageChat = page.getByRole("button", { name: "close page chat" });
-  if (await closePageChat.count()) {
-    await closePageChat.evaluate((button) => (button as HTMLElement).click());
-    await gateWait.playwright(page.locator(".page-chat-backdrop"), "waitFor", { state: "detached" });
+  const pageChatBackdrop = page.locator(".page-chat-backdrop");
+  if (await pageChatBackdrop.count()) {
+    await pageChatBackdrop.evaluate((backdrop) => (backdrop as HTMLElement).click());
+    await gateWait.playwright(pageChatBackdrop, "waitFor", { state: "detached" });
   }
   await gateSettings(page, origin, gateWait);
   await gateCreationApprovalDefaults(page, requests, awaitApprovalMode, gateWait);
