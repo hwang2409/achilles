@@ -437,14 +437,18 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const listedChats = nav.catalog.chats;
   // (a chat a stop left attached has no other writer, so the check covers it too)
   const heldIds = [ready?.sessionId, ...parked.map((row) => row.session_id)].filter((id): id is string => Boolean(id)).join(" ");
+  // a list another tab's write reloaded is not checked: that tab holds the chat and just stored its state, and zeta's
+  // view of it could lag behind
+  const remoteReload = useRef(false);
   useEffect(() => {
+    if (remoteReload.current) { remoteReload.current = false; return; }
     if (!client || !connected || !canWrite || !listedChats.length) return;
     void verifyChatStates(client, listedChats, new Set(heldIds.split(" ")));
   }, [client, connected, canWrite, listedChats]);
-  // every stored row state (this tab's chats, or a corrected stale row) loads the list again
+  // every chat write (here, or in another tab of this browser) loads the list again
   const reloadChats = useRef(nav.catalog.reload);
   reloadChats.current = nav.catalog.reload;
-  useEffect(() => subscribeRowWrites(() => reloadChats.current()), []);
+  useEffect(() => subscribeRowWrites((remote) => { remoteReload.current = remote; reloadChats.current(); }), []);
   const building = nav.catalog.chats.some((chat) => chat.session_id === ready?.sessionId && chat.purpose === "page_build");
   const stateLabel = runStateLabel(state, composerActivity.queued, building);
   useEffect(() => {

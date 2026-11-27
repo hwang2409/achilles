@@ -32,6 +32,8 @@ export type Chat = {
   created_at: string;
   updated_at: string;
   last_state: "idle" | "running" | "approval" | "failed" | null;
+  // the compare-and-set key of last_state (rowState)
+  state_version: number;
   titled_by_user?: boolean;
 };
 
