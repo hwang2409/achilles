@@ -720,7 +720,8 @@ const rows: Record<WriteSurfaceId, Row> = {
   // this tab already keeps a chat running and zeta refuses to park one more: "stop ... and open new chat" stops it, then retries
   "busy.retry": { kind: "visible", absent: true, options: { extraChat: { ...chat, session_id: "parked", title: "Parked chat" }, rpc: {
     new_session: (_params, requests) => requests.includes("abort") ? undefined as never : { error: { code: -32004, message: "parked limit", data: { reason: "parked_limit", parked: ["parked"] } } },
-    status: () => ({ result: { session: { session_id: "session" }, state: "idle", parked_sessions: [{ session_id: "parked", state: "running", pending_approvals: 0 }] } }),
+    // the stopped chat closed: it is no longer parked
+    status: (_params, requests) => ({ result: { session: { session_id: "session" }, state: "idle", parked_sessions: requests.includes("abort") ? [] : [{ session_id: "parked", state: "running", pending_approvals: 0 }] } }),
   } }, check: async (app, authority, writes) => {
     await click(select(app, tag("shell.new-chat")));
     if (authority === "observer") {

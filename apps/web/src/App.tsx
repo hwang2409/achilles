@@ -125,7 +125,11 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
   useLayoutEffect(() => { if (focus && !document.querySelector('[role="dialog"][aria-modal="true"]') && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
   useLayoutEffect(() => {
     if (!focusRequest) return;
-    slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true });
+    const field = slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]');
+    if (!field || document.activeElement === field) return;
+    field.focus({ preventScroll: true });
+    // the caret goes after the draft, so typing continues it
+    if (field instanceof HTMLTextAreaElement) field.setSelectionRange(field.value.length, field.value.length);
   }, [focusRequest, draft]);
   const adapterProps = {
     ...props,
@@ -493,7 +497,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {ready?.controlledElsewhere && <div className="chat-held-notice" role="status"><p><StableText text={heldText} reserve={Object.values(HELD_TEXT)} /></p><span className="chat-held-actions"><button type="button" className="ui-button" onClick={() => void active.newChat()} disabled={!canWrite}>new chat</button><button type="button" className="ui-button" aria-disabled={retryingHeld || undefined} onClick={() => { if (retryingHeld) return; setRenameRefused(false); setHeldRetry({ sessionId: ready.sessionId, lease: ready.lease }); active.retryAttachment(); }}><StableText text={retryingHeld ? "trying…" : "try again"} reserve={["try again", "trying…"]} /></button></span></div>}
-    {active.busy?.limit ? <LimitNotice kind={active.busy.limit} className="chat-held-notice limit-notice" busy={active.busy} parked={active.busy.parked ?? []} stop={active.stop} chats={nav.catalog.chats} onScreen={Boolean(ready)} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetry={active.busy.limit === "resident" ? active.retryBusy : undefined} onRetryStopped={active.retryStopped} onStay={stay} canWrite={canWrite} />
+    {active.busy?.limit ? <LimitNotice kind={active.busy.limit} className="chat-held-notice limit-notice" busy={active.busy} parked={active.busy.parked ?? []} stop={active.stop} chats={nav.catalog.chats} onScreen={Boolean(ready)} shownChat={ready ? nav.catalog.chats.find((chat) => chat.session_id === ready.sessionId) ?? null : null} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetry={active.busy.limit === "resident" ? active.retryBusy : undefined} onRetryStopped={active.retryStopped} onStay={stay} canWrite={canWrite} />
       : active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
@@ -583,7 +587,7 @@ function ChatApproval({ id, observer, takeControl, took, ...decision }: { observ
 // that hold the slots, and offer to stop the oldest (zeta's status order) and try the swap again, or to stay. the notice
 // is a choice, not an error; focus moves into it, so the keyboard reaches its buttons next. it stays while a stop and its
 // repeated swap run, and says so.
-function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = false, onOpen, onStop, onRetry, onRetryStopped, onStay, canWrite }: { kind: "parked" | "resident"; className: string; busy?: { retry: "attach" | "new"; target?: Chat | null }; parked: ParkedChat[]; stop: StopState | null; chats: readonly Chat[]; onScreen?: boolean; onOpen: (chat: Chat) => void; onStop: () => void; onRetry?: () => void; onRetryStopped: () => void; onStay: () => void; canWrite: boolean }) {
+function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = false, shownChat = null, onOpen, onStop, onRetry, onRetryStopped, onStay, canWrite }: { kind: "parked" | "resident"; className: string; busy?: { retry: "attach" | "new"; target?: Chat | null }; parked: ParkedChat[]; stop: StopState | null; chats: readonly Chat[]; onScreen?: boolean; shownChat?: Chat | null; onOpen: (chat: Chat) => void; onStop: () => void; onRetry?: () => void; onRetryStopped: () => void; onStay: () => void; canWrite: boolean }) {
   const element = useRef<HTMLDivElement>(null);
   // focus moves in when the notice shows, and back in after each change of it (a clicked button can go away) unless
   // the user is elsewhere (typing in the kept chat)
@@ -595,13 +599,17 @@ function LimitNotice({ kind, className, busy, parked, stop, chats, onScreen = fa
     element.current?.focus({ preventScroll: true });
   }, [kind, stop?.phase]);
   const chatOf = (sessionId: string) => parked.find((entry) => entry.sessionId === sessionId)?.chat ?? chats.find((chat) => chat.session_id === sessionId) ?? null;
-  // two chats in the notice with one title get their time, so each name means one chat
-  const shown = [...parked.map((entry) => entry.chat), busy?.target ?? null, stop ? chatOf(stop.sessionId) : null].filter((chat): chat is Chat => chat !== null);
+  // two chats in the notice (or one in it and the one on screen) with one title get their time, and a short id when
+  // the time is the same too, so each name means one chat
+  const shown = [...parked.map((entry) => entry.chat), busy?.target ?? null, stop ? chatOf(stop.sessionId) : null, shownChat].filter((chat): chat is Chat => chat !== null);
+  const timeOf = (chat: Chat) => new Date(chat.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase();
   const nameOf = (chat: Chat | null) => {
     if (!chat) return "a chat";
     const title = titleOf(chat);
-    const twin = shown.some((other) => other.session_id !== chat.session_id && titleOf(other) === title);
-    return twin ? `"${title}" (${new Date(chat.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase()})` : `"${title}"`;
+    const twins = shown.filter((other) => other.session_id !== chat.session_id && titleOf(other) === title);
+    if (twins.length === 0) return `"${title}"`;
+    const time = timeOf(chat);
+    return `"${title}" (${time}${twins.some((other) => timeOf(other) === time) ? ` · ${chat.session_id.slice(0, 4)}` : ""})`;
   };
   const name = (sessionId: string) => nameOf(chatOf(sessionId));
   const oldest = parked.find((entry) => !entry.finishing);
