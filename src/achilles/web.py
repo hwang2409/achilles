@@ -591,7 +591,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
                 "", "create mode on", "forbidden", "turn on create mode to restore code."
             )
             return JSONResponse({"error": error_document(error)}, status_code=403)
-        return JSONResponse(restored)
+        return JSONResponse({"version": restored["revision"], **restored})
 
     async def create_mode(request):
         if not _same_origin(request):

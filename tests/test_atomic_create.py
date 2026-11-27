@@ -898,3 +898,15 @@ def test_page_code_lifecycle_through_real_mcp_requests(monkeypatch, tmp_path):
             "restored_from": 1,
             "revision": 3,
         }
+
+        browser_restore = client.post(
+            f"/api/pages/{page_id}/code/restore",
+            headers={
+                "authorization": f"Bearer {store.ensure_credential(page_id)}",
+                "host": "127.0.0.1:5190",
+                "origin": "http://127.0.0.1:5190",
+            },
+            json={"version": 2, "expected_version": 3},
+        )
+        assert browser_restore.status_code == 200
+        assert browser_restore.json()["version"] == 4
