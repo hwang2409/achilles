@@ -1261,7 +1261,7 @@ describe("controller, chat controlled elsewhere", () => {
 const realWait = controlledRetry.wait;
 beforeEach(() => { controlledRetry.wait = async () => {}; });
 afterEach(() => { controlledRetry.wait = realWait; });
-const controlledReason = "this chat is open in another tab. write there, or start a new chat here.";
+const controlledReason = "this chat is open or kept running in another tab. write there, or start a new chat here.";
 const notice = "this chat is open or kept running in another tab. you can read it here.";
 const refusal = { error: { code: -32014, message: "session is controlled by another client", data: { code: "session_controlled", session_id: "session" } } };
 const heldElsewhere = (extra: Options = {}): Options => ({ attached: true, ...extra, rpc: { ...extra.rpc, resume: () => refusal } });
@@ -1278,7 +1278,7 @@ test.each([
   ["composer.send", heldElsewhere({ joined: { messages: [userMessage] } }), async (app: RenderResult, writes: string[]) => {
     expect(app.container.querySelector(`button${tag("composer.send")}`)).toBeNull();
     const field = select(app, '[data-part="composer"] textarea');
-    expect(field.getAttribute("placeholder")).toBe("read-only: this chat is open in another tab");
+    expect(field.getAttribute("placeholder")).toBe("read-only: this chat is open or kept running in another tab");
     await keydown(field, "Enter");
     expect(chatWrites(writes)).toEqual([]);
   }],
@@ -1353,7 +1353,7 @@ test("try again shows it is trying, then says the chat is still held", async () 
     await click(pending);
     expect(writes.filter((write) => write === "resume")).toHaveLength(5);
     await act(async () => release());
-    await app.findByText("still open in another tab. you can read it here.", { ignore: '[aria-hidden="true"]' }, { timeout: 3000 });
+    await app.findByText("still open or kept running in another tab. you can read it here.", { ignore: '[aria-hidden="true"]' }, { timeout: 3000 });
     expect(app.getByRole("button", { name: "try again" })).toBeTruthy();
     expect(writes.filter((write) => write === "resume")).toHaveLength(8);
   });

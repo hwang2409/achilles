@@ -73,7 +73,7 @@ export function creationApprovalMode(serverMode: string | null | undefined, auto
 export class SessionNotFoundError extends Error {}
 /** zeta refuses `resume` (-32014, `data.code: "session_controlled"`) while another client, such as another tab, holds the chat. */
 export class SessionControlledError extends Error {
-  constructor(readonly sessionId: string) { super("this chat is open in another tab."); }
+  constructor(readonly sessionId: string) { super("this chat is open or kept running in another tab."); }
 }
 // a reload can reach zeta before zeta has seen the old page's socket close; the chat is free a moment later, so retry
 // a refusal that names this chat
