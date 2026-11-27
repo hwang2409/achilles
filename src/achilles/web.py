@@ -18,6 +18,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Respon
 from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
+from .page_build import PageBuildError
 from .pages import CHAT_PURPOSES, PageStore
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
@@ -221,9 +222,10 @@ def create_app() -> Starlette:
         code = await anyio.to_thread.run_sync(store.page_code, row["id"])
         if not code:
             raise HTTPException(404, "page has no compiled revision")
-        artifact = store.root / "bundles" / f"{code['digest']}.js"
-        if not artifact.is_file():
-            raise HTTPException(404, "page artifact not found")
+        try:
+            await anyio.to_thread.run_sync(store.rebuild_artifact, row["id"])
+        except PageBuildError as exc:
+            raise HTTPException(404, "page artifact not found") from exc
         html = (
             "<!doctype html><meta charset='utf-8'><div id='root'></div>"
             f"<script crossorigin='anonymous' src='/api/pages/{row['id']}/"
