@@ -24,7 +24,7 @@ test("foreign owner refuses without opening a history lease", async () => {
   const owner = createChildRunsController(client, key, { attached: async () => "other", open: async () => { opened++; return result(); } });
   try {
     await owner.refresh();
-    expect(owner.snapshot()).toMatchObject({ limited: true, warning: expect.stringContaining("not attached") });
+    expect(owner.snapshot()).toMatchObject({ limited: true, warning: expect.stringContaining("the chat that started it") });
     expect(opened).toBe(0);
   } finally { owner.close(); }
 });

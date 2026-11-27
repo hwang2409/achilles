@@ -11,6 +11,7 @@ import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, 
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
+import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
@@ -561,9 +562,24 @@ with _database() as db:
   await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
   const mcpWriteSurfaceIds = await gateMcpWrites(browser, origin, zetaHome, cwd, screenshotDir);
   const mcpTestSurfaceId = await gateMcpTest(browser, origin, zetaHome, cwd, screenshotDir);
-  // skipped: /agents is read-only in multi-controller mode (zeta runs child_run_* only on the tab's own session).
-  // the next slice of this lane moves spawn, cancel, and send into the chat tab and restores this step there.
-  const agentWriteSurfaceIds: string[] = [];
+  const agentsHome = join(temp, "agents-zeta");
+  const agentsDiscovery = join(agentsHome, "agents-ws.json");
+  await mkdir(agentsHome, { mode: 0o700 });
+  // the agent gate opens a chat on this zeta, so it must trust achilles' page tools
+  await Bun.write(join(agentsHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
+  const agentsServer = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/agent-controls-server.py")], {
+    ...env, ZETA_HOME: agentsHome, ZETA_ACCOUNT_HOME: agentsHome, ZETA_PROOF_DISCOVERY: agentsDiscovery,
+  });
+  await waitFor(async () => await Bun.file(agentsDiscovery).exists(), "agent controls zeta discovery");
+  const agentDiscovery = await readDiscovery(agentsDiscovery);
+  const chatIds = async () => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: { session_id: string }[] }).chats.map((chat) => chat.session_id);
+  const chatsBefore = new Set(await chatIds());
+  const agentWriteSurfaceIds = await gateAgentControls(browser, origin, { ...agentDiscovery, url: `ws://127.0.0.1:${agentDiscovery.port}` }, waitFor, screenshotDir);
+  await stop(agentsServer);
+  // the agent gate's chat lives on another zeta and would become home's newest chat; later steps expect home's stale session
+  const agentChats = (await chatIds()).filter((id) => !chatsBefore.has(id));
+  const dropAgentChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...agentChats], env);
+  if (!(await waitForExit(dropAgentChats, 10_000)) || dropAgentChats.exitCode !== 0) throw new Error(`agent chat cleanup exited ${dropAgentChats.exitCode}`);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -3347,7 +3363,8 @@ with _database() as db:
   console.log("cap step: five catalog tabs next to the chat tab all control zeta");
   const capFillers: Array<{ client: ReturnType<typeof createClient>; sessionId: string }> = [];
   for (let opened = 0; ; opened++) {
-    if (opened > 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
+    // the chat tab holds one of the sixteen slots, so fillers alone can be at most fifteen
+    if (opened >= 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
     // the same handoff the browser reads, so the raw controllers reach the zeta serve the tabs use.
     const discovery = await fetch(discoveryUrl).then((response) => response.json()) as { url: string; controller_token: string };
     const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
@@ -3362,7 +3379,8 @@ with _database() as db:
     if (!created.session?.session_id) { filler.close(); throw new Error("a cap filler new_session returned no session id"); }
     capFillers.push({ client: filler, sessionId: created.session.session_id });
   }
-  if (!capFillers.length) throw new Error("no session-holding controller connected before the cap step");
+  // only the chat tab holds a session here, so the cap of sixteen leaves exactly fifteen filler slots
+  if (capFillers.length !== 15) throw new Error(`expected 15 cap fillers next to the chat tab, got ${capFillers.length}`);
   console.log(`cap step: ${capFillers.length} session-holding controllers filled zeta next to the chat tab`);
   const observerPage = await browser.newPage();
   const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId, mcpTestSurfaceId, ...mcpOAuthSurfaceIds, ...agentWriteSurfaceIds]);
@@ -3654,7 +3672,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),

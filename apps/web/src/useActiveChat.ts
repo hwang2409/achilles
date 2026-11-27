@@ -569,6 +569,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const creationError = status.error ? attachmentError(status.error, "creation") : null;
   const missingCreation = useRef<{ input: ChatCreationInput; route: string } | null>(null);
   const createAfterLoad = useRef(location.hash === newChatIntent);
+  // set when zeta refused a new chat (its `replace`): "try again" must make the new chat, not attach the page's newest
+  const refusedCreate = useRef<boolean | null>(null);
   const { autoApproveDefault } = useSettings();
   const pendingSelection = useRef<{ sessionId: string; sawRunning: boolean } | null>(null);
   const [busy, setBusy] = useState<BusyChat | null>(null);
@@ -643,6 +645,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   useEffect(() => {
     // read before the offline return: a retry clicked while offline must not stay set for a later, unrelated attach
     const retrying = retryingCreation.current; retryingCreation.current = false;
+    refusedCreate.current = null;
     if (!client || !connected) return;
     const landing = location.pathname === createPath;
     const continuing = !landing && !!selectedId && location.hash === continueChatIntent;
@@ -751,7 +754,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         applyActive(token, { kind: "state", update: { phase: "empty", page: next.page, serverApprovalMode: next.serverApprovalMode, credential: next.credential, newChat: true } });
       }
     } catch (caught) {
-      if (!creation.current.status(context.pageId).pending) applyActive(token, { kind: "state", update: { phase: "error", error: attachmentError(caught, "creation") } });
+      if (!creation.current.status(context.pageId).pending && applyActive(token, { kind: "state", update: { phase: "error", error: attachmentError(caught, "creation") } })) refusedCreate.current = replace;
     } finally {
       focusClaim.release();
     }
@@ -771,6 +774,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setAttachSlow(false);
     setRouteRefresh((value) => value + 1);
   }, []);
+  // "try again" on the too-many-chats screen repeats what failed: the new chat, or the attach of the url's chat
+  const retryLimit = useCallback(() => {
+    const replace = refusedCreate.current;
+    if (replace !== null && canWrite) openFresh(location.pathname, replace); else retryAttachment();
+  }, [canWrite, openFresh, retryAttachment]);
   // a create that keeps failing is never a dead end: drop it and open the page again (its empty state keeps the new-chat draft)
   const discardCreation = useCallback(() => {
     if (!canWrite) return;
@@ -1047,5 +1055,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [canWrite, state]);
 
   const approvalMode = "page" in state ? creationApprovalMode(state.page.approval_mode, autoApproveDefault) : null;
-  return { build: { approvalMode, draft: buildDraft, setDraft: setBuildDraft, pending: startingChat === "build", unavailable: startingChat !== null, error: buildError, locked: Boolean(buildTarget.current?.deliveryId), start: buildPage }, state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat: startingChat === "new", startingChat: startingChat !== null, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  return { build: { approvalMode, draft: buildDraft, setDraft: setBuildDraft, pending: startingChat === "build", unavailable: startingChat !== null, error: buildError, locked: Boolean(buildTarget.current?.deliveryId), start: buildPage }, state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat: startingChat === "new", startingChat: startingChat !== null, focusSessionId, retrySaving, discardCreation, retryAttachment, retryLimit, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }

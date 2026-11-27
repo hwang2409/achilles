@@ -59,7 +59,7 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const [failure, setFailure] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const supported = client && supportsFeature(client, ACCOUNT_LIST_IDLE_FEATURE);
-  // an observer tab (zeta was full) waits for the banner's take control; the router remounts this module as controller
+  // an observer tab (zeta was full) waits for the banner's take control, then reads as controller
   const observer = (client as { authority?: string } | null)?.authority === "observer";
   const latestCatalog = login.catalog();
   const refreshed = latestCatalog !== readAfter ? latestCatalog : null;
@@ -88,6 +88,7 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
       setLoading(false);
     }
   };
+  useEffect(() => { attempted.current = false; }, [observer]);
   useEffect(() => {
     if (attempted.current || !supported || observer || fresh || active || review) return;
     attempted.current = true;
@@ -101,7 +102,7 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
         : !client ? (connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
           : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />)
         : !supported ? <ModuleState kind="unsupported" title="update zeta to manage accounts here" detail="on this version, use /accounts inside an active chat." />
-        : observer && !failure ? <ModuleState kind="offline" title={OBSERVER_READ_REASON} />
+        : observer && !failure ? <ModuleState kind="observer" title={OBSERVER_READ_REASON} />
         : failure ? <ModuleState kind="failed" title="could not load accounts" detail={failure} action={showAction} />
         : !fresh ? <ModuleState kind="loading" title="loading accounts…" />
         : !rows.length && <ModuleState kind="empty" title="no model accounts yet" detail="sign in to a model provider to start." />}
