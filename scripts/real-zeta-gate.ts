@@ -3348,7 +3348,8 @@ with _database() as db:
   const capFillers: Array<{ close: () => void }> = [];
   for (let opened = 0; ; opened++) {
     if (opened > 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
-    const discovery = await readDiscovery(ownDiscovery);
+    // the same handoff the browser reads, so the raw controllers reach the zeta serve the tabs use.
+    const discovery = await fetch(discoveryUrl).then((response) => response.json()) as { url: string; controller_token: string };
     const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
     const filler = createClient(await webSocketTransport(url.toString(), ["zeta.v1", `zeta.bearer.${discovery.controller_token}`]));
     try { await filler.hello(FEATURES, "controller"); }
