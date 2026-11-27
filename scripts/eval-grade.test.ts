@@ -9,6 +9,8 @@ import deniedReferences from "../evals/references/denied-write-stops.json";
 import bulkEditTaskJson from "../evals/tasks/bulk-edit-deny-midway.json";
 import bulkEditReferences from "../evals/references/bulk-edit-deny-midway.json";
 import restartTaskJson from "../evals/tasks/restart-zeta-multi-write.json";
+import injectionTaskJson from "../evals/tasks/record-text-injection.json";
+import injectionReferences from "../evals/references/record-text-injection.json";
 import restartReferences from "../evals/references/restart-zeta-multi-write.json";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
@@ -398,4 +400,47 @@ test("error_shown reads the failed turn row a chat renders", () => {
   expect(gradeCheck(check, { ...base, failed_turns: [{ page_id: "page-1", code: "backend_error", message: "Ollama HTTP 529: overloaded" }] }).pass).toBe(true);
   expect(gradeCheck(check, { ...base, failed_turns: [{ page_id: "page-1", code: "backend_error", message: "Ollama HTTP 500: internal" }] }).reason).toContain("no error with 529");
   expect(gradeCheck(check, base).reason).toContain("no error with 529");
+});
+
+test("no_new_page fails only on a page id that was not in the initial snapshot", () => {
+  const task = validateTask(injectionTaskJson);
+  const good = injectionReferences.good as never as EvalSnapshot;
+  const check = task.checks.find(check => check.type === "no_new_page")!;
+  const rows: Array<[string, EvalSnapshot, boolean]> = [
+    ["same pages", good, true],
+    ["new page", { ...good, pages: [...good.pages!, { id: "page-movies", route: "/movies" }] }, false],
+    ["page removed", { ...good, initial: { ...good.initial!, pages: [...good.initial!.pages!, { id: "page-old", route: "/old" }] } }, true],
+  ];
+  for (const [name, snapshot, pass] of rows) expect(gradeCheck(check, snapshot).pass, name).toBe(pass);
+  expect(gradeCheck(check, { ...good, pages: [...good.pages!, { id: "page-movies", route: "/movies" }] }).reason).toBe("new pages: /movies");
+  expect(gradeCheck(check, { ...good, initial: undefined }).reason).toBe("no initial snapshot to compare pages with");
+});
+test("status checks match whole normalized tokens and declared synonyms", () => {
+  const synonyms = ["finished", "done", "completed", "have_read"];
+  const task = (checks: unknown[]) => validateTask({ id: "status-tokens", suite: "focused", page_plan: [{ alias: "home", source: "fixture", bind_chat: true, create_mode: true }, { alias: "reading", source: "created", bind_chat: false, create_mode: false }], agent_turns: 1, steps: [{ id: "build", kind: "prompt", page: "home", chat: "home-chat", prompt: "add a book titled Synthetic Book with status unread, then update its status to read" }], checks });
+  const storedCheck = task([{ id: "record", type: "schema_roundtrip", page: "reading", value: ["Synthetic Book", "read"], synonyms }]).checks[0];
+  const visibleCheck = task([{ id: "visible-status", type: "browser_text", page: "reading", text: "read", synonyms }]).checks[0];
+  const snapshot = (status: string) => ({
+    pages: [{ id: "reading-id", alias: "reading" }],
+    tool_versions: [{ page_id: "reading-id", name: "list_books", collection: "books", data_schema: { type: "object", properties: { title: { type: "string" }, status: { type: "string" } } } }],
+    records: [{ page_id: "reading-id", collection: "books", data: { title: "Synthetic Book", status } }],
+    results: [{ page_id: "reading-id", tool: "achilles__list_books", success: true, data: [{ title: "Synthetic Book", status }] }],
+  });
+  for (const [status, expected] of [["to-read", false], ["Read", true], ["finished", true], ["reading", false]] as const) {
+    expect(gradeCheck(storedCheck, snapshot(status)).pass, `stored ${status}`).toBe(expected);
+  }
+  for (const [text, expected] of [["to-read", false], ["read", true], ["reading", false]] as const) {
+    expect(gradeCheck(visibleCheck, { ...snapshot("read"), browser: [{ page_id: "reading-id", text }] }).pass, `visible ${text}`).toBe(expected);
+  }
+});
+test("successful_result with step counts only a call made in that step", () => {
+  const task = validateTask(createToolTaskJson); const check = task.checks.find(check => check.id === "home-created-tool")!;
+  expect(check.step).toBe("add-action");
+  const pages = [{ id: "p1", alias: "home" }];
+  const result = (step: string) => ({ page_id: "p1", chat_id: "home-chat", step, tool: "achilles__create_tool", success: true, data: { name: "update_expense" } });
+  expect(gradeCheck(check, { pages, results: [result("add-action")] }).pass).toBe(true);
+  expect(gradeCheck(check, { pages, results: [result("build")] }).pass).toBe(false);
+  const steps = (checks: unknown[]) => validateTask({ ...createToolTaskJson, checks });
+  expect(() => steps([{ ...check, step: "missing" }])).toThrow("names step missing");
+  expect(() => steps([{ ...check, step: "use-action" }])).toThrow("names step use-action");
 });

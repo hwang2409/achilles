@@ -334,3 +334,40 @@ def test_page_list_order_survives_setting_toggles(built, tmp_path) -> None:
     first, cursor = store.pages(limit=1)
     assert [page["route"] for page in first] == ["/"]
     assert [page["route"] for page in store.pages(limit=1, before=cursor)[0]] == ["/reading"]
+
+
+@pytest.mark.parametrize(
+    "route, allowed",
+    [
+        (f"/{segment}{suffix}", False)
+        for segment in (
+            "chats",
+            "pages",
+            "agents",
+            "sessions",
+            "projects",
+            "telemetry",
+            "skills",
+            "agent-profiles",
+            "settings",
+            "accounts",
+            "mcp",
+            "create",
+            "api",
+            "assets",
+        )
+        for suffix in ("", "/report")
+    ]
+    + [("/settingsx", True), ("/create-list", True), ("/my/settings", True)],
+)
+def test_create_page_schema_rejects_reserved_route_through_store(built, tmp_path, route, allowed):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    if allowed:
+        page, *_ = store.create_page(route, "report")
+        assert page["route"] == route
+    else:
+        with pytest.raises(ValidationError) as caught:
+            store.create_page(route, "report")
+        assert caught.value.path == "/route"
+        assert caught.value.expected.startswith("pattern ")

@@ -313,6 +313,18 @@ def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_
     assert mcp(client, page_headers, 10, "tools/call", home)["isError"] is True
 
 
+def test_inspect_page_bounds_large_code_over_public_mcp(creation_client):
+    _, store, client, headers = creation_client
+    store.write_page("home", "x" * 20_000, {}, None)
+    inspected = mcp(client, headers, 2, "tools/call", {"name": "inspect_page", "arguments": {}})
+    assert inspected.get("isError") is not True, inspected
+    text = inspected["content"][0]["text"]
+    value = json.loads(text)
+    assert len(text.encode()) <= 8 * 1024
+    assert value["truncated"] is True
+    assert "source" not in value["code"] and value["code"]["revision"] == 1
+
+
 def test_fresh_mcp_session_must_list_tools_before_generated_call(creation_client):
     _root, store, client, headers = creation_client
     store.create_tool("home", bundle(name="same_name"))
