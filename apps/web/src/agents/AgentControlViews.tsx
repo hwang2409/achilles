@@ -83,12 +83,16 @@ export function AgentCancel({ client, owner, refresh, row, title, parent, elapse
   const [review, setReview] = useState<{ id: number; row: AgentRun; title?: string; parent?: AgentRun; elapsed: string }>();
   const [activity, setActivity] = useState<HTMLDivElement | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const unavailable = readOnly ?? reason(client) ?? (row && isTerminal(row.status) ? "this run has finished." : undefined);
+  const [focused, setFocused] = useState(false);
+  const finished = !!row && isTerminal(row.status);
+  const unavailable = readOnly ?? reason(client) ?? (finished ? "this run has finished." : undefined);
   return <>
     {row && <div className="agents-cancel">
-      {/* aria-disabled, not disabled: a cancelled run turns terminal while this button has focus, and focus must stay in the dialog */}
-      <button ref={opener} type="button" aria-disabled={!!unavailable || undefined} data-write-surface={WRITE_SURFACE.agentsCancel}
-        onClick={() => { if (!unavailable) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed }); }}>cancel run</button>
+      {/* a finished run has no cancel; aria-disabled and kept while focused: a cancelled run turns terminal while this
+          button has focus, and focus must stay in the dialog */}
+      {(!finished || focused) && <button ref={opener} type="button" aria-disabled={!!unavailable || undefined} data-write-surface={WRITE_SURFACE.agentsCancel}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+        onClick={() => { if (!unavailable) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed }); }}>cancel run</button>}
       {unavailable && <small>{unavailable}</small>}
     </div>}
     <div ref={setActivity} className="agents-cancel-activity" />

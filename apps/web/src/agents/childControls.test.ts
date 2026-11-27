@@ -123,10 +123,13 @@ test("active status projects the picker, not stored catalog rows", async () => {
   expect(f.reads).toEqual([]);
 });
 
-test("a running report takes the live transcript row's newer step and tool count; finished runs keep the report", () => {
-  const running: AgentRun = { ...row, status: "running", currentStep: "starting", toolCount: 2 };
-  expect(withLiveRow(running, { status: "running", latestActivity: "turn 1: thinking", toolCount: 3 })).toMatchObject({ currentStep: "turn 1: thinking", toolCount: 3 });
+test("a running report takes the live transcript row's step, tool count, and waiting state; finished rows add the reply", () => {
+  const running: AgentRun = { ...row, status: "running", currentStep: "starting", toolCount: 2, turnsUsed: 0 };
+  expect(withLiveRow(running, { status: "running", latestActivity: "turn 1: thinking", toolCount: 3 })).toMatchObject({ currentStep: "turn 1: thinking", toolCount: 3, turnsUsed: undefined });
   expect(withLiveRow(running, { status: "running", toolCount: 1 })).toMatchObject({ currentStep: "starting", toolCount: 2 });
+  expect(withLiveRow(running, { status: "waiting_approval" }).waiting).toBe("needs approval");
+  expect(withLiveRow(running, { status: "waiting_input" }).waiting).toBe("needs input");
+  expect(withLiveRow(running, { status: "done", summary: "counted 3 lines" })).toEqual({ ...running, reply: "counted 3 lines" });
   expect(withLiveRow(running, { status: "done", toolCount: 5 })).toBe(running);
   expect(withLiveRow({ ...running, status: "completed" }, { status: "running", latestActivity: "late" }).currentStep).toBe("starting");
   expect(withLiveRow(running, undefined)).toBe(running);

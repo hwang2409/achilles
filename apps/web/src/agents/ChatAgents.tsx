@@ -41,7 +41,7 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
   const chosen = reported && withLiveRow(reported, live);
   const liveEnded = !!live && ["done", "error", "canceled"].includes(live.status);
   // the row finished after the report: read the outcome instead of showing a running run
-  useEffect(() => { if (liveEnded && reported && !isTerminal(reported.status) && !refreshing) refresh(); }, [liveEnded, reported?.status]);
+  useEffect(() => { if (liveEnded && reported && !isTerminal(reported.status) && !refreshing) refresh(); }, [liveEnded, reported?.status, refreshing]);
   const parent = chosen?.parentRunId ? rows.find((row) => row.runId === chosen.parentRunId) : undefined;
   return <dialog ref={dialog} className="settings-dialog chat-agents" aria-labelledby="chat-agents-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }}
@@ -55,7 +55,7 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
         {warning && <p role="status">{warning}</p>}
         {report && (rows.length ? <ul className="chat-agents-runs">{rows.map((row) => <li key={row.runId}>
           <button type="button" className="agents-row" aria-current={row.runId === chosenRun ? "true" : undefined} onClick={() => choose(row.runId)}>
-            <span className="agents-row-copy"><span className="agents-row-title"><b>{row.agentType ?? "agent"}</b>{row.description ? ` ${row.description}` : ""}</span><small><StateTag row={row} /></small></span>
+            <span className="agents-row-copy"><span className="agents-row-title"><b>{row.agentType ?? "agent"}</b>{row.description ? ` ${row.description}` : ""}</span><small><StateTag row={row.runId === chosenRun && chosen ? chosen : row} /></small></span>
           </button>
         </li>)}</ul> : <p>no agents in this chat yet.</p>)}
         {id && <AgentRunDetail chosen={chosen} parent={parent} title={title} id={id} client={client} send={send} controls={controls} readOnly={readOnly}

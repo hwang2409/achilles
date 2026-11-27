@@ -137,6 +137,11 @@ button[data-part="sub-agent"]:hover { background: var(--g1-hover); }
 [data-part="sub-agent-open"] { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 16px; color: var(--g1-muted); font-size: 0; }
 [data-part="sub-agent-open"]::after { content: ""; width: 5px; height: 5px; border: solid currentColor; border-width: 1.5px 1.5px 0 0; transform: translateX(-1px) rotate(45deg); }
 [data-part="sub-agent-line"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+/* a finished row shows the child's reply as a muted second line; a live row keeps one line, its step stays in the tooltip */
+[data-part="sub-agent"]:is([data-state="done"], [data-state="error"], [data-state="canceled"]) { flex-wrap: wrap; height: auto; min-height: 32px; padding-block: 6px; }
+[data-part="sub-agent"]:is([data-state="done"], [data-state="error"], [data-state="canceled"]) [data-part="sub-agent-line"] {
+  position: static; flex: 0 0 100%; width: auto; height: auto; clip-path: none; padding-left: calc(var(--g1-status-mark) + 6px); color: var(--g1-muted);
+}
 
 .empty-chat h1 {
   font-size: var(--g1-type-title);
