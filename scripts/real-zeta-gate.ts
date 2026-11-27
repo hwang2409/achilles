@@ -1814,6 +1814,11 @@ with _database() as db:
     await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()
   ).trim();
   secrets.push(readingCredential);
+  await mcp(readingCredential, 200, "initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "gate", version: "1" },
+  });
   const codeWrite = await mcp(readingCredential, 201, "tools/call", {
     name: "write_page",
     arguments: {
