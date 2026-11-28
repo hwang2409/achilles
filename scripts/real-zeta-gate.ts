@@ -382,22 +382,22 @@ try {
     if (await pin() !== "anthropic:failed") throw new Error("switch-then-reply chat did not start pinned to anthropic:failed");
     await capture("auth-card-1440", card);
     await card.getByRole("link", { name: "/accounts", exact: true }).click();
-    await authPage.getByRole("button", { name: "sign in again to anthropic:failed", exact: true }).click();
-    const login = authPage.getByRole("dialog", { name: "review browser sign-in" });
+    await authPage.getByRole("button", { name: "Sign in again to anthropic:failed", exact: true }).click();
+    const login = authPage.getByRole("dialog", { name: "Review browser sign-in" });
     await login.getByRole("checkbox").check();
     const popupEvent = authPage.waitForEvent("popup", { timeout: 10_000 });
-    const [popup, confirmed] = await Promise.allSettled([popupEvent, login.getByRole("button", { name: "sign in again", exact: true }).click()]);
+    const [popup, confirmed] = await Promise.allSettled([popupEvent, login.getByRole("button", { name: "Sign in again", exact: true }).click()]);
     if (popup.status === "rejected") throw new Error("named sign-in popup did not open", { cause: popup.reason });
     try {
       if (confirmed.status === "rejected") throw confirmed.reason;
       await popup.value.waitForURL(sentinel, { timeout: 10_000 });
     } finally { await popup.value.close(); }
-    await authPage.getByText(/^signed in at/).waitFor();
+    await authPage.getByText(/^Signed in at/).waitFor();
     const pageData = await authPage.evaluate(() => JSON.stringify([document.documentElement.outerHTML, location.href, history.state,
       ...[localStorage, sessionStorage].map(store => Object.entries(store))]));
     if (pageData.includes(sentinel) || log.some(line => line.includes(sentinel))) throw new Error("authorization URL escaped the popup");
     if (JSON.stringify(loginRequests) !== '[{"provider":"claude","account":"anthropic:failed"}]') throw new Error("browser sign-in did not name the failed account");
-    await capture("named-sign-in-1440", authPage.getByText(/^signed in at/));
+    await capture("named-sign-in-1440", authPage.getByText(/^Signed in at/));
     // /accounts has no "active chat" in multi-controller mode: a chat switches its own account, from its own tab.
     await authPage.goto(chatUrl);
     await composer.fill("/accounts anthropic:working");

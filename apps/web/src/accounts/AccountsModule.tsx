@@ -55,20 +55,20 @@ function AccountRows({ accounts, now, stale, signedIn, signIn }: { accounts: Acc
           {isDefault && <span className="account-default">Default</span>}
           {current && <span>In use</span>}
         </p>
+        {status.signIn && signIn && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
+          aria-label={`Sign in again to ${account}`} onClick={event => signIn({ provider: account.startsWith("anthropic:") ? "claude" : "codex", account }, event.currentTarget)}>Sign in again</button>}
       </div>
       <div className="account-usage">
         {!usage && <p>Usage unavailable</p>}
         {usage?.capturedAt != null && status.windows.map(({ kind, minutes, usedPercent, resetsAt, passed, stale }, index) =>
           <div className="account-window" key={`${kind}-${index}`} data-stale={stale}>
-            <div><span>{windowLabel(minutes)} window</span><span>{percent.format(usedPercent / 100)} used</span></div>
+            <div><span>{windowLabel(minutes)} window</span><span>{passed && "Was "}{percent.format(usedPercent / 100)} used</span></div>
             <meter high={stale ? undefined : 95} optimum={0} aria-label={`${account} ${windowLabel(minutes)} usage`} min={0} max={100} value={usedPercent} />
             <p>{passed ? "Reset passed" : <>Resets <time dateTime={new Date(resetsAt).toISOString()}>{resetTime.format(resetsAt)}</time></>}
               {" · last read "}<Time at={usage.capturedAt}>{ago(usage.capturedAt, now)}</Time></p>
           </div>)}
-        {usage?.error && <p className="account-refresh-failed">Usage refresh failed: {usage.error}</p>}
+        {status.refreshError && <p className="account-refresh-failed">Usage refresh failed: {status.refreshError}</p>}
       </div>
-      {status.signIn && signIn && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
-        aria-label={`sign in again to ${account}`} onClick={event => signIn({ provider: account.startsWith("anthropic:") ? "claude" : "codex", account }, event.currentTarget)}>sign in again</button>}
     </li>)}
   </ul></>;
 }
@@ -170,20 +170,20 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
         : observer && !failure ? <ModuleState kind="observer" title={OBSERVER_READ_REASON} />
         : failure ? <ModuleState kind="failed" title="Could not load accounts" detail={failure} action={showAction} />
         : !fresh ? <ModuleState kind="loading" title="Loading accounts…" />
-        : !rows.length && <ModuleState kind="empty" title="no model accounts yet" detail="sign in to a model provider to start." />}
+        : !rows.length && <ModuleState kind="empty" title="No model accounts yet" detail="Sign in to a model provider to start." />}
       {wakeFailed && fresh && !failure && !loading && !!rows.length && <p className="account-stale" role="status">Could not refresh accounts. Showing the last read.</p>}
       {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} now={now} stale={!fresh || active || loading || !!failure} signedIn={signedIn} signIn={canSignIn ? signIn : undefined} />}
       {attempt && <AccountLoginStatus attempt={attempt} login={login} canSignIn={canSignIn} signIn={signIn}
         available={fresh && rows.some(row => row.account === loginIdentity(attempt.target) && row.available)} />}
       {canSignIn && !rows.length && <div className="account-actions">
         <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
-          onClick={event => signIn({ provider: "claude" }, event.currentTarget)}>sign in to claude</button>
+          onClick={event => signIn({ provider: "claude" }, event.currentTarget)}>Sign in to Claude</button>
         <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
-          onClick={event => signIn({ provider: "codex" }, event.currentTarget)}>sign in to codex</button>
+          onClick={event => signIn({ provider: "codex" }, event.currentTarget)}>Sign in to Codex</button>
       </div>}
       {review && <Confirmation level={2} external={{ onKeep: () => { setReview(null); review.opener.focus(); } }}
-        action={review.target.account ? reviewText("sign in again") : reviewText("sign in")} keep={reviewText("Go back")}
-        title={reviewText("review browser sign-in")}
+        action={review.target.account ? reviewText("Sign in again") : reviewText("Sign in")} keep={reviewText("Go back")}
+        title={reviewText("Review browser sign-in")}
         effect={`start browser sign-in for ${loginIdentity(review.target)}` as ReviewText}
         scope={reviewText("zeta account store on this computer")}
         current={rows.find(row => row.account === review.target.account)?.available ? reviewText("signed in, but zeta reports authentication failed") : reviewText("not available")} after={reviewText("credentials may be saved and the account becomes available")}

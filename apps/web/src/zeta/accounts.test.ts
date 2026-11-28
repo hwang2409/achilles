@@ -80,6 +80,17 @@ test("accountStatus: a sign-in newer than the usage reading drops zeta's stale a
   expect(accountStatus(account("codex:x", { available: false, usage: usage(0, now + 24 * hour, read, SIGN_IN_FAILED) }), now, now).label).toBe("Needs sign-in");
 });
 
+test("accountStatus: the auth error lives only in the label; other refresh errors keep their line", () => {
+  const read = now - 19 * 24 * hour;
+  const refreshError = (error: string, flags: Partial<Account> = {}, signedInAt?: number) =>
+    accountStatus(account("codex:x", { usage: usage(0, now + 24 * hour, read, error), ...flags }), now, signedInAt).refreshError;
+  expect(refreshError(SIGN_IN_FAILED)).toBeNull();
+  expect(refreshError(SIGN_IN_FAILED, {}, now)).toBeNull();
+  expect(refreshError(SIGN_IN_FAILED, { available: false })).toBeNull();
+  expect(refreshError("rate limited; retry later")).toBe("rate limited; retry later");
+  expect(accountStatus(account("codex:x"), now).refreshError).toBeNull();
+});
+
 test("accountStatus: next is the first time the status changes by the clock alone", () => {
   const fresh = accountStatus(account("codex:x", { usage: usage(10, now + hour, now - 60_000) }), now);
   expect(fresh.next).toBe(now - 60_000 + USAGE_FRESH_MS + 1);

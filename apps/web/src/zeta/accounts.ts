@@ -119,6 +119,8 @@ export type AccountStatus = {
   label: "Needs sign-in" | "Sign-in expired" | "Limit reached" | "Available" | "Signed in";
   tone: "ok" | "warn" | "danger";
   signIn: boolean;
+  /** The usage refresh problem the row shows. Null for zeta's auth error: the label and sign-in action already say it. */
+  refreshError: string | null;
   windows: WindowStatus[];
   /** The next time this status changes by the clock alone; Infinity when none. */
   next: number;
@@ -139,7 +141,8 @@ export function accountStatus({ available, usage }: Account, now: number, signed
   const times = windows.map(({ resetsAt }) => resetsAt);
   if (usage?.capturedAt != null && !old) times.push(usage.capturedAt + USAGE_FRESH_MS + 1);
   const next = Math.min(...times.filter(time => time > now));
-  const status = (label: AccountStatus["label"], tone: AccountStatus["tone"], signIn = false) => ({ label, tone, signIn, windows, next });
+  const refreshError = usage?.error && usage.error !== SIGN_IN_FAILED ? usage.error : null;
+  const status = (label: AccountStatus["label"], tone: AccountStatus["tone"], signIn = false) => ({ label, tone, signIn, refreshError, windows, next });
   if (!available) return status("Needs sign-in", "danger", true);
   if (usage?.error === SIGN_IN_FAILED && signedInAt <= (usage.capturedAt ?? -Infinity)) return status("Sign-in expired", "danger", true);
   if (windows.some(({ limited }) => limited)) return status("Limit reached", "warn");

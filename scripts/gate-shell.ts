@@ -356,7 +356,7 @@ export async function gateAccountsPlace(tab: Page, origin: string) {
     });
   });
   await tab.goto(`${origin}/accounts`);
-  await tab.getByRole("heading", { name: "no model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
+  await tab.getByRole("heading", { name: "No model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
   // /accounts switches no chat: a chat switches its own account from its own tab.
   if (await tab.getByRole("button", { name: "switch chat", exact: true }).count()) throw new Error("/accounts still offers a chat switch");
   if (roles.join() !== "controller" || JSON.stringify(reads) !== '[{"role":"controller","params":{}}]' || sockets.length !== 1)

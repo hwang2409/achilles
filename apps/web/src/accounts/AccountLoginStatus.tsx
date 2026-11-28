@@ -14,32 +14,32 @@ export function AccountLoginStatus({ attempt, login, available, canSignIn, signI
   signIn: (target: LoginTarget, opener: HTMLButtonElement) => void;
 }) {
   const receipt = "at" in attempt ? attempt : null;
-  return <section className="account-login" data-state={attempt.state} aria-label="browser sign-in">
+  return <section className="account-login" data-state={attempt.state} aria-label="Browser sign-in">
   <div role="status">
     <h3>{loginIdentity(attempt.target)}</h3>
     <p>{attempt.state === "starting" ? "Starting browser sign-in…"
-      : attempt.state === "pending" ? "waiting for your browser"
+      : attempt.state === "pending" ? "Waiting for your browser"
       : attempt.state === "cancelling" ? "Checking whether sign-in can be cancelled…"
       : attempt.state === "settling" ? "Checking the account catalog…"
-      : attempt.state === "succeeded" ? "signed in"
+      : attempt.state === "succeeded" ? "Signed in"
       : attempt.state === "cancelled" ? "Sign-in cancelled"
       : attempt.state === "unknown" ? "Sign-in result unknown"
-      : attempt.state === "idle" ? "zeta no longer has a sign-in to check"
+      : attempt.state === "idle" ? "Zeta no longer has a sign-in to check"
       : attempt.state === "blocked" ? "Could not open the sign-in tab"
       : attempt.state === "contention" ? "A sign-in for this account is already pending"
       : "Sign-in failed"}
       {receipt?.state === "succeeded" && <> at <time dateTime={receipt.at.toISOString()}>{resetTime.format(receipt.at)}</time></>}
     </p>
-    {attempt.state === "pending" && <p>sign-in started. finish in the tab that opened. this page updates automatically. reloading this page ends an uncommitted sign-in.</p>}
-    {attempt.state === "unknown" && <p>check the account catalog before trying again. zeta ends an uncommitted sign-in when its connection closes.</p>}
-    {attempt.state === "blocked" && <p>allow pop-ups for achilles, then try again.</p>}
+    {attempt.state === "pending" && <p>Sign-in started. Finish in the tab that opened. This page updates automatically. Reloading this page ends an uncommitted sign-in.</p>}
+    {attempt.state === "unknown" && <p>Check the account catalog before trying again. Zeta ends an uncommitted sign-in when its connection closes.</p>}
+    {attempt.state === "blocked" && <p>Allow pop-ups for achilles, then try again.</p>}
     {attempt.state === "failed" && <p>{attempt.detail}</p>}
     {receipt?.state === "succeeded" && <p>{available
-      ? "the catalog shows this account as available for new chats."
-      : "check the catalog to see which accounts are available for new chats."}</p>}
+      ? "The catalog shows this account as available for new chats."
+      : "Check the catalog to see which accounts are available for new chats."}</p>}
   </div>
   {(attempt.state === "pending" || attempt.state === "cancelling") && <Confirmation level={1}
-    surface={WRITE_SURFACE.accountLoginCancel} label={reviewText("browser sign-in")} value={reviewText("pending")}
+    surface={WRITE_SURFACE.accountLoginCancel} label={reviewText("Browser sign-in")} value={reviewText("pending")}
     action={reviewText("Cancel sign-in")} keep={reviewText("Keep signing in")}
     effect={reviewText("cancel this pending browser sign-in? a credential commit already in progress may still finish.")}
     execute={async () => { await login.cancel(); return cancelledReview; }} checkResult={async () => cancelledReview} onCommitted={() => {}} />}

@@ -161,7 +161,7 @@ export function CommandOutput({ commands, opener }: { commands: ReturnType<typeo
       {output.accounts.map((account) => <li key={account.account}>
         <span>{account.account}</span>
         <small>{[account.current ? "Current" : account.default ? "Default" : "", accountHint(account)].filter(Boolean).join(" · ")}</small>
-        {!account.current && <button type="button" data-write-surface={WRITE_SURFACE.composerAccountSwitch} disabled={!canSwitch || !account.available} aria-label={`switch to ${account.account}`} onClick={() => switchTo(output.accounts, account.account, opener)}>switch</button>}
+        {!account.current && <button type="button" data-write-surface={WRITE_SURFACE.composerAccountSwitch} disabled={!canSwitch || !account.available} aria-label={`Switch to ${account.account}`} onClick={() => switchTo(output.accounts, account.account, opener)}>Switch</button>}
       </li>)}
     </ul>}
   </div>;
