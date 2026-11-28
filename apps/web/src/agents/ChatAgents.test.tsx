@@ -298,3 +298,20 @@ test("a run a restarted zeta resumed shows zeta's banked elapsed, which leaves o
   await views.pass(4000);
   expect(views.shown()).toEqual(["34s", "34s"]);
 });
+
+test("a page open across a zeta restart shows zeta's banked elapsed, not the downtime", async () => {
+  // anchored at 100 s; zeta restarted and resumed, and the next read 60 s later carries its banked 110 s
+  const views = await bothViews("a:across", [{ at: 0, elapsed: 100 }, { at: 0, elapsed: 100 }, { at: 60_000, elapsed: 110 }]);
+  expect(views.shown()).toEqual(["1m 40s", "1m 40s"]);
+  await views.refresh(60_000);
+  expect(views.shown()).toEqual(["1m 50s", "1m 50s"]);
+  await views.pass(4000);
+  expect(views.shown()).toEqual(["1m 54s", "1m 54s"]);
+});
+
+test("an older reply that arrives out of order does not step the count back", async () => {
+  const views = await bothViews("a:late", [{ at: 0, elapsed: 200 }, { at: 0, elapsed: 200 }, { at: 300, elapsed: 199.7 }]);
+  expect(views.shown()).toEqual(["3m 20s", "3m 20s"]);
+  await views.refresh(300);
+  expect(views.shown()).toEqual(["3m 20s", "3m 20s"]);
+});

@@ -49,6 +49,8 @@ export function nowSample() {
 // browser's clock. a live run counts on from zeta's number as of the read that carried it, on this page's monotonic
 // clock, with one anchor per run for every reader on the page, so the dialog and the place show the same second
 const anchors = new Map<string, { elapsed: number; at: number }>();
+// seconds a read may trail the shown count and still be latency: it absorbs request time and out-of-order replies
+const latencyBand = 2;
 export const ticking = (row: AgentRun) => row.elapsedSeconds !== undefined && !isTerminal(row.status);
 /** Records zeta's elapsed for a run as of this read; call it when a report row arrives. */
 export function anchorElapsed(row: AgentRun, at = performance.now()) {
@@ -56,9 +58,11 @@ export function anchorElapsed(row: AgentRun, at = performance.now()) {
   if (!ticking(row)) return void anchors.delete(key);
   const last = anchors.get(key);
   const seconds = row.elapsedSeconds!;
-  // a later read behind the running count only shows request latency, so the count stays. a number lower than zeta's
-  // last one is zeta's own (a restart banked the run's time): show it
-  if (last && seconds >= last.elapsed && seconds <= last.elapsed + (at - last.at) / 1000) return;
+  // a read a little behind the shown count only shows request latency or an older reply that came in late, so the
+  // count stays and never steps back. zeta ahead of the count, or far behind it (a restart banked the run's time and
+  // left out the downtime, also with the page open across the restart), is zeta's own number: show it
+  const projected = last && last.elapsed + (at - last.at) / 1000;
+  if (projected !== undefined && seconds <= projected && projected - seconds < latencyBand) return;
   anchors.set(key, { elapsed: seconds, at });
   // views in this second re-render with the new anchor, so none keeps the old count until the next tick
   sample = { ...sample };
