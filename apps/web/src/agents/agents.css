@@ -44,7 +44,8 @@
 .agents-state[data-status="suspended"]::before { background: transparent; box-shadow: inset 0 0 0 1px currentColor; }
 .agents-more { margin: 8px 16px; }
 .agents-detail { overflow-wrap: anywhere; }
-.agents-back { display: inline-flex; margin-inline: var(--g1-space-10); align-items: center; min-height: var(--g1-control-height); color: var(--fulcrum-accent); font-size: inherit; }
+/* the top margin keeps the focus ring (2px + 2px offset) inside the scrolling panel; the side margin puts the text on the heading edge */
+.agents-back { display: inline-flex; margin: var(--g1-space-2) var(--g1-page-gutter) 0; align-items: center; min-height: var(--g1-control-height); color: var(--fulcrum-accent); font-size: inherit; }
 .agents-run-head, .agents-activity { padding: var(--g1-page-padding); }
 .agents-run-head h2 { margin: 0; font-size: var(--g1-type-title); font-weight: var(--g1-weight-title); line-height: 1.3; text-wrap: balance; }
 .agents-run-head h2 span { font-size: inherit; }
