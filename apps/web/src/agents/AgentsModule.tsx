@@ -7,7 +7,7 @@ import { isTerminal, stateWord } from "./childControls";
 import { groupAgentRuns, type RunBranch } from "./groupAgentRuns";
 import { supportsFeature } from "../zeta/connection";
 import { AGENT_REFRESH_MS, createAgentRunsReader, recoveryFeature, statusChoices, rowKey, sourceNote, unavailable, type AgentFilters, type AgentRun } from "./reads";
-import { AgentRunDetail, elapsed, RetryLine, short, stamp, StateTag } from "./AgentRunDetail";
+import { AgentRunDetail, Elapsed, RetryLine, short, stamp, StateTag } from "./AgentRunDetail";
 import "./agents.css";
 
 export const countText = (count: number, complete: boolean) => `${count} ${complete ? "run" : "loaded result"}${count === 1 ? "" : "s"}${complete ? " in view" : ""}`;
@@ -111,7 +111,7 @@ export function AgentsModule({ client, connecting, retry, readRuns = createAgent
           <span className="agents-row-title"><b>{run.agentType ?? short(run.runId)}</b>{run.description ? ` ${run.description}` : ""}</span>
           <small><StateTag row={run} />{run.retry ? <> · <RetryLine retry={run.retry} /></> : run.currentStep && run.currentStep !== run.status && !isTerminal(run.status) ? ` · ${run.currentStep}` : ""}{missingParent && run.parentRunId ? ` · parent ${short(run.parentRunId)}` : ""}</small>
         </div>
-        {elapsed(run) && <span className="agents-elapsed">{elapsed(run)}</span>}
+        <Elapsed row={run} />
       </a>
     </li>;
   };

@@ -4,6 +4,7 @@ import { Confirmation, reviewText as t } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { supportsFeature } from "../zeta/connection";
 import { controlFeature, displayControl as display, isTerminal, newerControls, stateWord, readControlParent, runDisplayId, type ChildControls, type ControlParent } from "./childControls";
+import { elapsed } from "./AgentRunDetail";
 import type { AgentRun } from "./reads";
 
 // readOnly: why this tab cannot write (an observer tab); the controls stay visible but disabled.
@@ -77,8 +78,8 @@ function clearOnCommit(operation: Operation, clear: () => void): Operation {
   return { ...operation, execute: () => operation.execute().then(after), checkResult: () => operation.checkResult().then(after) };
 }
 
-export function AgentCancel({ client, owner, refresh, row, title, parent, elapsed, readOnly }: Props & {
-  row?: AgentRun; title?: string; parent?: AgentRun; elapsed?: string;
+export function AgentCancel({ client, owner, refresh, row, title, parent, readOnly }: Props & {
+  row?: AgentRun; title?: string; parent?: AgentRun;
 }) {
   const [review, setReview] = useState<{ id: number; row: AgentRun; title?: string; parent?: AgentRun; elapsed?: string }>();
   const [activity, setActivity] = useState<HTMLDivElement | null>(null);
@@ -93,7 +94,7 @@ export function AgentCancel({ client, owner, refresh, row, title, parent, elapse
           button has focus, and focus must stay in the dialog */}
       <button ref={opener} type="button" aria-disabled={!!unavailable || finished || undefined} data-write-surface={WRITE_SURFACE.agentsCancel}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-        onClick={() => { if (!unavailable && !finished) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed }); }}>cancel run</button>
+        onClick={() => { if (!unavailable && !finished) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed: elapsed(row, Date.now()) }); }}>cancel run</button>
       {unavailable && <small>{unavailable}</small>}
     </div>}
     <div ref={setActivity} className="agents-cancel-activity" />
@@ -109,7 +110,7 @@ function CancelReview({ row, title, parent, elapsed, owner, refresh, activity, o
     effect={display(`${row.agentType || "agent"} · ${row.description || "no task summary"}`)}
     scope={display(`${title || "this chat"}${row.parentRunId ? ` · parent ${runDisplayId(parent?.agentType, row.parentRunId)}` : ""}`, 750)}
     // "0 turns" during the first turn reads as "did nothing", so it says nothing
-    current={display([`${stateWord(row.status)} ${elapsed ?? ""}`.trim(), !row.turnsUsed ? "" : `${row.turnsUsed} turns`].filter(Boolean).join(" · "))}
+    current={display([`${stateWord(row.status)}${elapsed ? ` for ${elapsed}` : ""}`, !row.turnsUsed ? "" : `${row.turnsUsed} turns`].filter(Boolean).join(" · "))}
     after={t("the run stops at its next safe point.")}
     undo={t("no. work in progress can be lost; the transcript stays; a new run starts from zero.")}
     proof={{ kind: "name", name: runDisplayId(row.agentType, row.runId) }} external={{ opener }} activity={activity}

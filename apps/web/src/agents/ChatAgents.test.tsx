@@ -189,15 +189,47 @@ test("the agents place and the chat dialog show the same step and elapsed after 
   const field = (label: string) => [...chat.container.querySelectorAll(".agents-run-head dl div")].find((row) => row.querySelector("dt")?.textContent === label)?.querySelector("dd")?.textContent;
   try {
     await settle();
-    expect([field("current step"), field("elapsed at last refresh")]).toEqual(["turn 1: admitting request", undefined]);
+    expect([field("current step"), field("elapsed")]).toEqual(["turn 1: admitting request", undefined]);
     clock += 9000;
     const progress = { ...admitting, turns_used: 0, tool_count: 1, current_step: "turn 1: thinking", elapsed_seconds: 9.2 };
     await act(async () => { for (const event of fromZetaEvent({ event: "child_progress", session_id: "a", run_id: "a:1", sequence: 2, child: progress })) store.dispatch(event); });
     await settle();
-    expect([field("current step"), field("elapsed at last refresh"), field("tool calls")]).toEqual(["turn 1: thinking", "9s", "1"]);
+    expect([field("current step"), field("elapsed"), field("tool calls")]).toEqual(["turn 1: thinking", "9s", "1"]);
     const row = place.container.querySelector(".agents-catalog .agents-row");
     expect([row?.querySelector("small")?.textContent, row?.querySelector(".agents-elapsed")?.textContent]).toEqual(["running · turn 1: thinking", "9s"]);
   } finally { chat.unmount(); place.unmount(); store.dispose(); time.mockRestore(); }
+});
+
+test("the chat dialog and the agents place read at different times show the same elapsed at the same moment", async () => {
+  jest.useFakeTimers();
+  // own the clock: fake timers move Date differently across bun versions
+  const start = Date.parse("2026-11-08T00:00:00Z");
+  let clock = start + 500;
+  const time = spyOn(Date, "now").mockImplementation(() => clock);
+  // zeta's elapsed is wall time since the start, as of each read
+  const client = { features: ["agent_run_catalog_v1"], request: async (method: string) => {
+    if (method === "agent_run_catalog") return { revision: "sample", data: { items: [{ ...running, turns_used: 0, current_step: "turn 1: thinking",
+      started_at: "2026-11-08T00:00:00Z", elapsed_seconds: (clock - start) / 1000 }] } };
+    throw Object.assign(new Error("test rpc error"), { code: -32601 });
+  } } as unknown as ZetaClient;
+  const draft = { text: "", pending: false };
+  const send = { subscribe: () => () => {}, snapshot: () => draft } as never;
+  const settle = async () => { for (let tick = 0; tick < 20; tick++) await act(async () => { await Promise.resolve(); }); };
+  const chat = render(<ChatAgents client={client} store={null} sessionId="a" title="chat" controls={{} as never} send={send}
+    initialRun="a:1" opener={null} onClose={() => {}} readRuns={(zeta) => createAgentRunsReader(zeta, () => true)} />);
+  await settle();
+  // the place opens 3 s after the dialog read
+  clock += 3000;
+  const place = render(<AgentsModule client={client} connecting={false} retry={() => {}} readRuns={(zeta) => createAgentRunsReader(zeta, () => true)} />);
+  const shown = () => [[...chat.container.querySelectorAll(".agents-run-head dl div")].find((row) => row.querySelector("dt")?.textContent?.startsWith("elapsed"))?.querySelector("dd")?.textContent,
+    place.container.querySelector(".agents-catalog .agents-row .agents-elapsed")?.textContent];
+  try {
+    await settle();
+    await act(async () => { clock += 1000; jest.advanceTimersByTime(1000); });
+    expect(shown()).toEqual(["4s", "4s"]);
+    await act(async () => { clock += 15_000; jest.advanceTimersByTime(15_000); });
+    expect(shown()).toEqual(["19s", "19s"]);
+  } finally { chat.unmount(); place.unmount(); time.mockRestore(); jest.useRealTimers(); }
 });
 
 test("the open dialog follows the session store a replay rejoin installs", async () => {

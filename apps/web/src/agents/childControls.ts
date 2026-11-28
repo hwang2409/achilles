@@ -19,18 +19,16 @@ export const isTerminal = (state: unknown): state is typeof terminal[number] => 
 // zeta's run catalog reports a run's step, turns, and tool calls, but no reply and no waiting state: those come
 // from the chat transcript's live sub-agent row for the run (fulcrum's sub_agent item, fed by child_run_events)
 const waiting: Record<string, AgentRun["waiting"]> = { waiting_approval: "needs approval", waiting_input: "needs input" };
-/** `since`: seconds the live row last changed after the report; then its step and tool calls are newer than the report's */
-export function withLiveRow(row: AgentRun, live: { status: string; summary?: string; latestActivity?: string; toolCount?: number } | undefined, since?: number): AgentRun {
+/** `newer`: the live row changed after the report, so its step and tool calls are newer than the report's */
+export function withLiveRow(row: AgentRun, live: { status: string; summary?: string; latestActivity?: string; toolCount?: number } | undefined, newer = false): AgentRun {
   if (!live) return row;
   if (["done", "error", "canceled"].includes(live.status)) return live.summary ? { ...row, reply: live.summary } : row;
   if (isTerminal(row.status)) return row;
   const shown = waiting[live.status];
   // a waiting run's step is what it waits on (the question, the approval), not the catalog's older step
   if (shown) return { ...row, waiting: shown, currentStep: live.latestActivity || shown };
-  if (since === undefined) return row;
-  // zeta's elapsed is wall time since the start, so it grew by the time between the report and the live change
-  return { ...row, currentStep: live.latestActivity || row.currentStep, toolCount: live.toolCount === undefined ? row.toolCount : Math.max(row.toolCount ?? 0, live.toolCount),
-    ...(row.elapsedSeconds === undefined ? {} : { elapsedSeconds: row.elapsedSeconds + since }) };
+  if (!newer) return row;
+  return { ...row, currentStep: live.latestActivity || row.currentStep, toolCount: live.toolCount === undefined ? row.toolCount : Math.max(row.toolCount ?? 0, live.toolCount) };
 }
 
 type Profile = { name: string; description: string; tools: string[] | null };
