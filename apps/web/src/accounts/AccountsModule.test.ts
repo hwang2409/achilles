@@ -51,6 +51,7 @@ test("a window whose reset passed says so with how long ago it was read, a muted
   mount([account("passed", 100, "2026-11-15T04:00:00Z")]);
   const passed = await row("passed");
   expect(windowLine(passed)).toBe("Reset passed · last read 14 days ago");
+  expect(passed.getByText(/% used$/).textContent).toBe("Was 100% used");
   expect(passed.getByText("14 days ago").getAttribute("title")).toBe(at.format(Date.parse(old)));
   expect(passed.getByText("14 days ago").getAttribute("datetime")).toBe(new Date(old).toISOString());
   expect(passed.queryByText(/resets/i)).toBeNull();
@@ -112,14 +113,15 @@ async function expectSignInExpired(orchard: ReturnType<typeof within>) {
   expect(orchard.getByText("Sign-in expired").className).toBe("account-availability");
   expect(orchard.getByRole("heading").closest("li")!.textContent).not.toMatch(/log in|authentication failed|refresh failed/i);
   expect(windowLine(orchard)).toBe(`Resets ${at.format(Date.parse("2026-12-09T10:59:00Z"))} · last read 18 days ago`);
-  // the action sits in the identity column, next to the status it answers
-  expect(orchard.getByRole("button", { name: "Sign in again to codex:orchard" }).closest(".account-identity")).toBeTruthy();
+  expect(orchard.getByRole("button", { name: "Sign in again to codex:orchard" }).textContent).toBe("Sign in again");
 }
 
 test("a usage refresh that failed on sign-in says so once, with the read time and a sign-in action", async () => {
   mount([orchardRow()]);
   const orchard = await row("orchard", "codex");
   expect(orchard.queryByText(/^available$/i)).toBeNull();
+  // m-4: the action sits with the status, not in a row of its own (casing checked below)
+  expect(orchard.getByRole("button", { name: /^sign in again to codex:orchard$/i }).parentElement!.className).toBe("account-identity");
   await expectSignInExpired(orchard);
   expect(orchard.getByRole("meter").closest(".account-window")!.getAttribute("data-stale")).toBe("true");
   fireEvent.click(orchard.getByRole("button", { name: "Sign in again to codex:orchard" }));
@@ -196,7 +198,7 @@ test("after a good sign-in from this page, the row drops zeta's older auth error
   expect(orchard.getByText("Sign-in expired")).toBeTruthy();
   await login.start({ provider: "codex", account: "codex:orchard" });
   // zeta's re-read catalog still carries the error: only a usage refresh rewrites it
-  await waitFor(() => expect(screen.getByText(/^Signed in at/)).toBeTruthy(), { timeout: 500 });
+  await waitFor(() => expect(screen.getByText(/^signed in at/i)).toBeTruthy(), { timeout: 500 });
   const list = within(screen.getByRole("list", { name: "Model accounts" }));
   const after = within(list.getByRole("heading", { name: "codex:orchard" }).closest("li")!);
   expect(after.getByText("Signed in", { selector: ".account-availability" })).toBeTruthy();
