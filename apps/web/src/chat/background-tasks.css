@@ -6,7 +6,7 @@
 .chat-tasks-state::before { content: ""; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: .55ch; display: inline-block; background: currentColor; }
 .chat-tasks-rows li:is([data-status="running"], [data-status="starting"], [data-status="stopping"]) .chat-tasks-state { color: var(--fulcrum-accent); }
 .chat-tasks-rows li[data-status="failed"] .chat-tasks-state { color: var(--fulcrum-danger); }
-.chat-tasks-rows li[data-status="exited"] .chat-tasks-state::before { background: var(--fulcrum-ok); border-radius: 50%; }
+.chat-tasks-rows li[data-status="exited"] .chat-tasks-state::before { background: var(--fulcrum-ok); border-radius: var(--g1-radius-dot); }
 .chat-tasks-rows li[data-status="killed"] .chat-tasks-state::before { background: transparent; box-shadow: inset 0 0 0 1px currentColor; }
 .chat-tasks-rows button { min-height: var(--g1-control-height); border-radius: var(--g1-radius-control); }
 @media (max-width: 520px) {
