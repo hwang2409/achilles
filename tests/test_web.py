@@ -955,7 +955,7 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
 def test_records_reject_a_missing_or_invalid_json_body(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
-    client = TestClient(web.create_app())
+    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
     book = client.post("/api/pages/home/records/books", headers=own, json={"title": "dune"})
     path = f"/api/pages/home/records/books/{book.json()['record_id']}"
     for method, url in (("POST", "/api/pages/home/records/books"), ("PATCH", path)):
@@ -964,6 +964,50 @@ def test_records_reject_a_missing_or_invalid_json_body(tmp_path: Path) -> None:
             assert response.status_code == 400, (method, content, response.text)
             assert response.text == "body must be a JSON object"
     assert client.get("/api/pages/home/records/books", headers=own).json() == [book.json()]
+
+
+def test_runtime_error_rejects_a_bad_revision_and_keeps_the_first_error(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,digest,created_at)"
+            " VALUES(?,?,?,?,?,?)",
+            ("home", 1, "source", "{}", "d1", "2025-01-01"),
+        )
+        db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = TestClient(
+        web.create_app(),
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 1234),
+        raise_server_exceptions=False,
+    )
+    url = "/api/pages/home/runtime-error"
+    for revision in ("one", None, True):
+        response = client.post(url, headers=own, json={"revision": revision, "error": "x"})
+        assert response.status_code == 400, (revision, response.status_code)
+    # an error loop posts again and again; the first error is the cause and stays
+    for error in ("first cause", "loop 1", "loop 2"):
+        assert (
+            client.post(url, headers=own, json={"revision": 1, "error": error}).status_code == 200
+        )
+    assert store.page_code("home")["runtime_error"] == "first cause"
+
+
+def test_bridge_insert_rejects_a_non_string_record_id_and_a_huge_body(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
+    url = "/api/pages/home/records/books"
+    for record_id in (7, ["a"], {"a": 1}, True):
+        response = client.post(url, headers=own, json={"record_id": record_id})
+        assert response.status_code == 400, (record_id, response.status_code)
+    huge = json.dumps({"title": "x" * 2 * 1024 * 1024}).encode()  # past the 1 MiB cap
+    assert client.post(url, headers=own, content=huge).status_code == 413
+    # a chunked body has no content-length; the cap still stops it
+    chunked = client.post(url, headers=own, content=iter([huge[:1024], huge[1024:]]))
+    assert chunked.status_code == 413
+    assert client.get(url, headers=own).json() == []
 
 
 def test_http_restores_follow_create_mode(tmp_path: Path) -> None:
@@ -1011,6 +1055,11 @@ def test_http_restores_follow_create_mode(tmp_path: Path) -> None:
     assert store.page_tools("home")[0]["version"] == 2
     assert post("other", "code/restore") == 200
     assert store.page("other")["active_code_revision"] == 3
+    # the 1 MiB body cap covers restores too
+    padded = {"version": 1, "expected_version": 3, "pad": "x" * 2 * 1024 * 1024}
+    headers = {"authorization": f"Bearer {store.ensure_credential('other')}"}
+    huge = client.post("/api/pages/other/code/restore", headers=headers, json=padded)
+    assert (huge.status_code, store.page("other")["active_code_revision"]) == (413, 3)
 
 
 def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
@@ -1025,7 +1074,7 @@ def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
                 ") VALUES(?,?,?,?,?,?,?)",
                 ("home", "events", str(index), 1, json.dumps({"value": index}), stamp, stamp),
             )
-    client = TestClient(web.create_app())
+    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
     response = client.get(
         "/api/pages/home/records/events?limit=100",
         headers={"authorization": f"Bearer {token}"},
@@ -1089,7 +1138,9 @@ def test_filtered_records_observer_endpoint(
             ],
         )
 
-    response = TestClient(web.create_app(), raise_server_exceptions=False).get(
+    response = TestClient(
+        web.create_app(), base_url="http://127.0.0.1", raise_server_exceptions=False
+    ).get(
         "/api/pages/home/records/items",
         params={"field": field, "equals": json.dumps(equals), "limit": limit},
         headers={"authorization": f"Bearer {token}"},
@@ -1480,12 +1531,15 @@ def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: P
         )
         db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
 
-    with TestClient(web.create_app()) as client:
-        frame = client.get("/api/pages/home/frame")
-        artifact = client.get(f"/api/pages/home/artifact/{digest}", headers={"origin": "null"})
-        bootstrap = client.get(
-            "/api/pages/home/frame-bootstrap.js?revision=1", headers={"origin": "null"}
+    # what the sandboxed frame's script tags send: an opaque origin, cross-site, cors mode
+    from_frame = {"origin": "null", "sec-fetch-site": "cross-site", "sec-fetch-dest": "script"}
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+        frame = client.get(
+            "/api/pages/home/frame",
+            headers={"sec-fetch-site": "same-origin", "sec-fetch-dest": "iframe"},
         )
+        artifact = client.get(f"/api/pages/home/artifact/{digest}", headers=from_frame)
+        bootstrap = client.get("/api/pages/home/frame-bootstrap.js?revision=1", headers=from_frame)
 
     csp = frame.headers["content-security-policy"]
     assert "sandbox allow-scripts allow-forms allow-downloads allow-modals" in csp
@@ -1494,9 +1548,56 @@ def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: P
     assert "font-src 'self' https: data: blob:" in csp
     assert "<script>" not in frame.text
     assert "crossorigin='anonymous'" in frame.text
-    assert artifact.headers["access-control-allow-origin"] == "*"
-    assert bootstrap.headers["access-control-allow-origin"] == "*"
+    assert (frame.status_code, artifact.status_code, bootstrap.status_code) == (200, 200, 200)
+    for script in (artifact, bootstrap):
+        assert script.headers["access-control-allow-origin"] == "null"
+        assert script.headers["cross-origin-resource-policy"] == "same-origin"
     assert "window.achilles" in bootstrap.text
+
+
+def test_frame_routes_refuse_cross_site_and_rebound_requests(tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    store = PageStore(root)
+    digest = "a" * 64
+    (root / "bundles" / f"{digest}.js").write_text("export default 1")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+            "artifact_size,diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("home", 1, "source", "{}", digest, 16, None, None, "2025-01-01"),
+        )
+        db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+    fetched = {"origin": "https://evil.example", "sec-fetch-site": "cross-site"}
+    rebound = {"host": "evil.example"}  # dns rebinding: the attacker's name points at 127.0.0.1
+
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+        statuses = {
+            "fetch() frame": client.get(
+                "/api/pages/home/frame", headers=fetched | {"sec-fetch-dest": "empty"}
+            ),
+            "<img> frame": client.get(
+                "/api/pages/home/frame", headers=fetched | {"sec-fetch-dest": "image"}
+            ),
+            "fetch() artifact": client.get(
+                f"/api/pages/home/artifact/{digest}", headers=fetched | {"sec-fetch-dest": "empty"}
+            ),
+            "fetch() bootstrap": client.get(
+                "/api/pages/home/frame-bootstrap.js?revision=1",
+                headers=fetched | {"sec-fetch-dest": "empty"},
+            ),
+            "rebound page source": client.get("/api/pages/home", headers=rebound),
+            "rebound frame": client.get("/api/pages/home/frame", headers=rebound),
+            "rebound artifact": client.get(f"/api/pages/home/artifact/{digest}", headers=rebound),
+        }
+        own = client.get("/api/pages/home")
+        # the sandboxed frame's own reload or form post: cross-site, and its bundle exists
+        framed = client.get("/api/pages/home/frame", headers=fetched | {"sec-fetch-dest": "iframe"})
+    assert {name: response.status_code for name, response in statuses.items()} == dict.fromkeys(
+        statuses, 403
+    )
+    assert framed.status_code == 200 and "artifact/" in framed.text
+    assert "source" not in statuses["rebound page source"].text
+    assert own.status_code == 200
 
 
 def test_fresh_home_is_plain_chat_and_a_codeless_page_keeps_the_notice(tmp_path: Path) -> None:
@@ -1507,7 +1608,7 @@ def test_fresh_home_is_plain_chat_and_a_codeless_page_keeps_the_notice(tmp_path:
             ("old", "/old", "old block page", "2025-01-01", "2025-01-01"),
         )
 
-    with TestClient(web.create_app()) as client:
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
         home = client.get("/api/pages/home").json()
         old = client.get("/api/pages/old").json()
 
@@ -1528,7 +1629,7 @@ def test_a_codeless_page_in_a_migrated_home_names_the_layout_backup(tmp_path: Pa
             ("old", "/old", "old block page", "2025-01-01", "2025-01-01"),
         )
 
-    with TestClient(web.create_app()) as client:
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
         old = client.get("/api/pages/old").json()
 
     backup = root / "achilles.sqlite3.pre-block-model-v3.backup"
@@ -1546,7 +1647,7 @@ def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) ->
         )
     own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
     other = {"authorization": f"Bearer {store.ensure_credential('other')}"}
-    client = TestClient(web.create_app())
+    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
     book = client.post("/api/pages/home/records/books", headers=own, json={"title": "dune"})
     theirs = client.post("/api/pages/other/records/books", headers=other, json={"title": "emma"})
     path = f"/api/pages/home/records/books/{book.json()['record_id']}"
@@ -1576,7 +1677,9 @@ def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) ->
 def test_a_duplicate_record_id_insert_is_a_409(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
-    client = TestClient(web.create_app(), raise_server_exceptions=False)
+    client = TestClient(
+        web.create_app(), base_url="http://127.0.0.1", raise_server_exceptions=False
+    )
     url = "/api/pages/home/records/books"
     assert client.post(url, headers=own, json={"record_id": "r1"}).status_code == 200
     duplicate = client.post(url, headers=own, json={"record_id": "r1", "title": "again"})
