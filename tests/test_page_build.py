@@ -409,10 +409,11 @@ def test_cross_site_frame_request_does_not_start_a_rebuild(monkeypatch, tmp_path
     calls, _ = _fake_containers(monkeypatch, _build_outputs())
     monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
 
-    # what <img src=.../frame> on another site sends
+    # what <iframe src=.../frame> on another site, or the sandboxed frame's own reload, sends
+    cross_site = {"sec-fetch-site": "cross-site", "sec-fetch-dest": "iframe"}
     with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
-        frame = client.get("/api/pages/home/frame", headers={"sec-fetch-site": "cross-site"})
-    assert frame.status_code == 403
+        frame = client.get("/api/pages/home/frame", headers=cross_site)
+    assert frame.status_code == 404
     assert calls == [], "another site must not start a docker rebuild"
 
 

@@ -1055,6 +1055,11 @@ def test_http_restores_follow_create_mode(tmp_path: Path) -> None:
     assert store.page_tools("home")[0]["version"] == 2
     assert post("other", "code/restore") == 200
     assert store.page("other")["active_code_revision"] == 3
+    # the 1 MiB body cap covers restores too
+    padded = {"version": 1, "expected_version": 3, "pad": "x" * 2 * 1024 * 1024}
+    headers = {"authorization": f"Bearer {store.ensure_credential('other')}"}
+    huge = client.post("/api/pages/other/code/restore", headers=headers, json=padded)
+    assert (huge.status_code, store.page("other")["active_code_revision"]) == (413, 3)
 
 
 def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
@@ -1567,7 +1572,12 @@ def test_frame_routes_refuse_cross_site_and_rebound_requests(tmp_path: Path) -> 
 
     with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
         statuses = {
-            "cross-site frame": client.get("/api/pages/home/frame", headers=fetched),
+            "fetch() frame": client.get(
+                "/api/pages/home/frame", headers=fetched | {"sec-fetch-dest": "empty"}
+            ),
+            "<img> frame": client.get(
+                "/api/pages/home/frame", headers=fetched | {"sec-fetch-dest": "image"}
+            ),
             "fetch() artifact": client.get(
                 f"/api/pages/home/artifact/{digest}", headers=fetched | {"sec-fetch-dest": "empty"}
             ),
@@ -1580,9 +1590,12 @@ def test_frame_routes_refuse_cross_site_and_rebound_requests(tmp_path: Path) -> 
             "rebound artifact": client.get(f"/api/pages/home/artifact/{digest}", headers=rebound),
         }
         own = client.get("/api/pages/home")
+        # the sandboxed frame's own reload or form post: cross-site, and its bundle exists
+        framed = client.get("/api/pages/home/frame", headers=fetched | {"sec-fetch-dest": "iframe"})
     assert {name: response.status_code for name, response in statuses.items()} == dict.fromkeys(
         statuses, 403
     )
+    assert framed.status_code == 200 and "artifact/" in framed.text
     assert "source" not in statuses["rebound page source"].text
     assert own.status_code == 200
 

@@ -348,3 +348,57 @@ def test_another_origin_cannot_read_or_run_a_page_bundle(served, tmp_path) -> No
     assert done.returncode == 0, done.stderr
     result = json.loads(done.stdout.strip().splitlines()[-1])
     assert result == {"fetch": "blocked", "script": "not run", "frame": "frame ran"}
+
+
+# the sandboxed frame has an opaque origin, so chromium marks its own navigations cross-site
+_SELF_NAVIGATION_PROBE = """
+import { chromium } from "%(playwright)s";
+const port = %(port)d;
+const sandbox = "allow-scripts allow-forms allow-downloads allow-modals";
+const host = `<!doctype html><iframe sandbox="${sandbox}" src="/api/pages/home/frame"></iframe>`;
+const browser = await chromium.launch({ headless: true });
+try {
+  const page = await browser.newPage();
+  await page.route(`http://127.0.0.1:${port}/host`, (route) =>
+    route.fulfill({ contentType: "text/html", body: host }));
+  await page.goto(`http://127.0.0.1:${port}/host`);
+  const frame = page.frames().find((item) => item !== page.mainFrame())!;
+  const settled = async (start) => {
+    await frame.evaluate(start).catch(() => {});  // the navigation destroys the old context
+    await frame.waitForFunction(
+      () => !(window as any).__old && document.body?.innerText, null, { timeout: 10000 },
+    ).catch(() => {});
+    return await frame.evaluate(() => document.body?.innerText ?? "no page").catch(String);
+  };
+  const first = await settled(() => {});
+  const reloaded = await settled(() => {
+    (window as any).__old = true;
+    location.reload();
+  });
+  const submitted = await settled(() => {
+    (window as any).__old = true;
+    document.forms[0].submit();
+  });
+  console.log(JSON.stringify({ first, reloaded, submitted }));
+} finally {
+  await browser.close();
+}
+"""
+SELF_NAVIGATING = """
+document.getElementById("root").innerHTML =
+  "<form><input name='q' value='1'></form><p>loaded " + location.search + "</p>";
+"""
+
+
+def test_frame_reload_and_form_submit_render_the_page_again(served, tmp_path) -> None:
+    _home_with_code(tmp_path / "achilles", SELF_NAVIGATING)
+    playwright = Path(web.__file__).parents[2] / "apps/web/node_modules/playwright/index.mjs"
+    with served(web.create_app()) as port:
+        script = tmp_path / "self-navigation-probe.ts"
+        script.write_text(_SELF_NAVIGATION_PROBE % {"playwright": playwright, "port": port})
+        done = subprocess.run(
+            ["bun", str(script)], capture_output=True, text=True, timeout=60, check=False
+        )
+    assert done.returncode == 0, done.stderr
+    result = json.loads(done.stdout.strip().splitlines()[-1])
+    assert result == {"first": "loaded", "reloaded": "loaded", "submitted": "loaded ?q=1"}

@@ -230,19 +230,23 @@ def create_app() -> Starlette:
         )
 
     async def page_frame(request):
-        # only the shell and render_page embed the frame; another site must not start a rebuild
-        if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
-            raise HTTPException(403, "the frame loads only from achilles")
+        if request.headers.get("sec-fetch-dest") not in (None, "iframe"):
+            raise HTTPException(403, "the frame loads only in an iframe")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
         code = await anyio.to_thread.run_sync(store.page_code, row["id"])
         if not code:
             raise HTTPException(404, "page has no compiled revision")
-        try:
-            await anyio.to_thread.run_sync(store.rebuild_artifact, row["id"])
-        except PageBuildError as exc:
-            raise HTTPException(404, "page artifact not found") from exc
+        # the sandboxed frame's own reloads and form posts are cross-site; only achilles rebuilds
+        if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
+            if not (store.root / "bundles" / f"{code['digest']}.js").is_file():
+                raise HTTPException(404, "page artifact not found")
+        else:
+            try:
+                await anyio.to_thread.run_sync(store.rebuild_artifact, row["id"])
+            except PageBuildError as exc:
+                raise HTTPException(404, "page artifact not found") from exc
         html = (
             "<!doctype html><meta charset='utf-8'><div id='root'></div>"
             f"<script crossorigin='anonymous' src='/api/pages/{row['id']}/"
@@ -490,7 +494,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
         try:
-            body = await request.json()
+            body = await capped_json(request)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             error = ValidationError("", "valid JSON object")
             return JSONResponse({"error": error_document(error)}, status_code=400)
@@ -539,14 +543,17 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             raise HTTPException(403, "same-origin request required")
         return await page_bearer(request)
 
-    async def json_object(request) -> dict:
+    async def capped_json(request):
         raw = b""
         async for chunk in request.stream():  # stop reading at the cap, even for a chunked body
             raw += chunk
             if len(raw) > MAX_JSON_BODY:
                 raise HTTPException(413, f"body must be at most {MAX_JSON_BODY} bytes")
+        return json.loads(raw)
+
+    async def json_object(request) -> dict:
         try:
-            body = json.loads(raw)
+            body = await capped_json(request)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             body = None
         if not isinstance(body, dict):
@@ -611,7 +618,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def rollback_tool(request):
         page_id = await require_page_bearer(request)
         try:
-            body = await request.json()
+            body = await capped_json(request)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             error = ValidationError("", "valid JSON object")
             return JSONResponse({"error": error_document(error)}, status_code=400)
@@ -647,7 +654,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def restore_code(request):
         page_id = await require_page_bearer(request)
         try:
-            body = await request.json()
+            body = await capped_json(request)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             body = None
         if not isinstance(body, dict):
