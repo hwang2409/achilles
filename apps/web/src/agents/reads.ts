@@ -1,6 +1,7 @@
-import { listChildRuns, type ChildRunRow, type ZetaClient } from "@fulcrum/zeta";
+import { listChildRuns, type ChildRunRow, type SessionStore, type ZetaClient } from "@fulcrum/zeta";
 import { supportsFeature, supportsRequest } from "../zeta/connection";
 import { rpcCode } from "../zeta/historyRead";
+import { isTerminal, withLiveRow } from "./childControls";
 
 export const AGENT_REFRESH_MS = 30_000;
 const RECHECK_AFTER_MS = 3_000;
@@ -133,9 +134,13 @@ export async function readAttachedRoot(client: ZetaClient, signal: AbortSignal) 
   return value.session.session_id;
 }
 
-/** Owns the selected read source, report and continuation generation. Refresh retains the last valid report. */
+/**
+ * Owns the selected read source, report and continuation generation, and each run row: the report's row with the
+ * run's live row (child_run_events) from this client's session store laid over it. Refresh retains the last valid report.
+ */
 export function createAgentRunsReader(client: ZetaClient, advertised = (method: string) => supportsRequest(client, method), now = Date.now) {
-  let snapshot: Snapshot = { refreshing: true };
+  let state: Snapshot = { refreshing: true };
+  let snapshot = state;
   let pending: AbortController | undefined;
   let continuation: Cursor | undefined;
   let seen = new Set<Cursor>();
@@ -144,7 +149,43 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
   const rechecked = new Set<number>();
   const denied = new Set<Source>();
   const listeners = new Set<() => void>();
-  const publish = (next: Snapshot) => { snapshot = next; listeners.forEach((fn) => fn()); };
+  // per run: when its live row last changed, the stop for that watch, and whether its end was reread
+  const liveAt = new Map<string, number>();
+  const watches = new Map<string, { store: SessionStore; stop: () => void }>();
+  const reread = new Set<string>();
+  const liveItem = (row: AgentRun) => {
+    const item = client.stores?.get(row.sessionId)?.getItem(`sub-agent:${row.runId}`);
+    return item?.type === "sub_agent" ? item : undefined;
+  };
+  const show = () => {
+    const report = state.report;
+    const rows = report?.rows.map((row) => {
+      const at = liveAt.get(rowKey(row.sessionId, row.runId));
+      return withLiveRow(row, liveItem(row), at !== undefined && at > report.reportedAt ? (at - report.reportedAt) / 1000 : undefined);
+    });
+    snapshot = report && rows?.some((row, index) => row !== report.rows[index]) ? { ...state, report: { ...report, rows } } : state;
+    listeners.forEach((fn) => fn());
+    // a run that ended after the report: read its outcome once; a failed reread keeps the report, it does not retry
+    const ended = report?.rows.find((row) => !isTerminal(row.status) && ["done", "error", "canceled"].includes(liveItem(row)?.status ?? "") && !reread.has(rowKey(row.sessionId, row.runId)));
+    if (ended && !state.refreshing) { reread.add(rowKey(ended.sessionId, ended.runId)); queueMicrotask(() => void request(report!.filters)); }
+  };
+  const watch = () => {
+    const keys = new Set((state.report?.rows ?? []).map((row) => rowKey(row.sessionId, row.runId)));
+    for (const [key, { stop }] of watches) if (!keys.has(key)) { stop(); watches.delete(key); }
+    // a replay rejoin replaces a session's store: follow the current one. fulcrum has no stores-changed event, so this
+    // runs on each report and when a view sees its store change (`storesChanged`)
+    // shortcut: the Agents place has no store of its own, so it follows a replaced or later-opened store at the next report
+    for (const row of state.report?.rows ?? []) {
+      const key = rowKey(row.sessionId, row.runId);
+      const store = client.stores?.get(row.sessionId);
+      const current = watches.get(key);
+      if (current?.store === store) continue;
+      current?.stop();
+      watches.delete(key);
+      if (store) watches.set(key, { store, stop: store.subscribe(`sub-agent:${row.runId}`, () => { liveAt.set(key, now()); show(); }) });
+    }
+  };
+  const publish = (next: Snapshot) => { state = next; watch(); show(); };
   const sources = (Object.keys(capabilities) as Source[]).filter((source) => {
     const [feature, method] = capabilities[source];
     return supportsFeature(client, feature) && advertised(method);
@@ -193,17 +234,17 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
   const scheduleRecheck = () => {
     clearTimeout(recheck);
     recheck = undefined;
-    const next = Math.min(...(snapshot.report?.rows ?? []).flatMap(({ retry }) => retry?.nextAt !== undefined && !rechecked.has(retry.nextAt) ? [retry.nextAt] : []));
+    const next = Math.min(...(state.report?.rows ?? []).flatMap(({ retry }) => retry?.nextAt !== undefined && !rechecked.has(retry.nextAt) ? [retry.nextAt] : []));
     if (!Number.isFinite(next)) return;
     recheck = setTimeout(() => {
       recheck = undefined;
       rechecked.add(next);
       if (pending) return;
-      void request(snapshot.report?.filters ?? {});
+      void request(state.report?.filters ?? {});
     }, Math.min(2 ** 31 - 1, Math.max(0, next + RECHECK_AFTER_MS - now())));
   };
   const request = async (filters: AgentFilters, more = false) => {
-    const base = snapshot.report;
+    const base = state.report;
     const cursor = more ? continuation : undefined;
     if (more && (!base || cursor === undefined || pending)) return;
     pending?.abort();
@@ -220,7 +261,7 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
         reportedAt: append ? base!.reportedAt : now(), complete: result.next === undefined } });
       scheduleRecheck();
     };
-    publish({ ...snapshot, refreshing: !more, paging: more, warning: undefined });
+    publish({ ...state, refreshing: !more, paging: more, warning: undefined });
     try {
       if (more && base) {
         try {
@@ -233,7 +274,7 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
           if (code === -32601) denied.add(base.source);
           else if (code !== -32602 && code !== -32009 && code !== -32003) throw error;
           // The cursor is tied to this report. Restart once, never append a new generation.
-          publish({ ...snapshot, refreshing: true, paging: false });
+          publish({ ...state, refreshing: true, paging: false });
         }
       }
       const result = await first(filters, signal);
@@ -250,8 +291,10 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     snapshot: () => snapshot,
     subscribe(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     refresh: (filters: AgentFilters = {}) => request(filters),
-    more: () => request(snapshot.report?.filters ?? {}, true),
-    stop() { pending?.abort(); pending = undefined; clearTimeout(recheck); recheck = undefined; },
+    more: () => request(state.report?.filters ?? {}, true),
+    stop() { pending?.abort(); pending = undefined; clearTimeout(recheck); recheck = undefined; watches.forEach(({ stop }) => stop()); watches.clear(); },
+    /** a view's session store changed (a replay rejoin installed a new one): watch the current stores and show them */
+    storesChanged: () => { watch(); show(); },
   };
 }
 

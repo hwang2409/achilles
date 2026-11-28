@@ -21,8 +21,10 @@ function selection() {
   catch { return { invalid: true }; }
 }
 
-export function AgentsModule({ client, connecting, retry }: { client: ZetaClient | null; connecting: boolean; retry: () => void }) {
-  const reader = useMemo(() => client ? createAgentRunsReader(client) : undefined, [client]);
+export function AgentsModule({ client, connecting, retry, readRuns = createAgentRunsReader }: {
+  client: ZetaClient | null; connecting: boolean; retry: () => void; readRuns?: (client: ZetaClient) => ReturnType<typeof createAgentRunsReader>;
+}) {
+  const reader = useMemo(() => client ? readRuns(client) : undefined, [client]);
   const [snapshot, setSnapshot] = useState<ReturnType<NonNullable<typeof reader>["snapshot"]>>({ refreshing: true });
   const [titles, setTitles] = useState<ReadonlyMap<string, string>>(new Map());
   const [filters, setFilters] = useState<AgentFilters>({});
