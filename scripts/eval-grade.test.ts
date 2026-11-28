@@ -520,6 +520,10 @@ test("rendered_after_change rejects a render before the last build, a text misma
   expect(renderStatus([{ ...write, success: false }, render("Synthetic Offline")]), "the write failed").toBe("agent_fail");
 });
 
+test("rendered_after_change ignores a write and render on another page", () => {
+  expect(renderStatus([{ ...write, page_id: "page-2" }, { ...render("Synthetic Offline"), page_id: "page-2" }]), "only another page was written and rendered").toBe("agent_fail");
+});
+
 test("rendered_after_change needs text", () => {
   expect(() => validateTask({ ...task, checks: [{ id: "rendered", type: "rendered_after_change", page: "p" }] })).toThrow("needs text");
 });
