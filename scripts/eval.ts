@@ -392,11 +392,15 @@ async function pageActions(stack: EvalStack, task: EvalTask, pages: Map<string, 
     for (const step of steps) {
       const pageId = pages.get(step.page)!; const plan = task.page_plan.find(page => page.alias === step.page)!;
       const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
+      // playwright dismisses native dialogs by default; accept them like a user who clicks OK on "are you sure?"
+      page.on("dialog", (dialog: any) => dialog.accept());
       const button = page.frameLocator("iframe").getByRole(step.click!.role, { name: step.click!.name, exact: true });
       const row: Record<string, unknown> = { step: step.id, page_id: pageId, ...step.click, clicked: false, status: null }; output.push(row);
       try { await button.waitFor({ state: "visible", timeout: 10_000 }); }
       catch (error) { if ((error as Error).name !== "TimeoutError") throw error; row.reason = `no button named ${JSON.stringify(step.click!.name)} in the page`; await page.close(); continue; }
-      const write = page.waitForResponse((response: any) => response.url().includes(`/api/pages/${encodeURIComponent(pageId)}/records/`) && response.request().method() !== "GET", { timeout: 5_000 }).catch((error: Error) => error);
+      // only a request that starts after the click counts: a write already in flight from page load is not the click's
+      const afterClick = new Set<unknown>(); page.on("request", (request: unknown) => afterClick.add(request));
+      const write = page.waitForResponse((response: any) => afterClick.has(response.request()) && response.url().includes(`/api/pages/${encodeURIComponent(pageId)}/records/`) && response.request().method() !== "GET", { timeout: 5_000 }).catch((error: Error) => error);
       await button.click({ timeout: 5_000 }); row.clicked = true;
       const response = await write;
       if (response instanceof Error) { if (response.name !== "TimeoutError") throw response; }
@@ -548,7 +552,7 @@ function Page() {
   useEffect(() => { load(); }, []);
   return <ul>{chores.map(chore => <li key={chore.record_id}>{chore.title}{chore.done ? " (done)" : ""}
     <button onClick={() => records.update("chores", chore.record_id, { done: true }).then(load)}>Done {chore.title}</button>
-    <button onClick={() => records.delete("chores", chore.record_id).then(load)}>Delete {chore.title}</button></li>)}</ul>;
+    <button onClick={() => confirm("Delete " + chore.title + "?") && records.delete("chores", chore.record_id).then(load)}>Delete {chore.title}</button></li>)}</ul>;
 }
 createRoot(document.getElementById("root")!).render(<Page />);`;
 function scriptedProvider() {
@@ -587,7 +591,8 @@ function scriptedProvider() {
     else if (prompt.includes("/eval-smoke") && !toolResults.some(message => message.tool_name === "achilles__create_page") && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<main>smoke</main>);', dependencies: {} } } } }];
     // own-page-edit-create-off: the page chat rewrites its own page once; a chat that lacks write_page gets an unknown-tool error
     else if (prompt.includes("Synthetic Field Notes")) { if (!toolResults.some(message => message.tool_name === "achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<h1>Synthetic Field Notes</h1>);', dependencies: {} } } }]; }
-    // bridge-update-delete: the chat rewrites its page into a chores list whose buttons update and delete through the page bridge
+    // bridge-update-delete: the chat rewrites its page into a chores list whose buttons update and delete through the page bridge;
+    // Delete asks confirm() first, as a real page might, so the run proves the harness accepts the dialog like a user
     else if (prompt.includes("the chores collection")) { if (!toolResults.some(message => message.tool_name === "achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: SCRIPTED_CHORES_PAGE, dependencies: {} } } }]; }
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
