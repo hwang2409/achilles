@@ -697,10 +697,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     // the kept chat stays on screen; its lease went with the attempt (and a stop may have left zeta another chat
     // attached), so it is opened again: zeta takes back its own parked chat, never refused. one sync commit shows the
     // notice and runs the reopen's attach effect, so no click on the notice can take the attempt's dropped token
-    const show = (update: () => void) => flushSync(() => {
-      update();
-      if (attempt?.kept) { setSelectedId(attempt.kept); setRouteRefresh((value) => value + 1); }
-    });
+    // with no reopen, the notice batches with the caller's own update
+    const show = (update: () => void) => {
+      const kept = attempt?.kept;
+      if (!kept) return update();
+      flushSync(() => { update(); setSelectedId(kept); setRouteRefresh((value) => value + 1); });
+    };
     if (refusal.kind === "busy") {
       const chat = refusal.sessionId ? await findChat(refusal.sessionId).catch(() => null) : null;
       if (!owner.current.current(token)) return;
