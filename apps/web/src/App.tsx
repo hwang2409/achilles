@@ -475,7 +475,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   useEffect(() => subscribeRowWrites((remote) => { remoteReload.current = remote; reloadChats.current(); }), []);
   const building = nav.catalog.chats.some((chat) => chat.session_id === ready?.sessionId && chat.purpose === "page_build");
   const stateLabel = runStateLabel(state, composerActivity.queued, building);
-  useApprovalIntent(state === "approval");
+  useApprovalIntent({ chatId: ready?.sessionId ?? null, approval: ready ? state === "approval" : null });
   const title = ready?.title ?? "new chat";
   const newPageChatReason = !connected ? "new chat is off until zeta is back" : !canWrite ? readOnlyReason
     : active.creatingChat ? "creating chat…" : ready?.controlledElsewhere ? undefined : empty || (ready && !ready.sent) ? ALREADY_NEW

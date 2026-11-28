@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { getSettings, useSettings } from "./settings";
 import { approvalIntent } from "./surface/routes";
 import { chatHref, titleOf, type Chat } from "./surface/AgentNavAdapter";
@@ -12,8 +12,10 @@ import { chatHref, titleOf, type Chat } from "./surface/AgentNavAdapter";
 export type Note = { tag: string; title: string; href: string };
 export type Notifier = { update(chats: readonly Chat[]): void };
 
-export function createNotifier({ show, shouldShow }: {
+export function createNotifier({ show, hide, shouldShow }: {
   show(note: Note): void;
+  // the chat no longer waits: its "needs you" note goes, so it is not clicked later
+  hide(tag: string): void;
   // read at each transition: the setting is on, this tab leads, and it is hidden
   shouldShow(): boolean;
 }): Notifier {
@@ -25,6 +27,7 @@ export function createNotifier({ show, shouldShow }: {
         last.set(chat.session_id, chat.last_state);
         // a chat seen for the first time is no transition: a page load never notifies for what was already waiting
         if (before === undefined || before === chat.last_state) continue;
+        if (before === "approval") hide(chat.session_id);
         const kind = chat.last_state === "approval" ? "needs you" : before === "running" && chat.last_state === "idle" ? "finished" : null;
         if (!kind || !shouldShow()) continue;
         show({ tag: chat.session_id, title: `${titleOf(chat)} ${kind}`, href: chatHref(chat) + (kind === "needs you" ? approvalIntent : "") });
@@ -76,10 +79,13 @@ export function useChatNotifications(chats: readonly Chat[]) {
   useEffect(() => {
     if (!on) return;
     const lead = leadTabs(navigator.locks, document);
+    const shown = new Map<string, Notification>();
     setNotifier(createNotifier({
+      hide: (tag) => { shown.get(tag)?.close(); shown.delete(tag); },
       shouldShow: () => getSettings().notify && Notification.permission === "granted" && lead.leader() && document.visibilityState === "hidden",
       show: ({ tag, title, href }) => {
         const note = new Notification(title, { tag });
+        shown.set(tag, note);
         note.onclick = () => { window.focus(); note.close(); location.assign(href); };
       },
     }));
@@ -88,32 +94,38 @@ export function useChatNotifications(chats: readonly Chat[]) {
   useEffect(() => { notifier?.update(chats); }, [notifier, chats]);
 }
 
-const subscribeHash = (listener: () => void) => { addEventListener("hashchange", listener); return () => removeEventListener("hashchange", listener); };
-
 const approvalIntentWaitMs = 2000;
+type Intent = { chatId: string; armedAt: number };
 
 /**
- * The approval intent (a note's click, the "needs you" link) lives only while the approval it was made for waits, and
- * is used at most once: it focuses the approval's first enabled action, as fulcrum's "jump to approval", trying again
- * on each frame until the card renders (for at most `approvalIntentWaitMs`), then drops the hash. When that approval
- * ends first, or the card never renders, the hash is dropped without a focus move, so a later approval never takes
- * focus by itself. The hash is read as state: a click from the tab that already shows the chat changes the hash.
+ * The approval intent (a note's click, the "needs you" link: `?chat=<id>#approval`) is a value this hook owns. It is
+ * taken once from the URL, on mount or on a hash change (a click from the tab that already shows the chat), and the hash
+ * leaves the URL at once, so nothing reads it again. `approval` is the shown chat's state: null while it loads, false when
+ * loaded and not waiting, true when waiting. The intent ends at the first of: another chat shows (no focus), the chat is
+ * loaded and not waiting (no focus), the first enabled action of its approval takes focus (tried on each frame, as
+ * fulcrum's "jump to approval", since the card can render late), or `approvalIntentWaitMs` after it was taken.
  */
-export function useApprovalIntent(approval: boolean) {
-  const hash = useSyncExternalStore(subscribeHash, () => location.hash);
-  // the intent saw its approval waiting: when that approval ends, the intent ends too
-  const waited = useRef(false);
+export function useApprovalIntent({ chatId, approval }: { chatId: string | null; approval: boolean | null }) {
+  const [intent, setIntent] = useState<Intent | null>(null);
   useEffect(() => {
-    const drop = () => { waited.current = false; history.replaceState(history.state, "", location.pathname + location.search); };
-    if (hash !== approvalIntent) { waited.current = false; return; }
-    // a chat that loads has no approval yet: wait for it
-    if (!approval) { if (waited.current) drop(); return; }
-    waited.current = true;
-    const deadline = performance.now() + approvalIntentWaitMs;
+    const take = () => {
+      if (location.hash !== approvalIntent) return;
+      const chat = new URLSearchParams(location.search).get("chat");
+      history.replaceState(history.state, "", location.pathname + location.search);
+      setIntent(chat ? { chatId: chat, armedAt: performance.now() } : null);
+    };
+    take();
+    addEventListener("hashchange", take);
+    return () => removeEventListener("hashchange", take);
+  }, []);
+  useEffect(() => {
+    if (!intent) return;
+    if (approval === false || (approval === true && chatId !== intent.chatId)) { setIntent(null); return; }
     let frame = requestAnimationFrame(function tryFocus() {
-      const action = document.querySelector<HTMLElement>("[data-part=approval-actions] button:not([aria-disabled=true])");
-      if (action) { action.focus(); drop(); } else if (performance.now() < deadline) frame = requestAnimationFrame(tryFocus); else drop();
+      if (performance.now() - intent.armedAt > approvalIntentWaitMs) return setIntent(null);
+      const action = approval && document.querySelector<HTMLElement>("[data-part=approval-actions] button:not([aria-disabled=true])");
+      if (action) { action.focus(); setIntent(null); } else frame = requestAnimationFrame(tryFocus);
     });
     return () => cancelAnimationFrame(frame);
-  }, [approval, hash]);
+  }, [intent, chatId, approval]);
 }
