@@ -1,6 +1,6 @@
 /* "branch from here" under a user message, and the header chip "branch N of M" with its branch list. */
 .user-turn { position: relative; }
-.branch-from { position: absolute; top: calc(100% + 2px); right: 0; z-index: 1; min-height: 24px; padding: 0 8px; border: 0; border-radius: var(--g1-radius-control, 4px); background: var(--fulcrum-bg); color: var(--fulcrum-muted); font: inherit; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+.branch-from { position: absolute; top: calc(100% + 2px); right: 0; z-index: 1; min-height: 24px; padding: 0 8px; border: 0; border-radius: var(--g1-radius-control); background: var(--fulcrum-bg); color: var(--fulcrum-muted); font: inherit; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
 .user-turn:hover .branch-from, .branch-from:focus-visible { opacity: 1; pointer-events: auto; }
 .branch-from:hover:not([aria-disabled="true"]) { color: var(--g1-fg); }
 .branch-from:focus-visible { outline: var(--g1-focus-ring); outline-offset: 1px; }
@@ -12,7 +12,7 @@
 
 .branch-switcher { position: relative; }
 .branch-chip { font-variant-numeric: tabular-nums; }
-.branch-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; display: grid; width: min(320px, calc(100vw - 24px)); padding: 4px; border: 1px solid var(--fulcrum-border); border-radius: var(--g1-radius-chat, 8px); background: var(--fulcrum-bg); box-shadow: 0 4px 16px color-mix(in srgb, var(--g1-fg) 12%, transparent); white-space: normal; }
+.branch-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; display: grid; width: min(320px, calc(100vw - 24px)); padding: 4px; border: var(--g1-border-width) solid var(--fulcrum-border); border-radius: var(--g1-radius-container); background: var(--fulcrum-bg); box-shadow: var(--g1-shadow-floating); white-space: normal; }
 .branch-list button { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; justify-items: start; padding: 6px 8px; border: 0; background: none; text-align: start; }
 .branch-list button[aria-current="true"] { background: var(--g1-bg-subtle); font-weight: 600; }
 .branch-list button[aria-disabled="true"]:not([aria-current]) { color: var(--fulcrum-muted); cursor: not-allowed; }
@@ -21,4 +21,11 @@
 .branch-hint { margin: 4px 8px; color: var(--fulcrum-muted); font-size: 12px; }
 .branch-note { margin: 0 auto 6px; width: min(var(--g1-content-max), calc(100% - 48px)); color: var(--fulcrum-muted); font-size: 12px; }
 .branch-note[data-failed] { color: var(--fulcrum-danger); }
-@media (max-width: 760px) { .branch-note { width: calc(100% - 24px); } }
+.branch-chip [data-branch-label="compact"] { display: none; }
+/* narrow: a short chip keeps the chat title readable, and the list spans the screen under the header */
+@media (max-width: 760px) {
+  .branch-note { width: calc(100% - 24px); }
+  .branch-chip [data-branch-label="full"] { display: none; }
+  .branch-chip [data-branch-label="compact"] { display: inline; }
+  .branch-list { position: fixed; top: 48px; right: 12px; left: 12px; width: auto; }
+}

@@ -21,6 +21,24 @@ const parseTree = (value: unknown): Branch[] => {
   });
 };
 
+/**
+ * zeta's branch order is not stable: it lists leaves by head entry order, a switch re-anchors the target as a new
+ * newest leaf, and every turn replaces the current leaf's id. This keeps the order the user saw: an id that stays keeps
+ * its place, a new id takes the place of one that went (a turn or a switch replaced it), and any other new id (a fork)
+ * goes last.
+ */
+export const orderBranches = (previous: readonly string[], tree: readonly Branch[]): Branch[] => {
+  const byId = new Map(tree.map((branch) => [branch.id, branch]));
+  const added = tree.filter((branch) => !previous.includes(branch.id));
+  const kept = previous.flatMap((id) => byId.has(id) ? [byId.get(id)!] : added.length ? [added.shift()!] : []);
+  return [...kept, ...added];
+};
+const orderKey = (sessionId: string) => `achilles:branch-order:${sessionId}`;
+const savedOrder = (sessionId: string): string[] => {
+  try { const value = JSON.parse(localStorage.getItem(orderKey(sessionId)) ?? "[]"); return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []; }
+  catch { return []; }
+};
+
 /** "branch N of M" for the current branch; null while the chat has one branch. Order is zeta's (head entry order). */
 export const branchPosition = (branches: readonly Branch[]) => {
   const index = branches.findIndex((branch) => branch.current);
@@ -40,12 +58,18 @@ const userEvent = (store: RunStore, id: string): UserEvent | undefined => {
  * transcript from zeta, and tell the other tabs.
  */
 export function useBranches(client: ZetaClient | null, sessionId: string | null, store: RunStore | null, turns: string, running: boolean) {
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branches, setOrdered] = useState<Branch[]>([]);
+  // the order is kept per chat in this browser, so a reload and the other tabs number the branches the same way
+  const setBranches = (tree: Branch[]) => {
+    const ordered = orderBranches(savedOrder(sessionId!), tree);
+    try { localStorage.setItem(orderKey(sessionId!), JSON.stringify(ordered.map((branch) => branch.id))); } catch { /* order is only a display aid */ }
+    setOrdered(ordered);
+  };
   const [note, setNote] = useState<{ text: string; failed?: true } | null>(null);
   const [pending, setPending] = useState(false);
   const [followed, setFollowed] = useState(0);
   const supported = Boolean(client && supportsRequest(client, "fork_message") && supportsRequest(client, "switch_branch") && supportsRequest(client, "session_tree"));
-  useEffect(() => { setNote(null); setBranches([]); }, [client, sessionId]);
+  useEffect(() => { setNote(null); setOrdered([]); }, [client, sessionId]);
   useEffect(() => {
     if (!supported || !client || !sessionId) return;
     let live = true;
@@ -127,7 +151,7 @@ export function BranchSwitcher({ branches, disabledReason, pending, onSelect }: 
   const close = () => { setOpen(false); chip.current?.focus(); };
   return <div className="branch-switcher" onKeyDown={(event) => { if (event.key === "Escape" && open) { event.stopPropagation(); close(); } }}
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
-    <button ref={chip} type="button" className="branch-chip" aria-expanded={open} aria-controls={list} onClick={() => setOpen(!open)}>{position}</button>
+    <button ref={chip} type="button" className="branch-chip" aria-expanded={open} aria-controls={list} aria-label={position} onClick={() => setOpen(!open)}><span data-branch-label="full">{position}</span><span data-branch-label="compact" aria-hidden="true">{position.replace(/^branch (\d+) of (\d+)$/, "$1/$2")}</span></button>
     {open && <div id={list} className="branch-list" role="group" aria-label="branches">
       {branches.map((branch, index) => <button key={branch.id} type="button" data-write-surface={WRITE_SURFACE.chatBranchSwitch}
         aria-current={branch.current ? "true" : undefined} aria-disabled={branch.current || disabledReason || pending ? true : undefined}

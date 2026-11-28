@@ -43,16 +43,16 @@ export async function gateBranchAcrossTabs(browser: Browser, a: Page) {
     await action.focus();
     await action.press("Enter");
     await until(async () => await shows(a, "together from a") && !await shows(a, "you said: together from a") && !await shows(a, "after tab c joined"), "tab a did not show the new branch");
-    await until(async () => await chip(a).textContent() === "branch 2 of 2", "tab a's header did not say branch 2 of 2");
+    await until(async () => await chip(a).getAttribute("aria-label") === "branch 2 of 2", "tab a's header did not say branch 2 of 2");
     await a.getByText(NOTE, { exact: true }).waitFor(wait);
     const composer = a.getByRole("textbox", { name: "message", exact: true });
     if (!await composer.evaluate((element) => element === document.activeElement) || await composer.inputValue() !== "") throw new Error("the composer is not focused and empty after the fork");
-    await until(async () => !await shows(c, "after tab c joined") && await chip(c).textContent() === "branch 2 of 2", "tab c did not follow the fork");
+    await until(async () => !await shows(c, "after tab c joined") && await chip(c).getAttribute("aria-label") === "branch 2 of 2", "tab c did not follow the fork");
 
     await chip(a).click();
     await a.locator(".branch-list button:not([aria-current])").click();
-    await until(async () => await shows(a, "you said: after tab c joined") && await chip(a).textContent() === "branch 1 of 2", "switching back did not restore tab a's transcript");
-    await until(async () => await shows(c, "you said: after tab c joined") && await chip(c).textContent() === "branch 1 of 2", "tab c did not follow the switch back");
+    await until(async () => await shows(a, "you said: after tab c joined") && await chip(a).getAttribute("aria-label") === "branch 1 of 2", "switching back did not restore tab a's transcript");
+    await until(async () => await shows(c, "you said: after tab c joined") && await chip(c).getAttribute("aria-label") === "branch 1 of 2", "tab c did not follow the switch back");
     console.log("branch: tab a forked from a user message by keyboard, both tabs showed branch 2 of 2 without the later turns, and switching back restored both");
   } finally { await c.close(); }
 }
