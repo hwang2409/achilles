@@ -2,10 +2,12 @@ import "../test-dom";
 import { afterEach, expect, test } from "bun:test";
 import React, { act } from "react";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import type { ZetaClient } from "@fulcrum/zeta";
 import { createRunStore } from "@fulcrum/core";
 import { RunProvider } from "@fulcrum/react";
 import { deliverChatMessage } from "../useActiveChat";
 import { createChatQueues } from "./chatQueues";
+import { useComposerCommands } from "./ComposerCommands";
 import { createComposerModel, transition } from "./composer-machine";
 import { MAX_IMAGE_BYTES, readImages, type ComposerImage } from "./images";
 import { PlainComposer } from "./PlainComposer";
@@ -194,4 +196,43 @@ test("with path completion on, an image paste adds a chip and leaves the open pa
   expect(options()).toEqual([]);
   await act(async () => { fireEvent.keyDown(field, { key: "Enter" }); await new Promise((resolve) => setTimeout(resolve, 0)); });
   expect(calls).toEqual([["send_images", { session_id: "s1", text: "see @s", images: [{ name: "shot.png", mime_type: "image/png", data: PNG }], delivery_id: "d1" }]]);
+});
+
+test.each([
+  ["runs", { kind: "output", text: "status: idle" }],
+  ["is refused", new Error("a turn is already running")],
+])("a slash command that %s with images in the box keeps the chips and never sends them", async (_name, reply) => {
+  const calls: string[] = [];
+  const client = { features: ["model_input_ids"], request: async (method: string) => {
+    calls.push(method);
+    if (method === "slash_list") return { commands: [] };
+    if (reply instanceof Error) throw reply;
+    return reply;
+  } } as unknown as ZetaClient;
+  const sent: string[] = [];
+  function Composer() {
+    const [draft, setDraft] = React.useState("");
+    const commands = useComposerCommands(client, { id: "s1", title: "chat" }, true, draft, () => {}, () => true);
+    return React.createElement(PlainComposer, {
+      state: "idle", images: true, label: "message", chatId: `images-test-${chatSeq++}`, defaultValue: "",
+      onSubmit: async (text: string) => { sent.push(text); },
+      onDraftChange: setDraft, onDraftSubmit: () => {},
+      onCommand: (command, text) => commands.run(command, null, text),
+      slashCommands: commands.slashList,
+    });
+  }
+  const view = render(React.createElement(RunProvider, { store: createRunStore() }, React.createElement(Composer)));
+  const field = view.getByLabelText("message", { selector: "textarea" });
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: { getData: () => "", files: [pngFile("shot.png")] } });
+  await act(async () => { field.dispatchEvent(event); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(view.getByRole("img", { name: "shot.png" })).toBeTruthy();
+
+  await act(() => { fireEvent.change(field, { target: { value: "/status" } }); });
+  await act(async () => { fireEvent.keyDown(field, { key: "Escape" }); });
+  await act(async () => { fireEvent.keyDown(field, { key: "Enter" }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(calls.filter((method) => method !== "slash_list")).toEqual(["slash_run"]);
+  expect(sent).toEqual([]);
+  expect(view.getByRole("img", { name: "shot.png" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "remove image 1: shot.png" })).toBeTruthy();
 });

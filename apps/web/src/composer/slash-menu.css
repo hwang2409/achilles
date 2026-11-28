@@ -1,0 +1,19 @@
+/* the "/" menu takes the command result's place over the composer and matches the command palette's rows */
+[data-part="composer"]:has(> .composer-slash-menu) { position: relative; }
+.composer-slash-menu {
+  position: absolute; inset-inline: -1px; bottom: calc(100% + 8px); z-index: 3;
+  max-height: min(280px, 38dvh); overflow-y: auto; overscroll-behavior: contain;
+  padding: 6px 0; border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container);
+  background: var(--g1-bg); color: var(--fulcrum-fg); box-shadow: var(--g1-shadow-floating);
+  font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, var(--g1-font-ui));
+}
+.composer-slash-option { display: flex; align-items: baseline; gap: 16px; min-height: var(--g1-control-height); box-sizing: border-box; margin-inline: 6px; padding: 6px 14px; border-radius: var(--g1-radius-control); cursor: pointer; }
+.composer-slash-option > span { flex: none; font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+.composer-slash-option > small { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fulcrum-muted); font-size: inherit; }
+.composer-slash-option:hover { background: var(--g1-hover); }
+.composer-slash-option[aria-selected="true"] { background: var(--g1-selected); }
+.composer-slash-option[aria-selected="true"] > span { font-weight: 600; }
+/* a command's text result keeps its own lines and columns */
+.composer-command-output p[data-command-text] { white-space: pre-wrap; font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+
+@media (pointer: coarse) { .composer-slash-option { min-height: 44px; } }

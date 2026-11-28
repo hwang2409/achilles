@@ -112,7 +112,6 @@ const FIELD = 'textarea[aria-label="message"], [role="textbox"]';
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps & { held?: boolean }; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const commandOpener = useRef<HTMLElement | null>(null);
-  const commands = useComposerCommands(client, chat, canWrite);
   const chatId = chat?.id;
   // zeta advertises path_complete only to a controller that negotiated path_completion
   const completePaths = useMemo(() => (canWrite && client && chatId && supportsRequest(client, "path_complete")
@@ -128,6 +127,8 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
+  // a refused command's text comes back only into an empty composer, so newer typing is never lost
+  const commands = useComposerCommands(client, chat, canWrite, draft, (text) => { if (!draftStore.get(sessionId)) draftStore.set(sessionId, text); });
   // a hold's end, or a swap that replaced the field the user typed in, gives focus back to this composer
   const editable = props.state !== "read-only";
   useLayoutEffect(() => { if (editable) returnFocusToComposer(slot.current?.querySelector<HTMLElement>(FIELD)); }, [editable]);
@@ -149,12 +150,13 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     fromNewChat,
     onActivity,
     questionWaiting,
-    onCommand: (command: Parameters<typeof commands.run>[0]) => {
+    onCommand: (command: Parameters<typeof commands.run>[0], text: string) => {
       const field = slot.current?.querySelector<HTMLElement>(FIELD);
       commandOpener.current = field ?? null;
-      return commands.run(command, commandOpener.current);
+      return commands.run(command, commandOpener.current, text);
     },
     commandOutput: commands.output && <CommandOutput commands={commands} opener={commandOpener.current} />,
+    slashCommands: commands.slashList,
     controls,
     // an older zeta takes no images: no paste, no drop, no chips
     images: Boolean(client && supportsFeature(client, IMAGE_FEATURE) && supportsRequest(client, IMAGE_REQUEST)),
