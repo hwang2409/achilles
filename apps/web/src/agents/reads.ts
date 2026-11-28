@@ -191,7 +191,7 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     const report = state.report;
     const rows = report?.rows.map((row) => {
       const at = liveAt.get(rowKey(row.sessionId, row.runId));
-      return withLiveRow(row, liveItem(row), at !== undefined && at > report.reportedAt ? (at - report.reportedAt) / 1000 : undefined);
+      return withLiveRow(row, liveItem(row), at !== undefined && at > report.reportedAt);
     });
     snapshot = report && rows?.some((row, index) => row !== report.rows[index]) ? { ...state, report: { ...report, rows } } : state;
     listeners.forEach((fn) => fn());

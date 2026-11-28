@@ -115,4 +115,6 @@
 /* the titlebar stays on screen while the dialog scrolls; its actions wrap under the title when narrow */
 .chat-agents .settings-titlebar { position: sticky; top: 0; z-index: 1; flex-wrap: wrap; gap: 0 8px; background: var(--g1-bg); }
 .chat-agents .settings-titlebar > div:last-child { margin-inline-start: auto; }
+/* wrapped, the bar is taller than its min-height, so it needs its own inset: the 1440 title sits 10px from the top edge */
+@media (max-width: 680px) { .chat-agents .settings-titlebar { padding-block: 10px; } }
 @media (max-width: 420px) { .chat-agents .agents-run-head dl > div { grid-template-columns: minmax(0, 1fr); gap: 0; } }
