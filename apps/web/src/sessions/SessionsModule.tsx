@@ -6,7 +6,7 @@ import { EnumListbox } from "../page/EnumListbox";
 import { timeLabel, type Chat } from "../surface/AgentNavAdapter";
 import { ModuleState, ShellDockSlot } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
-import { createSessionsReader, readError, ReadLimit, type Collection, type SessionRow, type SessionsReader, type Transcript } from "./reads";
+import { createSessionsReader, readError, ReadLimit, type AttentionItem, type Collection, type SessionRow, type SessionsReader, type Transcript } from "./reads";
 import { sessionOwned } from "../chat/continuation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import "./sessions.css";
@@ -15,11 +15,14 @@ type ContinueSession = (id: string, signal: AbortSignal) => Promise<string | nul
 
 const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
 const short = (id: string) => id.length > 10 ? id.slice(0, 8) + "…" : id;
-const href = (id?: string, transcript = false) => surfaceHref(`/sessions${id ? `/${encodeURIComponent(id)}` : ""}${transcript ? "/transcript" : ""}`);
+type View = "detail" | "transcript" | "attention";
+const views: readonly string[] = ["transcript", "attention"];
+const href = (id?: string, view: View = "detail") => surfaceHref(`/sessions${id ? `/${encodeURIComponent(id)}` : ""}${view === "detail" ? "" : `/${view}`}`);
 function selection() {
   const [, , id, sub, ...extra] = location.pathname.split("/");
-  try { return { id: id ? decodeURIComponent(id) : undefined, transcript: sub === "transcript", invalid: !!extra.length || (!!sub && sub !== "transcript") }; }
-  catch { return { id: undefined, transcript: false, invalid: true }; }
+  const view: View = sub && views.includes(sub) ? sub as View : "detail";
+  try { return { id: id ? decodeURIComponent(id) : undefined, view, invalid: !!extra.length || (!!sub && !views.includes(sub)) }; }
+  catch { return { id: undefined, view: "detail" as View, invalid: true }; }
 }
 
 function useRead<T>(load: ((signal: AbortSignal) => Promise<T>) | undefined, interval = 0) {
@@ -67,7 +70,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
 }) {
   const reader = useMemo(() => client ? createSessionsReader(client) : undefined, [client]);
   const { data, error, refreshing, refresh } = useRead(reader?.catalog, 30000);
-  const [{ id, transcript, invalid }, setSelection] = useState(selection);
+  const [{ id, view, invalid }, setSelection] = useState(selection);
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
   const search = useRef<HTMLInputElement>(null);
   const detail = useRef<HTMLElement>(null);
@@ -93,7 +96,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
       else (restore.current && rowRefs.current.get(restore.current) || search.current)?.focus();
     }
     if (id) restore.current = id;
-  }, [id, transcript]);
+  }, [id, view]);
 
   const rows = data?.items ?? [];
   const row = rows.find((one) => one.id === id);
@@ -112,7 +115,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
       {!client && <p className="sessions-notice" role="status">zeta is offline · showing data from {stamp(data.reportedAt)} <button type="button" onClick={retry}>retry now</button></p>}
       <div className="sessions-split" data-detail={!!id || invalid}>
         <SessionCatalog result={{ data, error, refreshing, refresh }} online={!!client} id={id} owned={owned} search={search} rowRefs={rowRefs} follow={follow} />
-        <DetailPane id={id} row={row} transcript={transcript} invalid={invalid} complete={data.complete} reader={reader}
+        <DetailPane id={id} row={row} view={view} invalid={invalid} complete={data.complete} reader={reader}
           owned={!!row && owned.has(row.id)} detail={detail} follow={follow} continueSession={continueSession} />
       </div>
     </>}
@@ -165,37 +168,39 @@ function SessionCatalog({ result, online, id, owned, search, rowRefs, follow }: 
   </section>;
 }
 
-function DetailPane({ id, row, transcript, invalid, complete, reader, owned, detail, follow, continueSession }: {
-  id?: string; row?: SessionRow; transcript: boolean; invalid: boolean; complete: boolean; reader?: SessionsReader;
+function DetailPane({ id, row, view, invalid, complete, reader, owned, detail, follow, continueSession }: {
+  id?: string; row?: SessionRow; view: View; invalid: boolean; complete: boolean; reader?: SessionsReader;
   owned: boolean; detail: RefObject<HTMLElement | null>; follow: Follow; continueSession: ContinueSession;
 }) {
-  const back = transcript ? href(id) : href();
-  return <section className="sessions-detail" ref={detail} tabIndex={-1} aria-label={transcript ? "session transcript" : "session detail"}>
+  const back = view === "detail" ? href() : href(id);
+  return <section className="sessions-detail" ref={detail} tabIndex={-1} aria-label={view === "detail" ? "session detail" : `session ${view}`}>
     {(id || invalid) && <a className="sessions-back" href={back} onClick={(event) => follow(event, back)}>
-      {transcript ? "← session detail" : "← sessions"}
+      {view === "detail" ? "← sessions" : "← session detail"}
     </a>}
-    {invalid ? <ModuleState kind="failed" title="invalid session link" /> : row ? <SessionDetail key={row.id} row={row} reader={reader} transcript={transcript}
+    {invalid ? <ModuleState kind="failed" title="invalid session link" /> : row ? <SessionDetail key={row.id} row={row} reader={reader} view={view}
       owned={owned} follow={follow} continueSession={continueSession} /> : id ? <ModuleState kind="empty" title="session not in this catalog" detail={complete ? "it may have been removed." : "the catalog is incomplete."} />
       : <ModuleState kind="empty" title="select a session" />}
   </section>;
 }
 
-function SessionDetail({ row, reader, transcript, owned, follow, continueSession }: {
-  row: SessionRow; reader?: SessionsReader; transcript: boolean; owned: boolean; follow: Follow; continueSession: ContinueSession;
+function SessionDetail({ row, reader, view, owned, follow, continueSession }: {
+  row: SessionRow; reader?: SessionsReader; view: View; owned: boolean; follow: Follow; continueSession: ContinueSession;
 }) {
   const [copied, setCopied] = useState("");
-  const access = useMemo(() => reader && !transcript ? (signal: AbortSignal) => reader.transcriptMode(row, signal) : undefined, [reader, row.id, row.project, transcript]);
+  const detailView = view === "detail";
+  const access = useMemo(() => reader && detailView ? (signal: AbortSignal) => reader.transcriptMode(row, signal) : undefined, [reader, row.id, row.project, detailView]);
   const mode = useRead(access, 30000);
-  const agents = useCollection(reader, row, "agents", !transcript);
-  const tasks = useCollection(reader, row, "background_tasks", !transcript);
+  const agents = useCollection(reader, row, "agents", detailView);
+  const tasks = useCollection(reader, row, "background_tasks", detailView);
   const snapshot = [agents.data, tasks.data].filter((data) => !!data).sort((a, b) => b.reportedAt - a.reportedAt)[0]?.state ?? row.state;
   const state = snapshot?.status ?? "unknown";
-  const transcriptHref = href(row.id, true);
+  const transcriptHref = href(row.id, "transcript");
+  const attentionHref = href(row.id, "attention");
   const fields = (values: (readonly [string, ReactNode])[]) => values.filter(([, value]) => value !== undefined);
   return <>
     <div className="sessions-title"><h2>{row.title}</h2><p><StateTag state={state} />{owned && " · achilles"}{row.project && <> · project {row.project}</>}</p></div>
     <ContinueAction row={row} online={!!reader} run={continueSession} />
-    {transcript ? <SessionTranscript row={row} reader={reader} /> : <>
+    {view === "transcript" ? <SessionTranscript row={row} reader={reader} /> : view === "attention" ? <SessionAttention row={row} reader={reader} /> : <>
       <dl className="sessions-fields">{fields([
         ["session id", <><code title={row.id}>{short(row.id)}</code> <button className="sessions-copy" type="button" onClick={async () => {
           try { await navigator.clipboard.writeText(row.id); setCopied("copied"); } catch { setCopied("could not copy"); }
@@ -203,7 +208,8 @@ function SessionDetail({ row, reader, transcript, owned, follow, continueSession
         ["project", row.project === null ? "no project" : row.project], ["parent session", row.parent || undefined],
         ["model", [row.model, row.provider].filter(Boolean).join(" · ") || undefined], ["profile", snapshot?.profile], ["working directory", row.cwd],
         ["started · last", [row.created, row.updated].filter((v): v is string => !!v).map((v) => timeLabel(v)).join(" · ") || undefined],
-        ["child agents", snapshot?.children], ["background tasks", snapshot?.tasks], ["attention", snapshot?.attention], ["first message", row.preview],
+        ["child agents", snapshot?.children], ["background tasks", snapshot?.tasks], ["attention", snapshot && (reader?.attention
+          ? <a className="sessions-attention-link" href={attentionHref} onClick={(event) => follow(event, attentionHref)}>{snapshot.attention} open</a> : snapshot.attention)], ["first message", row.preview],
       ]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       {reader && mode.data && !mode.error ? <a className="sessions-transcript-action sessions-transcript-secondary" href={transcriptHref} onClick={(event) => follow(event, transcriptHref)}>read transcript</a>
         : <><button type="button" className="sessions-transcript-action" disabled>read transcript</button>
@@ -284,4 +290,39 @@ function SessionTranscript({ row, reader }: { row: SessionRow; reader?: Sessions
       {data.rows.length ? <div className="transcript sessions-timeline"><RunProvider store={store}><Timeline /></RunProvider></div> : <ModuleState kind="empty" title="no messages" />}
     </>}
   </div>;
+}
+
+/** Read-only: zeta serve has no method to reply to or dismiss an item, so the page points to `/decisions`. */
+export function SessionAttention({ row, reader }: { row: SessionRow; reader?: SessionsReader }) {
+  const read = reader?.attention;
+  const load = useMemo(() => read ? (signal: AbortSignal) => read(row, signal) : undefined, [read, row.id, row.project]);
+  const { data, refreshing, error, refresh } = useRead(load, 30000);
+  return <div className="sessions-attention">
+    <div className="sessions-history-bar"><span>read-only attention{data && ` · snapshot at ${stamp(data.reportedAt)}`}</span>
+      {data && read && <button type="button" disabled={refreshing} onClick={refresh}>refresh now</button>}</div>
+    {!reader ? <ModuleState kind="offline" title="connect to zeta to read attention" />
+      : !read ? <ModuleState kind="unsupported" title="attention unavailable" detail="the attention list needs a newer zeta" />
+      : !data ? error ? <ModuleState kind={error instanceof ReadLimit ? "unsupported" : "failed"} title="attention unavailable" detail={readError(error)}
+          action={error instanceof ReadLimit ? undefined : { label: "retry now", run: refresh }} />
+        : <ModuleState kind="loading" title="loading attention" />
+      : <>
+        {!refreshing && !!error && <p className="sessions-notice" role="status">showing data from {stamp(data.reportedAt)} · read failed · {readError(error)}</p>}
+        {data.omitted > 0 && <p className="sessions-notice" role="status">{data.omitted} malformed {data.omitted === 1 ? "item" : "items"} omitted</p>}
+        <AttentionGroup title="decisions" hint="open decisions and deferred items" items={data.decisions} empty="no open decisions" />
+        <AttentionGroup title="notes" hint="answers and choices made for you" items={data.notes} empty="no notes" />
+        <p className="sessions-help">reply to or dismiss these in zeta with /decisions.</p>
+      </>}
+  </div>;
+}
+
+function AttentionGroup({ title, hint, items, empty }: { title: string; hint: string; items: readonly AttentionItem[]; empty: string }) {
+  return <section className="sessions-attention-group" aria-label={`${title} · ${items.length}`}>
+    <h3>{title} <span>{items.length}</span></h3>
+    <p className="sessions-help">{hint}</p>
+    {items.length ? <ul>{items.map((item) => <li key={item.id}>
+      <span className="sessions-attention-kind" data-kind={item.kind}>{item.kind}</span>
+      <span className="sessions-attention-title">{item.title}</span>
+      <time dateTime={item.created}>{timeLabel(item.created)}</time>
+    </li>)}</ul> : <p className="sessions-attention-empty">{empty}</p>}
+  </section>;
 }

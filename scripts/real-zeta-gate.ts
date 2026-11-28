@@ -13,6 +13,7 @@ import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
 import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
 import { gateParkedChats, parkArtifacts } from "./gate-park";
+import { attentionArtifacts, gateAttention } from "./gate-attention";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
@@ -75,6 +76,12 @@ for await (const file of new Bun.Glob("*.py").scan(resourceDir)) {
   for (const [, wire] of source.matchAll(/ResourceMethod\(\s*"([^"]+)",\s*Access\.CONTROLLER_WRITE\b/g)) protocolMutationMethods.add(wire!);
 }
 if (!protocolMutationMethods.size) throw new Error(`pinned zeta ${zetaRef} has no mutation declarations`);
+// zeta's MCP HTTP client gives a tool call 10 s (zeta src/zeta/mcp/http.py:70), so the first create_page build must not also pay the image pull
+const buildImage = (await readFile(join(root, "src/achilles/page_build.py"), "utf8")).match(/^_BUILD_IMAGE = "([^"]+)"$/m)?.[1];
+if (!buildImage) throw new Error("src/achilles/page_build.py has no _BUILD_IMAGE");
+if ((await Bun.spawn(["docker", "image", "inspect", buildImage], { stdout: "ignore", stderr: "ignore" }).exited) !== 0 &&
+  (await Bun.spawn(["docker", "pull", "--quiet", buildImage], { stdout: "ignore", stderr: "inherit" }).exited) !== 0)
+  throw new Error(`docker pull ${buildImage} failed: page builds need docker`);
 const temp = await mkdtemp(join(tmpdir(), "achilles-v3-"));
 const zetaHome = join(temp, "zeta-home");
 const achillesHome = join(temp, "achilles-home");
@@ -545,6 +552,18 @@ with _database() as db:
   const parkChats = (await chatIds()).filter((id) => !chatsBeforePark.has(id));
   const dropParkChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...parkChats], env);
   if (!(await waitForExit(dropParkChats, 10_000)) || dropParkChats.exitCode !== 0) throw new Error(`park chat cleanup exited ${dropParkChats.exitCode}`);
+  // the attention place on a zeta seeded with synthetic attention records
+  // short: zeta binds a unix socket under the home, and macOS caps its path at 104 bytes
+  const attentionHome = join(temp, "attn");
+  const attentionDiscovery = join(attentionHome, "ws.json");
+  await mkdir(attentionHome, { mode: 0o700 });
+  const attentionServer = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/attention-server.py")], {
+    ...env, ZETA_HOME: attentionHome, ZETA_ACCOUNT_HOME: attentionHome, ZETA_PROOF_DISCOVERY: attentionDiscovery,
+  });
+  await waitFor(async () => await Bun.file(attentionDiscovery).exists(), "attention zeta discovery");
+  const attentionZeta = await readDiscovery(attentionDiscovery);
+  await gateAttention(browser, origin, { ...attentionZeta, url: `ws://127.0.0.1:${attentionZeta.port}` }, screenshotDir);
+  await stop(attentionServer);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -1399,8 +1418,13 @@ with _database() as db:
       `${error}\nbackend did not receive achilles__create_page catalog: ${await safeControl()}`,
     );
   });
+  const createStarted = performance.now();
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
+  // the scripted turn completes on any tool result, so a failed create must fail here, not later as a missing page link
+  const created = await fetch(`${origin}/api/pages/reading`);
+  if (!created.ok) throw new Error(`create_page did not create /reading (HTTP ${created.status}); backend catalog=${await safeControl()}`);
+  console.log(`create_page built /reading in ${Math.round(performance.now() - createStarted)} ms`);
   await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
   await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
   const pageSection = page.locator('.page-list[data-list-state="ready"]');
@@ -2117,6 +2141,8 @@ with _database() as db:
   await page.goto(`${origin}/allow`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   await page.setViewportSize({ width: 390, height: 760 });
+  // the layout follows the viewport on matchMedia's change event: read it once the narrow page chat rendered (sheet open or closed)
+  await gateWait.playwright(page.locator('.page-chat-sheet-closed, #page-chat-sheet[role="dialog"]'), "waitFor", { state: "attached" });
   const shellChat = page.locator(".page-chat");
   const shellComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
   const shellGeometry = await page.evaluate(() => {
@@ -2129,6 +2155,7 @@ with _database() as db:
       composerVisible: Boolean(composer && getComputedStyle(composer).display !== "none" && composer.getBoundingClientRect().height > 0),
       barCount: document.querySelectorAll(".page-chat-bar").length,
       dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
+      focused: document.activeElement?.closest("#message-composer") ? "composer" : document.activeElement?.tagName ?? null,
     };
   });
   if (!(await shellChat.count()) || !shellGeometry.chatClass.includes("page-chat-docked") || shellGeometry.transcriptHeight <= 0 || !shellGeometry.composerVisible || shellGeometry.barCount !== 1 || shellGeometry.dialogCount !== 1 || !(await shellComposer.isVisible()) || await shellComposer.isDisabled())
@@ -3081,7 +3108,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts, ...parkArtifacts, "park-new-chat-1440x900.png"],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts, ...parkArtifacts, ...attentionArtifacts, "park-new-chat-1440x900.png"],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),

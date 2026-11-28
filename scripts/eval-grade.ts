@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "no_canary" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept" | "delivered_once" | "answer_excludes" | "code_changed";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "no_canary" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept" | "delivered_once" | "answer_excludes" | "code_changed" | "rendered_after_change";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -64,7 +64,7 @@ export type CheckResult = { id: string; pass: boolean; expected: unknown; actual
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write", "browser_prompt", "page_action"]);
 const MODEL_STEPS = new Set(["prompt", "annotate", "browser_prompt"]);
 const RELOAD_EVENTS = new Set(["tool_start", "assistant_delta", "approval_request"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "no_canary", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept", "delivered_once", "answer_excludes", "code_changed"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "no_canary", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept", "delivered_once", "answer_excludes", "code_changed", "rendered_after_change"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser", "reloads"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 // `{ "field": { "absent": true } }` in a records_exact row: the matched record must not have that field
@@ -212,7 +212,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
     own(check.transition, ["before", "after"], `checks[${i}].transition`);
     if ([check.transition.before, check.transition.after].some(values => !Array.isArray(values) || !values.length || !values.every(value => typeof value === "string"))) throw new Error(`checks[${i}] transition sets need string values`);
   }
-  if (["browser_text", "prompt"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
+  if (["browser_text", "prompt", "rendered_after_change"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
   if (check.synonyms !== undefined && (!["browser_text", "schema_roundtrip"].includes(check.type) || !Array.isArray(check.synonyms) || !check.synonyms.length || !check.synonyms.every(value => typeof value === "string"))) throw new Error(`checks[${i}] has invalid synonyms`);
   if ((check.type === "answer_mentions" || check.type === "answer_excludes") && (typeof check.step !== "string" || !Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string" && value.trim() === value && value.length > 0))) throw new Error(`checks[${i}] needs a step and non-empty mention values`);
   if (check.fields !== undefined && check.type === "no_duplicate_writes" && (!identifier(check.collection) || !Array.isArray(check.fields) || !check.fields.length || !check.fields.every(identifier))) throw new Error(`checks[${i}] fields must name record fields`);
@@ -753,6 +753,15 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     if (active <= before) return { reason: `active code revision ${active} is not newer than revision ${before}` } satisfies CheckFailure;
     const revision = rows(snapshot, "code_revisions").find(row => row.page_id === page && row.version === active);
     return !revision || revision.failed || revision.runtime_error ? { reason: `active code revision ${active} ${revision ? "failed" : "is missing"}` } satisfies CheckFailure : true;
+  },
+  // the page's last successful code write is followed by a successful render_page whose text contains `text`
+  rendered_after_change: ({ check, snapshot, page }) => {
+    const results = rows(snapshot, "results").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat) && successful(row));
+    const write = results.findLastIndex(row => ["achilles__write_page", "achilles__edit_page", "achilles__create_page"].includes(String(row.tool)));
+    if (write < 0) return { reason: "the page has no successful code write" } satisfies CheckFailure;
+    const renders = results.slice(write + 1).filter(row => row.tool === "achilles__render_page");
+    if (!renders.length) return { reason: "no successful render_page after the last code write" } satisfies CheckFailure;
+    return renders.some(row => String((row.data as { text?: unknown } | undefined)?.text ?? "").includes(String(check.text))) ? true : { reason: `no render_page after the last code write shows ${JSON.stringify(check.text)}` } satisfies CheckFailure;
   },
   no_new_page: ({ snapshot }) => {
     if (!snapshot.initial) return { reason: "no initial snapshot to compare pages with" } satisfies CheckFailure;
