@@ -733,6 +733,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     if (!snapshot.initial) return { reason: "no initial snapshot to compare code revisions with" } satisfies CheckFailure;
     const active = rows(snapshot, "pages").find(row => row.id === page)?.active_code_revision;
     if (typeof active !== "number") return { reason: "the page has no active code revision" } satisfies CheckFailure;
+    // after_failed's real guard is the seed precondition: a failed revision never becomes active
     const before = check.after_failed ? newestRevision(snapshot.initial, page) : Number(rows(snapshot.initial, "pages").find(row => row.id === page)?.active_code_revision ?? 0);
     if (active <= before) return { reason: `active code revision ${active} is not newer than revision ${before}` } satisfies CheckFailure;
     const revision = rows(snapshot, "code_revisions").find(row => row.page_id === page && row.version === active);

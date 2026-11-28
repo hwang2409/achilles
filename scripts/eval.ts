@@ -360,6 +360,8 @@ async function openReadyPage(browser: any, stack: EvalStack, plan: PagePlan, pag
   finally { if (abortReady) signal.removeEventListener("abort", abortReady); }
   return page;
 }
+// only the page frame's text is graded: the shell (breadcrumb, sidebar, chat titles) can hold the check text without the page rendering it
+export const browserRow = (pageId: string, shell: string, rendered: string) => ({ page_id: pageId, text: rendered, shell_text: shell });
 async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, string>, snapshot: EvalSnapshot, signal: AbortSignal) {
   if (!task.checks.some(check => check.type === "browser_text")) return [];
   signal.throwIfAborted(); const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true });
@@ -374,7 +376,7 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
         await frame.getByText(check.text!, { exact: false }).waitFor({ state: "visible", timeout: 10_000 }).catch((error: Error) => { if (error.name !== "TimeoutError") throw error; });
       const shell = await page.locator("body").innerText({ timeout: 10_000 });
       const rendered = await frame.locator("body").innerText({ timeout: 10_000 });
-      output.push({ page_id: pageId, text: `${shell}\n${rendered}` }); await page.close();
+      output.push(browserRow(pageId, shell, rendered)); await page.close();
     }
     return output;
   } finally { await browser.close(); }

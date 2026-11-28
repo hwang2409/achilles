@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { approvalDecision, classifyTaskSupport, createDecisionQueue, finalAnswer, parseHistory, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
-import { gradeReference, validateTask, type TaskSetup } from "./eval-grade";
+import { approvalDecision, browserRow, classifyTaskSupport, createDecisionQueue, finalAnswer, parseHistory, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
+import { gradeCheck, gradeReference, validateTask, type TaskSetup } from "./eval-grade";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
   const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
@@ -208,4 +208,11 @@ test("every declared seed key is verified before setup and grading", () => {
   const withoutSchema = { ...setup, tools: [{ name: "add_note", operation: "insert" as const, collection: "notes" }] };
   expect(() => verifySetup(withoutSchema, stored), "an undeclared default input_schema is ignored").not.toThrow();
   expect(grade(withoutSchema, stored).status).toBe("pass");
+});
+
+test("browser_text grades only the page frame, never the shell around it", () => {
+  const check = { id: "renders", type: "browser_text", page: "notes", text: "field-notes" } as const;
+  const snapshot = (shell: string, frame: string) => ({ pages: [{ id: "notes-id", alias: "notes" }], browser: [browserRow("notes-id", shell, frame)] });
+  expect(gradeCheck(check, snapshot("Pages / field-notes", "Synthetic Field Notes")).pass, "text only in the shell").toBe(false);
+  expect(gradeCheck(check, snapshot("Pages", "see field-notes")).pass, "text in the frame").toBe(true);
 });
