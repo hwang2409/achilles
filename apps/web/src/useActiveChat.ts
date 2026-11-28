@@ -17,7 +17,7 @@ import { patchChat, writeShownState, type RowState } from "./zeta/rowState";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 import type { ComposerImage } from "./composer/images";
 
-export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; code?: { version: number; digest: string } | null; unsupported_format?: string | null };
+export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; code?: { version: number; digest: string } | null; unsupported_format?: string | null; archived_at?: string | null };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
 // newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
 type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
