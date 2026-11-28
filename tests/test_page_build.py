@@ -365,7 +365,7 @@ def test_frame_does_not_wait_for_a_running_rebuild(monkeypatch, tmp_path: Path) 
 
     monkeypatch.setattr(page_build.subprocess, "Popen", held_popen)
     statuses: list[int] = []
-    with TestClient(web.create_app()) as client:
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
         running = threading.Thread(
             target=lambda: statuses.append(client.get("/api/pages/home/frame").status_code)
         )
@@ -390,7 +390,7 @@ def test_failed_rebuild_is_remembered_for_a_while(monkeypatch, tmp_path: Path) -
     calls, _ = _fake_containers(monkeypatch, _build_outputs(), exit_codes=(1, 1, 1))
     monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
 
-    with TestClient(web.create_app()) as client:
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
         first = client.get("/api/pages/home/frame").status_code
         again = client.get("/api/pages/home/frame").status_code
         launched = len(calls)
@@ -400,6 +400,20 @@ def test_failed_rebuild_is_remembered_for_a_while(monkeypatch, tmp_path: Path) -
     assert (first, again, later) == (404, 404, 404)
     assert launched == 1, "a recently failed rebuild must not run again"
     assert len(calls) == 2, "after the retry window the rebuild runs again"
+
+
+def test_cross_site_frame_request_does_not_start_a_rebuild(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    _missing_bundle_revision(tmp_path / "achilles")
+    calls, _ = _fake_containers(monkeypatch, _build_outputs())
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+
+    # what <img src=.../frame> on another site sends
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+        frame = client.get("/api/pages/home/frame", headers={"sec-fetch-site": "cross-site"})
+    assert frame.status_code == 403
+    assert calls == [], "another site must not start a docker rebuild"
 
 
 # real container builds with a local package; no package registry is contacted
@@ -529,7 +543,7 @@ def test_rebuilt_revision_keeps_lock_versions_and_digest(probe_root: Path, monke
     original = bundle.read_bytes()
     bundle.unlink()
 
-    with TestClient(web.create_app()) as client:
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
         frame = client.get("/api/pages/home/frame")
 
     assert frame.status_code == 200, frame.text

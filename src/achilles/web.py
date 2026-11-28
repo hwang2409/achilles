@@ -60,6 +60,11 @@ def _same_origin(request) -> bool:
     )
 
 
+def _script_request(request) -> bool:
+    # a browser always sends Sec-Fetch-Dest; script tags pass, fetch() reads from other sites do not
+    return request.headers.get("sec-fetch-dest") in (None, "script")
+
+
 def _shell_authorized(request) -> bool:
     supplied = request.headers.get("x-achilles-shell", "").encode()
     expected = request.app.state.shell_token.encode()
@@ -167,6 +172,11 @@ class PageAuthMiddleware(BaseHTTPMiddleware):
         self.store = store
 
     async def dispatch(self, request, call_next):
+        # dns rebinding: another site's name resolved to 127.0.0.1 sends its own Host
+        if request.url.path.startswith("/api") and not _loopback(
+            f"http://{request.headers.get('host', '')}"
+        ):
+            return JSONResponse({"error": "loopback host required"}, status_code=403)
         if request.url.path.startswith("/mcp"):
             if not request.client or not _loopback(f"http://{request.client.host}"):
                 return JSONResponse({"error": "loopback required"}, status_code=403)
@@ -219,6 +229,9 @@ def create_app() -> Starlette:
         )
 
     async def page_frame(request):
+        # only the shell and render_page embed the frame; another site must not start a rebuild
+        if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
+            raise HTTPException(403, "the frame loads only from achilles")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
@@ -251,6 +264,8 @@ def create_app() -> Starlette:
         )
 
     async def frame_bootstrap(request):
+        if not _script_request(request):
+            raise HTTPException(403, "load this script with a script tag")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         code = await anyio.to_thread.run_sync(store.page_code, row["id"]) if row else None
         if not code or request.query_params.get("revision") != str(code["version"]):
@@ -275,13 +290,16 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             script,
             media_type="text/javascript",
             headers={
-                "access-control-allow-origin": "*",
-                "cross-origin-resource-policy": "cross-origin",
+                # the sandboxed frame has the opaque origin "null"; no real site reads or runs it
+                "access-control-allow-origin": "null",
+                "cross-origin-resource-policy": "same-origin",
                 "cache-control": "no-store",
             },
         )
 
     async def page_artifact(request):
+        if not _script_request(request):
+            raise HTTPException(403, "load this script with a script tag")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
@@ -292,8 +310,9 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             store.root / "bundles" / f"{code['digest']}.js",
             media_type="text/javascript",
             headers={
-                "access-control-allow-origin": "*",
-                "cross-origin-resource-policy": "cross-origin",
+                # the sandboxed frame has the opaque origin "null"; no real site reads or runs it
+                "access-control-allow-origin": "null",
+                "cross-origin-resource-policy": "same-origin",
             },
         )
 

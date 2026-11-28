@@ -284,3 +284,67 @@ def test_hung_page_times_out_and_leaves_no_chromium(served, monkeypatch, tmp_pat
     table = _processes()
     assert [pid for pid in ours if pid in table] == []
     assert [pid for pid, (_, command) in table.items() if marker in command] == []
+
+
+# another site (localhost is a different site from 127.0.0.1) tries to read and run the bundle,
+# then the achilles origin embeds the real sandboxed frame
+_ORIGIN_PROBE = """
+import { chromium } from "%(playwright)s";
+const port = %(port)d;
+const artifact = `http://127.0.0.1:${port}/api/pages/home/artifact/%(digest)s`;
+const probe = `<!doctype html><script>
+window.__probe = (async () => {
+  const fetched = await fetch(${JSON.stringify(artifact)})
+    .then(r => r.text()).then(() => "read", () => "blocked");
+  const script = await new Promise(resolve => {
+    const tag = document.createElement("script");
+    tag.src = ${JSON.stringify(artifact)};
+    tag.onload = tag.onerror = () => resolve(window.__ran ? "ran" : "not run");
+    document.head.append(tag);
+  });
+  return { fetch: fetched, script };
+})();
+</script>`;
+const sandbox = "allow-scripts allow-forms allow-downloads allow-modals";
+const host = `<!doctype html><iframe sandbox="${sandbox}" src="/api/pages/home/frame"></iframe>`;
+const serve = (body) => (route) => route.fulfill({ contentType: "text/html", body });
+const text = () => document.getElementById("root")?.textContent ?? "";
+const browser = await chromium.launch({ headless: true });
+try {
+  // worst case: the user granted the other site local network access, so only achilles decides
+  const context = await browser.newContext({ permissions: ["local-network-access"] });
+  const page = await context.newPage();
+  await page.route(`http://localhost:${port}/probe`, serve(probe));
+  await page.route(`http://127.0.0.1:${port}/host`, serve(host));
+  await page.goto(`http://localhost:${port}/probe`);
+  const other = await page.evaluate(() => (window as any).__probe);
+  await page.goto(`http://127.0.0.1:${port}/host`);
+  const frame = page.frames().find((item) => item !== page.mainFrame())!;
+  await frame.waitForFunction(text, null, { timeout: 10000 }).catch(() => {});
+  console.log(JSON.stringify({ ...other, frame: await frame.evaluate(text) }));
+} finally {
+  await browser.close();
+}
+"""
+RUNS_ANYWHERE = """
+const root = document.getElementById("root");
+if (root) root.textContent = "frame ran";
+window.__ran = true;
+"""
+
+
+def test_another_origin_cannot_read_or_run_a_page_bundle(served, tmp_path) -> None:
+    _home_with_code(tmp_path / "achilles", RUNS_ANYWHERE)
+    digest = hashlib.sha256(RUNS_ANYWHERE.encode()).hexdigest()
+    playwright = Path(web.__file__).parents[2] / "apps/web/node_modules/playwright/index.mjs"
+    with served(web.create_app()) as port:
+        script = tmp_path / "origin-probe.ts"
+        script.write_text(
+            _ORIGIN_PROBE % {"playwright": playwright, "port": port, "digest": digest}
+        )
+        done = subprocess.run(
+            ["bun", str(script)], capture_output=True, text=True, timeout=60, check=False
+        )
+    assert done.returncode == 0, done.stderr
+    result = json.loads(done.stdout.strip().splitlines()[-1])
+    assert result == {"fetch": "blocked", "script": "not run", "frame": "frame ran"}
