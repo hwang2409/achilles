@@ -124,8 +124,8 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 [data-part="composer-image"] img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: var(--g1-radius-control); outline: 1px solid light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.1)); outline-offset: -1px; }
 [data-part="composer"] [data-part="composer-image"] button[data-part="composer-image-remove"] {
   position: absolute; top: -6px; right: -6px; width: 20px; min-width: 0; height: 20px; min-height: 0; padding: 0;
-  border: 1px solid var(--fulcrum-border); border-radius: 50%; background: var(--fulcrum-bg, var(--g1-bg)); color: var(--fulcrum-fg);
-  font-size: 14px; line-height: 1; box-shadow: var(--g1-shadow-xs); transition-property: scale; transition-duration: 120ms;
+  border: 1px solid var(--fulcrum-border); border-radius: var(--g1-radius-control); background: var(--fulcrum-bg, var(--g1-bg)); color: var(--fulcrum-fg);
+  font-size: 14px; line-height: 1; transition-property: scale; transition-duration: 120ms;
 }
 /* the visible dot stays small; its hit area is 40px */
 [data-part="composer"] [data-part="composer-image"] button[data-part="composer-image-remove"]::after { content: ""; position: absolute; inset: -10px; }
@@ -253,3 +253,17 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after, ::backdrop { transition-duration: 0s !important; animation-duration: 0s !important; }
 }
+/* polish: headings balance their lines, prose avoids a lone last word */
+:where(h1, h2, h3, h4) { text-wrap: balance; }
+:where(p, li, figcaption) { text-wrap: pretty; }
+/* every image gets the same neutral 1px inset edge, pure black or pure white so it never tints */
+:where(img) { outline: 1px solid light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.1)); outline-offset: -1px; }
+/* press feedback: a button shrinks a little while pressed. rows, nav links, and full-width bars stay still: a wide row
+   that shrinks looks like it moves. the timeline keeps fulcrum's plain look (no press scale) */
+:where(button, .ui-button, a.primary) { transition-property: scale; transition-duration: 120ms; transition-timing-function: ease-out; }
+:where(button, .ui-button, a.primary):where(:not(:disabled, [aria-disabled="true"], .new-chat, .list-head, .drawer-scrim, .page-chat-bar, .chat-row-rename, [role="option"], [data-part="timeline"] *)):active { scale: var(--g1-press-scale); }
+/* hit areas: small controls reach 40px or more without growing what you see */
+.chat-header button { position: relative; }
+.chat-header button::after { content: ""; position: absolute; inset: -6px 0; }
+.surface-search .palette-button::after { content: ""; position: absolute; inset: -6px 0; }
+.main-pane [data-part="composer"] :is([data-part="composer-submit"], [data-part="composer-stop"])::after { content: ""; position: absolute; inset: -4px; }
