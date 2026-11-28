@@ -294,7 +294,10 @@ def _v4_database(root: Path) -> Path:
             "VALUES('reading',?,'export default 1','{}','t')",
             [(1,), (2,)],
         )
-        db.execute("INSERT INTO chat VALUES('chat-1','reading','kept','t','t',NULL,'chat',0,1,0,NULL)")
+        db.execute(
+            "INSERT INTO chat(session_id,page_id,title,created_at,updated_at) "
+            "VALUES('chat-1','reading','kept','t','t')"
+        )
         db.execute("PRAGMA user_version = 4")
     return database
 

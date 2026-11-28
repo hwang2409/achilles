@@ -417,9 +417,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             raise HTTPException(404, "page not found") from exc
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
-        return JSONResponse(
-            {key: row[key] for key in ("id", "route", "title", "archived_at")}
-        )
+        return JSONResponse({key: row[key] for key in ("id", "route", "title", "archived_at")})
 
     async def chats(request):
         if not _same_origin(request):
