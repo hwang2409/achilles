@@ -76,7 +76,7 @@ test("a pasted image shows as a chip with a remove button and goes out with the 
   const view = await mount(true);
   expect(await view.paste([pngFile("shot.png")])).toBe(true);
   expect(view.getByRole("img", { name: "shot.png" }).getAttribute("src")).toBe(`data:image/png;base64,${PNG}`);
-  await act(async () => { fireEvent.click(view.getByRole("button", { name: "remove image shot.png" })); });
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: "remove image 1: shot.png" })); });
   expect(view.queryByRole("img", { name: "shot.png" })).toBeNull();
   expect(document.activeElement).toBe(view.field);
 
@@ -133,4 +133,30 @@ test("an image message in flight at a page reload keeps its images and delivery 
     detach();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: previous });
   }
+});
+
+test("two clipboard images get remove buttons with distinct names", async () => {
+  const view = await mount(true);
+  await view.paste([pngFile()]);
+  await view.paste([pngFile()]);
+  expect(view.getAllByRole("button", { name: /^remove image/ }).map((button) => button.getAttribute("aria-label"))).toEqual(["remove image 1: image.png", "remove image 2: image.png"]);
+});
+
+test("images in the box survive a switch to another chat and back", async () => {
+  const queues = createChatQueues();
+  const options = { state: "idle" as const, defaultValue: "", onDraftChange: () => {}, onDraftSubmit: () => {}, onSubmit: async () => {} };
+  const first = queues.open("images-switch-a", options);
+  const detach = first.attach();
+  await first.addImages([pngFile("shot.png")]);
+  // the user opens another chat: this composer unmounts, the page settles
+  const other = queues.open("images-switch-b", options);
+  const detachOther = other.attach();
+  detach();
+  queues.settle();
+  detachOther();
+  const back = queues.open("images-switch-a", options);
+  const attached = back.attach();
+  try {
+    expect(back.getModel().images).toEqual([{ name: "shot.png", mime_type: "image/png", data: PNG }]);
+  } finally { attached(); }
 });

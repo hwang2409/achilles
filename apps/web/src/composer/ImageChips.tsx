@@ -9,7 +9,7 @@ export function ImageChips({ images, onRemove }: { images: ComposerImage[]; onRe
       {images.map((image, index) => (
         <li key={`${index}:${image.name}`} data-part="composer-image">
           <img src={`data:${image.mime_type};base64,${image.data}`} alt={image.name} title={image.name} />
-          <button type="button" data-part="composer-image-remove" aria-label={`remove image ${image.name}`} onClick={() => onRemove(index)}>×</button>
+          <button type="button" data-part="composer-image-remove" aria-label={`remove image ${index + 1}: ${image.name}`} onClick={() => onRemove(index)}>×</button>
         </li>
       ))}
     </ul>

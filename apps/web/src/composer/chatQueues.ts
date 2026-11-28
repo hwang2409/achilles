@@ -25,7 +25,8 @@ const parse = (value: string): StoredRow[] | undefined => {
     });
   } catch { return undefined; }
 };
-// shortcut: an entry exists only while a message is unsent, so nothing is swept; a deleted chat's rows stay (a few bytes)
+// shortcut: an entry exists only while a message is unsent, so nothing is swept; a deleted chat's unsent rows stay, up to
+// about 0.7 MiB per row with images (512 KiB as base64), against a quota of about 5 MiB; sweep keys of deleted chats if writes start to fail
 const readRows = (chat: string): StoredRow[] => {
   try {
     const value = storage()?.getItem(PREFIX + chat);
@@ -137,10 +138,10 @@ export function createChatQueues() {
     },
     /** Runs after each commit, and when a send of a chat with no composer ends. A new-chat owner whose created chat did not
      * take it (no composer showed that chat) moves there now. Owners with no composer and nothing in memory that storage
-     * does not hold (no send in flight, no row that would still go out) are dropped: a later `open` reads their rows back. */
+     * does not hold (no send in flight, no row that would still go out, no image in the box) are dropped: a later `open` reads their rows back. */
     settle() {
       for (const [chat, owner] of [...owners]) {
-        const { queue, sending } = owner.getModel();
+        const { queue, sending, images } = owner.getModel();
         if (owner.attached() || sending) continue;
         const target = createdChats.get(chat);
         createdChats.delete(chat);
@@ -149,7 +150,8 @@ export function createChatQueues() {
           keys.set(owner, chat); keep(owner); keep(owners.get(target)!);
           continue;
         }
-        if (queue.some((item) => !item.failed) || unsaved.has(owner)) continue;
+        // images in the box are kept in memory only, like the draft text the page keeps: a chat switch must not drop them
+        if (queue.some((item) => !item.failed) || unsaved.has(owner) || images.length) continue;
         owners.delete(chat); keys.delete(owner);
       }
     },
