@@ -1,0 +1,22 @@
+/* the @path list floats just above the composer box, at the box's width, like the command result panel */
+[data-part="composer"]:has(> .composer-paths) { position: relative; }
+.composer-paths {
+  position: absolute; inset-inline: 0; bottom: calc(100% + 8px); z-index: 3;
+  padding: 4px; border: 1px solid var(--g1-border); border-radius: 16px; /* 12px rows + 4px padding */
+  background: var(--g1-bg); color: var(--fulcrum-fg); box-shadow: var(--g1-shadow-floating);
+  font: calc(var(--achilles-ui-size, 14px) - 1px) / 20px var(--g1-font-mono);
+}
+.composer-paths ul { max-height: min(256px, 38dvh); overflow: auto; margin: 0; padding: 0; list-style: none; }
+.composer-paths li {
+  display: flex; align-items: center; min-height: 32px; padding: 0 8px; border-radius: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.composer-paths li:hover { background: var(--g1-hover); }
+.composer-paths li[aria-selected="true"] { background: var(--g1-selected); color: var(--fulcrum-fg); }
+.composer-paths p { margin: 0; padding: 4px 8px 2px; color: var(--fulcrum-muted); font-family: var(--achilles-ui-font, var(--g1-font-ui)); }
+@media (forced-colors: active) {
+  .composer-paths li[aria-selected="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+@media (max-width: 760px), (pointer: coarse) {
+  .composer-paths li { min-height: 44px; }
+}

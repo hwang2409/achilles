@@ -21,6 +21,7 @@ import {
 import { chatQueues } from "./chatQueues";
 import { parseComposerInput } from "./commands";
 import { readImages, type ComposerImage } from "./images";
+import type { CompletePaths } from "./pathCompletion";
 
 const attempt = (action: () => unknown) =>
   new Promise<unknown>((resolve) => resolve(action()));
@@ -46,6 +47,8 @@ export type ComposerAdapterProps = ComposerProps & {
   held?: boolean;
   /** zeta takes images (`send_images` with a delivery id): a paste or drop of an image adds it to the message */
   images?: boolean;
+  /** `@path` completion in the chat's working directory; absent when this zeta or chat cannot complete paths */
+  completePaths?: CompletePaths;
 };
 
 /** `deliveryId`: send with this id (a retry of a held row), not a new one; `images`: send them with the text */

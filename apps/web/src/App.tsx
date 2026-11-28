@@ -12,7 +12,7 @@ import { Approval, Fallback, Message, Notification, RunProvider, SubAgentNavigat
 import { ChatAgents } from "./agents/ChatAgents";
 import type { ChildControls } from "./agents/childControls";
 import type { ChildSendOwner } from "./agents/childSend";
-import type { ZetaClient } from "@fulcrum/zeta";
+import { completePath, type ZetaClient } from "@fulcrum/zeta";
 import type { RenderShell } from "./surface/SurfaceRouter";
 import { chatHref, titleOf, useAgentNavAdapter, type Chat } from "./surface/AgentNavAdapter";
 import { surfaceHref, approvalIntent, chatsRoute, createRoute, pagesRoute, type SurfaceRoute } from "./surface/routes";
@@ -112,6 +112,11 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
   const slot = useRef<HTMLDivElement>(null);
   const commandOpener = useRef<HTMLElement | null>(null);
   const commands = useComposerCommands(client, chat, canWrite);
+  const chatId = chat?.id;
+  // zeta advertises path_complete only to a controller that negotiated path_completion
+  const completePaths = useMemo(() => (canWrite && client && chatId && supportsRequest(client, "path_complete")
+    ? (text: string, signal: AbortSignal) => completePath(client, chatId, text, { signal })
+    : undefined), [canWrite, client, chatId]);
   const draft = useSyncExternalStore(
     (listener) => {
       const unsubscribeConfirm = draftStore.subscribeConfirm(sessionId, listener);
@@ -152,6 +157,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     controls,
     // an older zeta takes no images: no paste, no drop, no chips
     images: Boolean(client && supportsFeature(client, IMAGE_FEATURE) && supportsRequest(client, IMAGE_REQUEST)),
+    completePaths,
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>

@@ -9,6 +9,7 @@ import { createChatQueues } from "./chatQueues";
 import { createComposerModel, transition } from "./composer-machine";
 import { MAX_IMAGE_BYTES, readImages, type ComposerImage } from "./images";
 import { PlainComposer } from "./PlainComposer";
+import { PATH_DEBOUNCE_MS, type CompletePaths } from "./pathCompletion";
 import type { SendIntent } from "./useComposerDelivery";
 
 afterEach(cleanup);
@@ -159,4 +160,38 @@ test("images in the box survive a switch to another chat and back", async () => 
   try {
     expect(back.getModel().images).toEqual([{ name: "shot.png", mime_type: "image/png", data: PNG }]);
   } finally { attached(); }
+});
+
+test("with path completion on, an image paste adds a chip and leaves the open path list alone; enter then sends both", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const client = { request: async (method: string, params: Record<string, unknown>) => { calls.push([method, params]); return { accepted: true }; } };
+  const completePaths: CompletePaths = async () => ({ kind: "entries", entries: [{ text: "src/", display: "@src/", kind: "directory", startPosition: -1 }], truncated: false });
+  const view = render(React.createElement(RunProvider, { store: createRunStore() }, React.createElement(PlainComposer, {
+    state: "idle", images: true, completePaths, label: "message", chatId: `images-test-${chatSeq++}`, defaultValue: "",
+    onSubmit: (text: string, intent: SendIntent) => deliverChatMessage(client as never, "s1", text, "d1", false, () => {}, async () => undefined, () => {}, intent.images),
+    onDraftChange: () => {}, onDraftSubmit: () => {},
+  })));
+  const field = view.getByLabelText("message", { selector: "textarea" }) as HTMLTextAreaElement;
+  const options = () => view.queryAllByRole("option").map((option) => option.textContent);
+  const paste = async (files: File[], text = "") => {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { getData: (type: string) => type === "text/plain" ? text : "", files } });
+    await act(async () => { field.dispatchEvent(event); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    return event.defaultPrevented;
+  };
+  await act(() => { fireEvent.change(field, { target: { value: "see @s" } }); });
+  await act(() => new Promise((resolve) => setTimeout(resolve, PATH_DEBOUNCE_MS + 30)));
+  expect(options()).toEqual(["@src/"]);
+
+  expect(await paste([pngFile("shot.png")])).toBe(true);
+  expect(view.getByRole("img", { name: "shot.png" })).toBeTruthy();
+  expect(options()).toEqual(["@src/"]);
+  expect(field.value).toBe("see @s");
+  // a text paste with an @ is still the field's, list open or not
+  expect(await paste([], "@docs")).toBe(false);
+
+  await act(() => { fireEvent.keyDown(field, { key: "Escape" }); });
+  expect(options()).toEqual([]);
+  await act(async () => { fireEvent.keyDown(field, { key: "Enter" }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(calls).toEqual([["send_images", { session_id: "s1", text: "see @s", images: [{ name: "shot.png", mime_type: "image/png", data: PNG }], delivery_id: "d1" }]]);
 });

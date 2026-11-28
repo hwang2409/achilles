@@ -9,6 +9,7 @@ import { gateAccountsPlace, gateCreatePlace, gateShell, gateStablePlace } from "
 import { gateReloadMidTurn, gateTranscript, gateTwoChatsAtOnce, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
+import { gatePathComplete } from "./gate-path-complete";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
 import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
@@ -2522,6 +2523,7 @@ with _database() as db:
   if (firstSetSettingsAfterAllowReopen !== firstSetSettingsBeforeAllowReopen)
     throw new Error("reopening a user ask chat under an allow server sent set_settings");
   await gatePalette(page, first, waitFor, gateWait);
+  await gatePathComplete(page, first, waitFor, requests, gateWait);
 
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });

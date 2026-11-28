@@ -16,6 +16,7 @@ import {
   type ComposerAdapterProps,
 } from "./useComposerDelivery";
 import { ComposerHint } from "./hint";
+import { usePathCompletion } from "./pathCompletion";
 
 // send while the composer is held: shown, and off
 export const HeldSend = () => <button type="button" data-part="composer-submit" aria-label="send message" disabled>send</button>;
@@ -41,8 +42,16 @@ export function PlainComposer(props: ComposerAdapterProps) {
   // images cannot steer: with a turn running they wait for it, like a queued message
   const queues = model.sending || model.queue.length > 0 || (steer && model.images.length > 0);
   const { text: message, tone } = composerStatus(model);
+  const caret = useRef<number | null>(null);
+  const paths = usePathCompletion(props.completePaths, (value, at) => { caret.current = at; edit(value); });
+  useLayoutEffect(() => {
+    if (caret.current === null || !input.current) return;
+    input.current.setSelectionRange(caret.current, caret.current);
+    caret.current = null;
+  });
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (paths.onKeyDown(event)) return;
     if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
       cancel();
@@ -100,6 +109,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       onSubmit={onFormSubmit}
       {...(props.images && !readOnly ? imageInputProps(addImages) : {})}
     >
+      {!readOnly && paths.list(() => input.current)}
       {!readOnly && <QueuedMessages model={model} onRetry={(id) => { retry(id); focusInput(); }} onRestore={(id) => { restore(id); focusInput(); }} onCancel={(id) => { cancel(id); focusInput(); }} />}
       {!readOnly && <ImageChips images={model.images} onRemove={(index) => { removeImage(index); focusInput(); }} />}
       <div data-part="composer-field" data-value={model.draft}>
@@ -111,7 +121,10 @@ export function PlainComposer(props: ComposerAdapterProps) {
           aria-label={label}
           aria-describedby={readOnly ? undefined : `${id}-hint ${id}-message`}
           readOnly={readOnly}
-          onChange={readOnly ? undefined : (event) => edit(event.target.value)}
+          {...(readOnly ? {} : paths.fieldProps)}
+          onChange={readOnly ? undefined : (event) => { edit(event.target.value); paths.sync(event.target); }}
+          onSelect={readOnly ? undefined : (event) => paths.sync(event.currentTarget)}
+          onBlur={paths.close}
           onKeyDown={readOnly ? undefined : onKeyDown}
         />
       </div>
