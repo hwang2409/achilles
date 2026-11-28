@@ -195,7 +195,7 @@
   .skip-link:focus { top: 56px; }
   .chat-heading strong { max-width: calc(100vw - 150px); }
   .chat-heading > span { display: block; max-width: calc(100vw - 150px); margin-top: 2px; }
-  /* the page crumb gives way before the chat title, so the page title (the middle part) takes the ellipsis */
+  /* the page crumb shrinks with the chat title (both flex-shrink: 1), so the page title (the middle part) takes the ellipsis instead of overflowing */
   .chat-heading > .page-crumb { flex-shrink: 1; }
   .chat-header { height: 48px; flex-basis: 48px; padding-inline: 60px 8px; }
   .chat-header > [role="alert"] { top: 48px; }
