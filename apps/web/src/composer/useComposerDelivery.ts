@@ -20,6 +20,7 @@ import {
 } from "./composer-machine";
 import { chatQueues } from "./chatQueues";
 import { parseComposerInput } from "./commands";
+import type { CompletePaths } from "./pathCompletion";
 
 const attempt = (action: () => unknown) =>
   new Promise<unknown>((resolve) => resolve(action()));
@@ -43,6 +44,8 @@ export type ComposerAdapterProps = ComposerProps & {
   controls?: ReactNode;
   /** read-only for a moment (a swap is pending): the reason shows and send shows as off */
   held?: boolean;
+  /** `@path` completion in the chat's working directory; absent when this zeta or chat cannot complete paths */
+  completePaths?: CompletePaths;
 };
 
 /** `deliveryId`: send with this id (a retry of a held row), not a new one */
