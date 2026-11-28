@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { controlSnapshot, createFrameRing, createGateWait, desktopPageChatProof, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { controlSnapshot, createFrameRing, createGateWait, desktopPageChatProof, diagnostic, redactArtifact, storageDiff } from "./gate-diagnostics";
 
 const fake = "fake-secret-token";
 
@@ -101,4 +101,10 @@ test("websocket diagnostics keep and collapse safe delivery status fields", () =
     { direction: "received", method: "delivery_status", delivery_id: "delivery-8", status: "queued", count: 2 },
   ]);
   expect(JSON.stringify(ring.snapshot())).not.toContain(fake);
+});
+
+test("storage diff names keys only before, only after, and changed values; key order alone is no diff", () => {
+  expect(storageDiff(JSON.stringify({ a: "1", b: "2" }), JSON.stringify({ b: "2", a: "1" }))).toBe("");
+  expect(storageDiff(JSON.stringify({ gone: "x", same: "s", moved: "old" }), JSON.stringify({ moved: "new", same: "s", added: "y".repeat(5) }), 3))
+    .toBe("only before: gone=x\nonly after: added=yyy...\nchanged: moved: old -> new");
 });
