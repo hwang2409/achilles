@@ -47,6 +47,12 @@ button, input, textarea, select { border-radius: var(--g1-radius-control); }
   background: var(--g1-bg);
   border: var(--g1-border-width) solid var(--g1-control-border);
 }
+/* a selected row's secondary text keeps 4.5:1 on the selected fill: every muted alias reads the stronger value inside it */
+:where([aria-current]:not([aria-current="false"]), [aria-selected="true"], [aria-pressed="true"], [data-selected]:not([data-selected="false"]), [data-current="true"], .chat-row.current, .td-span-selected, .projects-entry[aria-expanded="true"], .projects-group li:has(input:checked)) {
+  --g1-muted: var(--g1-muted-on-selected);
+  --g1-fg-3: var(--g1-muted-on-selected);
+  --fulcrum-muted: var(--g1-muted-on-selected);
+}
 /* hover only where a real pointer hovers: on touch a tapped control must not keep the tint */
 @media (hover: hover) and (pointer: fine) {
   :where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }

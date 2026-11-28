@@ -24,6 +24,8 @@
   --g1-fg-2: var(--g1-fg);
   --g1-fg-3: var(--g1-muted);
   --g1-muted: light-dark(#696969, #ACACAC);
+  /* muted text inside a selected row: 4.5:1 or more on the 12% selected fill over every surface (plain muted drops to 3.9:1) */
+  --g1-muted-on-selected: light-dark(#5C5C5C, #B3B3B3);
   --g1-link: light-dark(#385C86, #9FB9D6);
   --g1-panel: light-dark(var(--g1-bg), var(--g1-surface));
   --g1-primary: light-dark(#171717, #E5E5E5);
