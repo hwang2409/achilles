@@ -199,13 +199,16 @@ test("with path completion on, an image paste adds a chip and leaves the open pa
 });
 
 test.each([
-  ["runs", { kind: "output", text: "status: idle" }],
-  ["is refused", new Error("a turn is already running")],
-])("a slash command that %s with images in the box keeps the chips and never sends them", async (_name, reply) => {
-  const calls: string[] = [];
-  const client = { features: ["model_input_ids"], request: async (method: string) => {
-    calls.push(method);
+  ["runs", { kind: "output", text: "status: idle" }, []],
+  ["is refused", new Error("a turn is already running"), []],
+  // the command's own message goes out by its id alone
+  ["sends model input", { kind: "model_input", input_id: "i1", display_text: "/status" }, [["send", { session_id: "s1", input_id: "i1" }]]],
+])("a slash command that %s with images in the box keeps the chips and never sends them", async (_name, reply, sends) => {
+  const calls: [string, unknown][] = [];
+  const client = { features: ["model_input_ids"], request: async (method: string, params: unknown) => {
+    calls.push([method, params]);
     if (method === "slash_list") return { commands: [] };
+    if (method === "send") return { accepted: true };
     if (reply instanceof Error) throw reply;
     return reply;
   } } as unknown as ZetaClient;
@@ -230,8 +233,9 @@ test.each([
 
   await act(() => { fireEvent.change(field, { target: { value: "/status" } }); });
   await act(async () => { fireEvent.keyDown(field, { key: "Escape" }); });
-  await act(async () => { fireEvent.keyDown(field, { key: "Enter" }); await new Promise((resolve) => setTimeout(resolve, 0)); });
-  expect(calls.filter((method) => method !== "slash_list")).toEqual(["slash_run"]);
+  // two replies: slash_run, then the model input's send
+  await act(async () => { fireEvent.keyDown(field, { key: "Enter" }); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(calls.filter(([method]) => method !== "slash_list")).toEqual([["slash_run", { session_id: "s1", text: "/status" }], ...sends]);
   expect(sent).toEqual([]);
   expect(view.getByRole("img", { name: "shot.png" })).toBeTruthy();
   expect(view.getByRole("button", { name: "remove image 1: shot.png" })).toBeTruthy();

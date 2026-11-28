@@ -129,10 +129,12 @@ export function PlainComposer(props: ComposerAdapterProps) {
           {...(readOnly ? {} : paths.fieldProps)}
           // after the path props: they set aria-controls even when closed, so the open slash menu must win
           {...(readOnly ? {} : slash.field)}
-          onChange={readOnly ? undefined : (event) => { edit(event.target.value); paths.sync(event.target); }}
-          // caret moves by key or pointer, not onSelect: a focus from code fires that too, and must not open a list
-          onKeyUp={readOnly ? undefined : (event) => paths.sync(event.currentTarget)}
-          onMouseUp={readOnly ? undefined : (event) => paths.sync(event.currentTarget)}
+          onChange={readOnly ? undefined : (event) => { slash.typed(event.target.value); edit(event.target.value); paths.sync(event.target); }}
+          // caret moves by key or pointer open lists, not onSelect: a focus from code fires that too, and must not open one
+          onKeyUp={readOnly ? undefined : (event) => { slash.caretMoved(event.key); paths.sync(event.currentTarget); }}
+          onMouseUp={readOnly ? undefined : (event) => { slash.caretMoved(); paths.sync(event.currentTarget); }}
+          // a caret move with no keyup or mouseup (a touch trackpad, selection handles) only closes a stale path list
+          onSelect={readOnly ? undefined : (event) => paths.closeIfStale(event.currentTarget)}
           onBlur={paths.close}
           onKeyDown={readOnly ? undefined : onKeyDown}
         />

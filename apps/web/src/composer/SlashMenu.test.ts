@@ -183,3 +183,39 @@ test("a failed command list is read again on the next /", async () => {
   expect(h.calls.filter(([method]) => method === "slash_list")).toHaveLength(2);
   expect(h.hook.result.current.slashList?.map((command) => command.name)).toEqual(["help"]);
 });
+
+test("a refused command's restored draft opens no menu, so the reason stays visible; a caret move or typing opens it again", async () => {
+  const client = { features: ["model_input_ids"], request: async (method: string) => {
+    if (method === "slash_list") return { commands };
+    throw new Error("a turn is already running");
+  } } as unknown as ZetaClient;
+  function Composer() {
+    const [draft, setDraft] = React.useState("");
+    const commands = useComposerCommands(client, { id: "s1", title: "chat" }, true, draft, setDraft, () => true);
+    return React.createElement(PlainComposer, {
+      state: "idle", label: "message", chatId: `slash-test-${chatSeq++}`, defaultValue: draft,
+      onSubmit: async () => {}, onDraftChange: setDraft, onDraftSubmit: () => {},
+      onCommand: (command, text) => commands.run(command, null, text),
+      commandOutput: commands.output && React.createElement("p", { role: "alert" }, commands.output.text),
+      slashCommands: commands.slashList,
+    });
+  }
+  const view = render(React.createElement(RunProvider, { store: createRunStore() }, React.createElement(Composer)));
+  const field = view.getByLabelText("message", { selector: "textarea" }) as HTMLTextAreaElement;
+  const options = () => view.container.querySelectorAll('[role="listbox"][aria-label="commands"] [role="option"]').length;
+  await act(async () => { fireEvent.change(field, { target: { value: "/status" } }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(options()).toBe(1);
+  await act(async () => { fireEvent.keyDown(field, { key: "Enter" }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(field.value).toBe("/status");
+  expect(options()).toBe(0);
+  expect(view.container.querySelector('p[role="alert"]')?.textContent).toBe("a turn is already running");
+  // the enter keyup after the restore is not a caret move
+  await act(() => { fireEvent.keyUp(field, { key: "Enter" }); });
+  expect(options()).toBe(0);
+  await act(() => { fireEvent.keyUp(field, { key: "ArrowLeft" }); });
+  expect(options()).toBe(1);
+  await act(() => { fireEvent.keyDown(field, { key: "Escape" }); fireEvent.keyUp(field, { key: "Escape" }); });
+  expect(options()).toBe(0);
+  await act(() => { fireEvent.mouseUp(field); });
+  expect(options()).toBe(1);
+});

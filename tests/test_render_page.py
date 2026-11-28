@@ -8,6 +8,7 @@ import subprocess
 import threading
 from pathlib import Path
 
+import homes
 import httpx
 import pytest
 from test_web import running_http_app
@@ -154,7 +155,7 @@ def test_render_returns_an_image_and_waits_for_bridge_content(served, tmp_path) 
     store = _home_with_code(tmp_path / "achilles", DELAYED)
     store.insert_record("home", "items", {"title": "from the real records"})
     token = store.ensure_credential("home")
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         result = _mcp_render(port, token)
     assert not result.get("isError"), result
     image, text = result["content"]
@@ -170,7 +171,7 @@ def test_render_returns_an_image_and_waits_for_bridge_content(served, tmp_path) 
 def test_render_reports_errors_with_context_and_blocks_writes(served, tmp_path) -> None:
     store = _home_with_code(tmp_path / "achilles", FAULTS % _closed_port())
     token = store.ensure_credential("home")
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         result = _mcp_render(port, token)
     report = json.loads(result["content"][-1]["text"])
     assert any(
@@ -187,7 +188,7 @@ def test_render_reports_errors_with_context_and_blocks_writes(served, tmp_path) 
 def test_inline_styles_and_data_images_render(served, tmp_path) -> None:
     store = _home_with_code(tmp_path / "achilles", STYLED)
     token = store.ensure_credential("home")
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         result = render_page(f"http://127.0.0.1:{port}", "home", token)
     assert "color rgb(1, 2, 3) image 1" in result["text"], result
     assert result["console_errors"] == [] and result["failed_requests"] == [], result
@@ -196,7 +197,7 @@ def test_inline_styles_and_data_images_render(served, tmp_path) -> None:
 def test_confirm_is_accepted_and_reported_so_a_render_never_hangs(served, tmp_path) -> None:
     store = _home_with_code(tmp_path / "achilles", CONFIRM_DELETE)
     token = store.ensure_credential("home")
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         result = render_page(f"http://127.0.0.1:{port}", "home", token)
     assert result["ready"] is True and "confirmed true" in result["text"], result
     assert result["dialogs"] == ["confirm: delete stretch?"]
@@ -206,7 +207,7 @@ def test_confirm_is_accepted_and_reported_so_a_render_never_hangs(served, tmp_pa
 def test_polling_page_times_out_with_a_fallback_screenshot(served, tmp_path) -> None:
     store = _home_with_code(tmp_path / "achilles", POLLING)
     token = store.ensure_credential("home")
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         result = render_page(f"http://127.0.0.1:{port}", "home", token, timeout=3)
     assert result["ready"] is False and result["timed_out"] is True
     assert "network-idle" in result["note"]
@@ -216,7 +217,7 @@ def test_polling_page_times_out_with_a_fallback_screenshot(served, tmp_path) -> 
 def test_large_screenshot_reaches_the_caller_whole(served, tmp_path) -> None:
     store = _home_with_code(tmp_path / "achilles", NOISE)
     token = store.ensure_credential("home")
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         result = render_page(f"http://127.0.0.1:{port}", "home", token)
     image = base64.b64decode(result["screenshot"])
     assert result["ready"] is True and len(image) > 64 * 1024 and image[-2:] == b"\xff\xd9"
@@ -236,7 +237,7 @@ def test_deadline_note_is_absent_when_the_screenshot_is_omitted(
     monkeypatch.setattr(render_page_module, "_RUNNER", tmp_path / "render-page.ts")
     store = _home_with_code(tmp_path / "achilles", POLLING)
     token = store.ensure_credential("home")
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         result = render_page(f"http://127.0.0.1:{port}", "home", token, timeout=3)
     assert result["timed_out"] is True and "screenshot" not in result
     assert "omitted" in result["screenshot_note"]
@@ -271,7 +272,7 @@ def test_hung_page_times_out_and_leaves_no_chromium(served, monkeypatch, tmp_pat
                 ours.update(browsers | helpers)
 
     watcher = threading.Thread(target=watch)
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         watcher.start()
         try:
             result = render_page(f"http://127.0.0.1:{port}", "home", token, timeout=3)
@@ -337,7 +338,7 @@ def test_another_origin_cannot_read_or_run_a_page_bundle(served, tmp_path) -> No
     _home_with_code(tmp_path / "achilles", RUNS_ANYWHERE)
     digest = hashlib.sha256(RUNS_ANYWHERE.encode()).hexdigest()
     playwright = Path(web.__file__).parents[2] / "apps/web/node_modules/playwright/index.mjs"
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         script = tmp_path / "origin-probe.ts"
         script.write_text(
             _ORIGIN_PROBE % {"playwright": playwright, "port": port, "digest": digest}
@@ -393,7 +394,7 @@ document.getElementById("root").innerHTML =
 def test_frame_reload_and_form_submit_render_the_page_again(served, tmp_path) -> None:
     _home_with_code(tmp_path / "achilles", SELF_NAVIGATING)
     playwright = Path(web.__file__).parents[2] / "apps/web/node_modules/playwright/index.mjs"
-    with served(web.create_app()) as port:
+    with served(homes.app()) as port:
         script = tmp_path / "self-navigation-probe.ts"
         script.write_text(_SELF_NAVIGATION_PROBE % {"playwright": playwright, "port": port})
         done = subprocess.run(
