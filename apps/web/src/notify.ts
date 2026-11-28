@@ -6,23 +6,18 @@ import { chatHref, titleOf, type Chat } from "./surface/AgentNavAdapter";
 /**
  * Browser notifications for chat rows (opt-in in settings). A row that turns "approval" says "<title> needs you"; a row
  * that goes from running to idle says "<title> finished". Only while this tab is hidden, and only in the leader tab.
- * The row's state_version names each transition, so a reconnect, a list reload, or a new leader never repeats one.
+ * Each tab compares a row with the state it last saw, so a list reload (a reconnect, focus, another tab's write) repeats
+ * nothing; the tag (the chat) makes the browser replace, not add, a note shown twice in a leader handover.
  */
-export type Note = { key: string; tag: string; title: string; href: string };
+export type Note = { tag: string; title: string; href: string };
 export type Notifier = { update(chats: readonly Chat[]): void };
 
-export const NOTIFIED_KEY = "achilles:notified";
-const KEEP = 200;
-
-export function createNotifier({ show, shouldShow, storage }: {
+export function createNotifier({ show, shouldShow }: {
   show(note: Note): void;
   // read at each transition: the setting is on, this tab leads, and it is hidden
   shouldShow(): boolean;
-  // shared by the tabs of this browser (localStorage): the transitions already shown
-  storage: Pick<Storage, "getItem" | "setItem">;
 }): Notifier {
   const last = new Map<string, Chat["last_state"]>();
-  const shown = () => { try { const value: unknown = JSON.parse(storage.getItem(NOTIFIED_KEY) ?? "[]"); return Array.isArray(value) ? value.filter((key): key is string => typeof key === "string") : []; } catch { return []; } };
   return {
     update(chats) {
       for (const chat of chats) {
@@ -32,11 +27,7 @@ export function createNotifier({ show, shouldShow, storage }: {
         if (before === undefined || before === chat.last_state) continue;
         const kind = chat.last_state === "approval" ? "needs you" : before === "running" && chat.last_state === "idle" ? "finished" : null;
         if (!kind || !shouldShow()) continue;
-        const key = `${chat.session_id}:${chat.state_version}`;
-        const keys = shown();
-        if (keys.includes(key)) continue;
-        try { storage.setItem(NOTIFIED_KEY, JSON.stringify([...keys, key].slice(-KEEP))); } catch { /* storage off: this tab still shows it once */ }
-        show({ key, tag: chat.session_id, title: `${titleOf(chat)} ${kind}`, href: chatHref(chat) + (kind === "needs you" ? approvalIntent : "") });
+        show({ tag: chat.session_id, title: `${titleOf(chat)} ${kind}`, href: chatHref(chat) + (kind === "needs you" ? approvalIntent : "") });
       }
     },
   };
@@ -87,7 +78,6 @@ export function useChatNotifications(chats: readonly Chat[]) {
     const lead = leadTabs(navigator.locks, document);
     setNotifier(createNotifier({
       shouldShow: () => getSettings().notify && Notification.permission === "granted" && lead.leader() && document.visibilityState === "hidden",
-      storage: localStorage,
       show: ({ tag, title, href }) => {
         const note = new Notification(title, { tag });
         note.onclick = () => { window.focus(); note.close(); location.assign(href); };

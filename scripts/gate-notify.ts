@@ -1,6 +1,5 @@
 import type { Browser, BrowserContext, Page } from "../apps/web/node_modules/playwright";
 
-export const notifyArtifacts: string[] = [];
 type Shown = { title: string; tag?: string };
 declare global { interface Window { __notes: Shown[]; __asks: number; __visibility: DocumentVisibilityState; __clickNote(index: number): void } }
 
@@ -133,6 +132,8 @@ export async function gateNotifications(browser: Browser, origin: string, waitFo
     await waitFor(listed(a, ids[0]!, "running"), "tab a sees the first chat run again");
     await write(ids[0]!, { last_state: "approval" });
     await waitFor(async () => (await notes(a)).length === 2, "a second approval shows a second notification");
+    // the opened chat is not loaded: it is a fixture row with no zeta session behind it
+    await a.route((url) => url.searchParams.get("chat") === ids[0], (route) => route.fulfill({ contentType: "text/html", body: "<title>opened</title>" }));
     const opened = a.waitForURL((url) => url.pathname === "/" && url.searchParams.get("chat") === ids[0] && url.hash === "#approval", { waitUntil: "commit" });
     await a.evaluate(() => window.__clickNote(1));
     await opened;
