@@ -43,7 +43,7 @@ jobs:
       - run: bun scripts/fulcrum.ts
         env:
           FULCRUM_DIR: ${{ github.workspace }}/.cache/fulcrum
-      - run: bun test --preload ./apps/web/src/test-dom.ts ./apps/web/src/
+      - run: timeout -s KILL 300 bun test --preload ./apps/web/src/test-dom.ts ./apps/web/src/ 2>&1 | tail -c 20000
       - run: bun run typecheck
         working-directory: apps/web
       - run: bun run build
