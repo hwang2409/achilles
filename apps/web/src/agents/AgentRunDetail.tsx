@@ -15,6 +15,8 @@ export const short = (id: string) => id.length > 12 ? `${id.slice(0, 7)}…${id.
 export const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
 // the transcript row's format: 19s, 1m 40s, 1h 2m
 export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
+// a run that never ran a turn has no honest elapsed time: zeta reports 0s while it waits
+export const elapsed = ({ elapsedSeconds, turnsUsed }: AgentRun) => elapsedSeconds === undefined || !elapsedSeconds && !turnsUsed ? undefined : duration(elapsedSeconds);
 // one page-wide 1 s clock for "retries in …": it runs only while a retrying row is shown, and never reads the network
 const ticks = new Set<() => void>();
 let tick: ReturnType<typeof setInterval> | undefined;
@@ -65,7 +67,7 @@ export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follo
           detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
       {chosen && !controls && <p className="agents-note">control this run from <ChatLink sessionId={chosen.sessionId}>its chat</ChatLink>.</p>}
       {controls && <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh} readOnly={readOnly}
-        elapsed={chosen?.elapsedSeconds === undefined ? undefined : `for ${duration(chosen.elapsedSeconds)} at last refresh`} />}
+        elapsed={chosen && elapsed(chosen) && `for ${elapsed(chosen)} at last refresh`} />}
       {chosen && <RunActivity client={client} row={chosen} />}
     </div>
     {chosen && send && <ChildComposer key={id} client={client} row={chosen} owner={send} readOnly={readOnly} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
@@ -78,7 +80,7 @@ function RunDetail({ row, parent, rootTitle }: { row: AgentRun; parent?: AgentRu
     ["parent", row.parentRunId ? <span title={row.parentRunId}>{parent?.agentType ? `${parent.agentType} · ` : ""}{short(row.parentRunId)}</span> : undefined],
     ["started", row.startedAt !== undefined && <time dateTime={new Date(row.startedAt).toISOString()}>{stamp(row.startedAt)}</time>],
     ["finished", row.finishedAt !== undefined && <time dateTime={new Date(row.finishedAt).toISOString()}>{stamp(row.finishedAt)}</time>],
-    ["elapsed at last refresh", row.elapsedSeconds === undefined ? undefined : duration(row.elapsedSeconds)],
+    ["elapsed at last refresh", elapsed(row)],
     // zeta reports 0 completed turns for a run canceled or failed mid-turn; that reads as "did nothing", so say nothing
     ["turns", (row.status === "canceled" || row.status === "failed") && !row.turnsUsed ? undefined : row.turnsUsed], ["tool calls", row.toolCount],
     ["current step", isTerminal(row.status) ? undefined : row.retry ? <RetryLine retry={row.retry} /> : row.currentStep],
@@ -103,7 +105,7 @@ function RunActivity({ client, row }: { client: ZetaClient | null; row: AgentRun
   </section>;
 }
 
-function RunHistory({ client, row }: { client: ZetaClient; row: AgentRun }) {
+export function RunHistory({ client, row }: { client: ZetaClient; row: AgentRun }) {
   const { sessionId, runId } = row;
   const owner = useMemo(() => createChildRunsController(client, { sessionId, runId }), [client, sessionId, runId]);
   const result = useSyncExternalStore(owner.subscribe, owner.snapshot);
@@ -116,6 +118,6 @@ function RunHistory({ client, row }: { client: ZetaClient; row: AgentRun }) {
     {result.warning && <p role="status">{result.warning}</p>}
     {result.stale && <p role="status">run changed · refresh to read the latest stored history</p>}
     {!result.limited && <button type="button" disabled={result.loading} onClick={() => void owner.refresh()}>refresh transcript</button>}
-    {result.result && (result.progress?.complete && result.progress.messages === 0 ? <p>no stored messages</p> : <div className="agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
+    {result.result && (result.progress?.complete && result.progress.messages === 0 ? <p>{isTerminal(row.status) ? "no stored messages" : "no activity yet"}</p> : <div className="agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
   </>;
 }

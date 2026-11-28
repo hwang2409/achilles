@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { createRunStore } from "@fulcrum/core";
 import type { ZetaClient } from "@fulcrum/zeta";
+import { childRecoveryNotice } from "../chat/ChildRecoveryNotice";
 import { wrapTab } from "../keyboard";
 import { AgentSpawn } from "./AgentControlViews";
 import { AgentRunDetail, RetryLine, StateTag } from "./AgentRunDetail";
@@ -11,6 +12,7 @@ import "../settings-dialog.css";
 import "./agents.css";
 
 const idle = () => () => {};
+const NOTICE_REREAD_MS = 250;
 const none = { refreshing: false } as ReturnType<ReturnType<typeof createAgentRunsReader>["snapshot"]>;
 
 // this chat's child runs: spawn, the run list, and the chosen run's detail with cancel and send. every write targets sessionId.
@@ -29,6 +31,19 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
     return () => { node?.close(); opener?.focus(); };
   }, []);
   useEffect(() => { refresh(); return () => reader?.stop(); }, [reader, sessionId]);
+  // zeta keeps the old retry time until its probe ends: a paused or resumed notice in this chat rereads the list once
+  // (several notices in one burst share the read); the read adds no transcript rows, so it cannot loop
+  useEffect(() => {
+    if (!store || !reader) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = store.subscribeOutline(() => {
+      const added = store.getOutlineSnapshot().change?.splices.flatMap((splice) => splice.items) ?? [];
+      if (!added.some(({ id }) => childRecoveryNotice(store.getItem(id)))) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => void reader.refresh({ root: sessionId }), NOTICE_REREAD_MS);
+    });
+    return () => { stop(); clearTimeout(timer); };
+  }, [store, reader, sessionId]);
   const { report, refreshing, warning } = snapshot;
   const rows = report?.rows ?? [];
   const id = chosenRun ? rowKey(sessionId, chosenRun) : undefined;

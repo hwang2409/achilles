@@ -40,6 +40,8 @@ test("live events and history rows show the same readable paused and resumed lin
   const historyLines = [...history.container.querySelectorAll("[data-part=child-recovery]")].map((node) => node.textContent);
   expect(liveLines).toEqual([`work paused · provider unavailable · retries at ${stamp(Date.parse(paused.next_retry_at))}`, "work resumed"]);
   expect(historyLines).toEqual(liveLines);
+  // screen readers announce a live pause, like ChatNotification
+  expect([...history.container.querySelectorAll("[data-part=child-recovery]")].map((node) => node.getAttribute("role"))).toEqual(["status", "status"]);
   expect(history.container.querySelector("[data-part=child-recovery] time")?.getAttribute("dateTime")).toBe("2026-11-08T00:00:05.000Z");
   for (const text of [liveText, history.container.textContent]) {
     expect(text).not.toContain(path);

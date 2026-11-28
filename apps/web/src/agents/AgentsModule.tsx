@@ -7,9 +7,10 @@ import { isTerminal, stateWord } from "./childControls";
 import { groupAgentRuns, type RunBranch } from "./groupAgentRuns";
 import { supportsFeature } from "../zeta/connection";
 import { AGENT_REFRESH_MS, createAgentRunsReader, recoveryFeature, statusChoices, rowKey, sourceNote, unavailable, type AgentFilters, type AgentRun } from "./reads";
-import { AgentRunDetail, duration, RetryLine, short, stamp, StateTag } from "./AgentRunDetail";
+import { AgentRunDetail, elapsed, RetryLine, short, stamp, StateTag } from "./AgentRunDetail";
 import "./agents.css";
 
+export const countText = (count: number, complete: boolean) => `${count} ${complete ? "run" : "loaded result"}${count === 1 ? "" : "s"}${complete ? " in view" : ""}`;
 const runHref = (run?: AgentRun) => surfaceHref(run ? `/agents/${encodeURIComponent(run.sessionId)}/${encodeURIComponent(run.runId)}` : "/agents");
 
 function selection() {
@@ -108,7 +109,7 @@ export function AgentsModule({ client, connecting, retry }: { client: ZetaClient
           <span className="agents-row-title"><b>{run.agentType ?? short(run.runId)}</b>{run.description ? ` ${run.description}` : ""}</span>
           <small><StateTag row={run} />{run.retry ? <> · <RetryLine retry={run.retry} /></> : run.currentStep && run.currentStep !== run.status && !isTerminal(run.status) ? ` · ${run.currentStep}` : ""}{missingParent && run.parentRunId ? ` · parent ${short(run.parentRunId)}` : ""}</small>
         </div>
-        {run.elapsedSeconds !== undefined && <span className="agents-elapsed">{duration(run.elapsedSeconds)}</span>}
+        {elapsed(run) && <span className="agents-elapsed">{elapsed(run)}</span>}
       </a>
     </li>;
   };
@@ -139,7 +140,7 @@ export function AgentsModule({ client, connecting, retry }: { client: ZetaClient
           </div>
           <div className="agents-lane-note">
             {sourceNote[report.source] && <p role="status">{sourceNote[report.source]}</p>}
-            <p>{shown.length} {report.complete ? "runs in view" : "loaded results"}{report.omitted ? ` · ${report.omitted} malformed ${report.omitted === 1 ? "row" : "rows"} omitted` : ""}</p>
+            <p>{countText(shown.length, report.complete)}{report.omitted ? ` · ${report.omitted} malformed ${report.omitted === 1 ? "row" : "rows"} omitted` : ""}</p>
           </div>
           {!lanes.length && <ModuleState kind="empty" title={matches || report.filters.status || report.filters.root || !report.complete || report.omitted ? "no agent runs in this view" : "no agent runs yet"} />}
           {lanes.map((lane) => <section className="agents-lane" key={lane.sessionId}>

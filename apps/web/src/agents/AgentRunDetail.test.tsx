@@ -1,7 +1,9 @@
 import "../test-dom";
 // @ts-expect-error Bun supplies this module at test time; the web project does not install Bun types.
 import { afterEach, expect, jest, spyOn, test } from "bun:test";
-import { RetryLine, retryText } from "./AgentRunDetail";
+import type { ZetaClient } from "@fulcrum/zeta";
+import { AgentRunDetail, RetryLine, retryText, RunHistory } from "./AgentRunDetail";
+import { countText } from "./AgentsModule";
 import { statusChoices, type Retry } from "./reads";
 const { act, cleanup, render } = await import("@testing-library/react");
 
@@ -53,3 +55,37 @@ test("the state filter offers suspended only when zeta negotiated child recovery
   // stored agent state has no suspended status to filter by
   expect(statusChoices("state", true)).not.toContain("suspended");
 });
+
+// zeta's row for a child that was paused before its first turn (synthetic)
+const waiting = { runId: "a:1", sessionId: "a", parentRunId: null, agentType: "run", status: "suspended" as const, description: "work", currentStep: "suspended",
+  turnsUsed: 0, toolCount: 0, elapsedSeconds: 0, startedAt: now, retry: retrying(40) };
+
+test("a run that never ran a turn shows no elapsed time; one that ran shows it", () => {
+  const fields = (row: typeof waiting) => {
+    const ui = render(<AgentRunDetail chosen={row} title="chat" id="a:1" client={null} reportedAt={now} refreshing={false} refresh={() => {}} />);
+    const labels = [...ui.container.querySelectorAll(".agents-run-head dt")].map((node) => node.textContent);
+    const value = [...ui.container.querySelectorAll(".agents-run-head div")].find((node) => node.querySelector("dt")?.textContent === "elapsed at last refresh")?.querySelector("dd")?.textContent;
+    ui.unmount();
+    return { labels, value };
+  };
+  expect(fields(waiting).labels).not.toContain("elapsed at last refresh");
+  expect(fields({ ...waiting, turnsUsed: 1, elapsedSeconds: 5 }).value).toBe("5s");
+});
+
+test("child history shows loading only while the first read runs; an empty transcript says no activity yet", async () => {
+  const read = Promise.withResolvers<unknown>();
+  const client = { features: ["child_runs", "child_run_history"], request: (method: string) =>
+    method === "status" ? Promise.resolve({ session: { session_id: "a" } }) : read.promise } as unknown as ZetaClient;
+  const ui = render(<RunHistory client={client} row={waiting} />);
+  try {
+    await act(async () => {});
+    expect(ui.container.textContent).toContain("reading child history");
+    await act(async () => { read.resolve({ messages: [], next_before: null, history_validator: { end: 0, entry_id: null } }); });
+    for (let tick = 0; tick < 5; tick++) await act(async () => { await Promise.resolve(); });
+    expect(ui.container.textContent).not.toContain("reading child history");
+    expect(ui.container.textContent).toContain("no activity yet");
+  } finally { ui.unmount(); }
+});
+
+test.each([[0, true, "0 runs in view"], [1, true, "1 run in view"], [2, true, "2 runs in view"], [1, false, "1 loaded result"], [2, false, "2 loaded results"]])(
+  "countText %p %p", (count: number, complete: boolean, words: string) => { expect(countText(count, complete)).toBe(words); });

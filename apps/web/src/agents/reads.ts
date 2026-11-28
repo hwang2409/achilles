@@ -184,7 +184,8 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     }
     return { unsupported: true };
   };
-  // shortcut: a recovery from a sent message shows at the next refresh, not at once; upgrade: reread on the child_recovered notice
+  // shortcut: in the Agents place, a recovery from a sent message or a slow probe shows at the next refresh (the chat
+  // dialog also rereads on the paused and resumed notices); upgrade: when the run catalog has a change stream
   const scheduleRecheck = () => {
     clearTimeout(recheck);
     recheck = undefined;

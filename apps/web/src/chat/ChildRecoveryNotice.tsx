@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import type { RunItem } from "@fulcrum/core";
 import { useItem } from "@fulcrum/react";
 import { stamp } from "../agents/AgentRunDetail";
 import { displayControl } from "../agents/childControls";
@@ -18,8 +19,7 @@ function notice(kind: unknown, data: unknown): Notice | undefined {
 }
 
 // live, fulcrum does not map these events yet and gives an unknown item; in history they are notification rows
-function useNotice(id: string) {
-  const item = useItem(id);
+export function childRecoveryNotice(item: RunItem | undefined) {
   if (item?.type === "unknown" && item.event.type === "unknown") return notice(item.event.name, item.event.data?.data);
   if (item?.type === "notification" && item.event.type === "notification") return notice(item.event.data?.kind, item.event.data);
 }
@@ -27,9 +27,9 @@ function useNotice(id: string) {
 /** A row renderer that shows a child recovery notice as one line, and any other item with `Other`. */
 export function withChildRecovery(Other: ComponentType<{ id: string }>) {
   return function ChildRecoveryRow({ id }: { id: string }) {
-    const shown = useNotice(id);
+    const shown = childRecoveryNotice(useItem(id));
     // the time is what zeta planned when it wrote the notice; the agents view shows the current plan
-    return shown ? <p className="chat-continuation" data-part="child-recovery" data-kind={shown.kind}>{shown.text}
+    return shown ? <p className="chat-continuation" role="status" data-part="child-recovery" data-kind={shown.kind}>{shown.text}
       {shown.kind === "child_suspended" && (shown.next === undefined ? "stopped retrying"
         : <>retries at <time dateTime={new Date(shown.next).toISOString()}>{stamp(shown.next)}</time></>)}</p> : <Other id={id} />;
   };
