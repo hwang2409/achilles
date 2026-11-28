@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test";
-import { createNotifier, type Note } from "./notify";
+import "./test-dom";
+import { afterEach, describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { createNotifier, useApprovalIntent, type Note } from "./notify";
+const { act, cleanup, render } = await import("@testing-library/react");
 import type { Chat } from "./surface/AgentNavAdapter";
 
 const row = (state: Chat["last_state"], version: number, id = "s1"): Chat => ({
@@ -40,5 +43,44 @@ describe("createNotifier", () => {
     show.on = true;
     notifier.update([row("approval", 2)]);
     expect(notes).toEqual([]);
+  });
+});
+
+describe("useApprovalIntent", () => {
+  const frame = () => act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  afterEach(() => { cleanup(); history.replaceState(null, "", "/"); });
+  function Chat({ approval }: { approval: boolean }) {
+    useApprovalIntent(approval);
+    return createElement("div", null,
+      createElement("textarea", { "aria-label": "composer" }),
+      approval && createElement("div", { "data-part": "approval-actions" }, createElement("button", null, "approve")));
+  }
+
+  // the tab already shows ?chat=s1, waiting on an approval; the note's click is a same-document navigation that only
+  // changes the hash
+  async function clickFromSameTab() {
+    history.replaceState(null, "", "/?chat=s1");
+    const ui = render(createElement(Chat, { approval: true }));
+    await frame();
+    const composer = ui.getByLabelText("composer");
+    composer.focus();
+    await act(() => new Promise<void>((resolve) => { addEventListener("hashchange", () => resolve(), { once: true }); location.hash = "#approval"; }));
+    await frame();
+    return { ui, composer };
+  }
+
+  test("a click from the tab that already shows the waiting chat focuses approve and consumes the intent", async () => {
+    await clickFromSameTab();
+    expect(document.activeElement?.textContent).toBe("approve");
+    expect(location.search + location.hash).toBe("?chat=s1");
+  });
+
+  test("after that click, a later approval of the chat keeps focus where the user put it", async () => {
+    const { ui, composer } = await clickFromSameTab();
+    composer.focus();
+    ui.rerender(createElement(Chat, { approval: false }));
+    ui.rerender(createElement(Chat, { approval: true }));
+    await frame();
+    expect(document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent).toBe("composer");
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { getSettings, useSettings } from "./settings";
 import { approvalIntent } from "./surface/routes";
 import { chatHref, titleOf, type Chat } from "./surface/AgentNavAdapter";
@@ -86,4 +86,26 @@ export function useChatNotifications(chats: readonly Chat[]) {
     return () => { lead.stop(); setNotifier(null); };
   }, [on]);
   useEffect(() => { notifier?.update(chats); }, [notifier, chats]);
+}
+
+const subscribeHash = (listener: () => void) => { addEventListener("hashchange", listener); return () => removeEventListener("hashchange", listener); };
+
+/**
+ * The approval intent (a note's click, the "needs you" link): while the chat waits on an approval, focus its first
+ * enabled action, as fulcrum's "jump to approval", then drop the hash so a later approval never takes focus by itself.
+ * The hash is read as state: a click from the tab that already shows the chat only changes the hash.
+ */
+export function useApprovalIntent(approval: boolean) {
+  const hash = useSyncExternalStore(subscribeHash, () => location.hash);
+  useEffect(() => {
+    if (!approval || hash !== approvalIntent) return;
+    // once the card has rendered
+    const frame = requestAnimationFrame(() => {
+      const action = document.querySelector<HTMLElement>("[data-part=approval-actions] button:not([aria-disabled=true])");
+      if (!action) return;
+      action.focus();
+      history.replaceState(history.state, "", location.pathname + location.search);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [approval, hash]);
 }

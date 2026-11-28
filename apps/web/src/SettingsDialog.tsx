@@ -112,16 +112,19 @@ function Notifications({ on }: { on: boolean }) {
   const [asked, setAsked] = useState(false);
   const supported = notificationsSupported();
   const blocked = supported && Notification.permission === "denied";
+  // the setting alone is not "on": the site permission can be reset after it was given
+  const showing = on && supported && Notification.permission === "granted";
   const explanation = !supported ? "this browser cannot show notifications."
     : blocked ? "the browser blocks notifications for this site. allow them in its site settings, then turn this on."
-    : on ? "on. a hidden tab tells you when a chat needs you or finishes." : "off. turning it on asks the browser for permission.";
+    : showing ? "on. a hidden tab tells you when a chat needs you or finishes."
+    : on ? "off: the browser has no permission now. turn this on to ask again." : "off. turning it on asks the browser for permission.";
   const change = async (next: boolean) => {
     if (!next) { updateSettings({ notify: false }); return; }
     if (asked) return;
     setAsked(true);
     try { if (await allowNotifications()) updateSettings({ notify: true }); } finally { setAsked(false); }
   };
-  return <div className="setting-explanation"><Toggle label="notifications" checked={on && !blocked} disabled={!supported} surface={WRITE_SURFACE.settingsNotify} onChange={(next) => void change(next)} /><span>{explanation}</span></div>;
+  return <div className="setting-explanation"><Toggle label="notifications" checked={showing} disabled={!supported} surface={WRITE_SURFACE.settingsNotify} onChange={(next) => void change(next)} /><span>{explanation}</span></div>;
 }
 
 export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrite }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canWrite: boolean }) {

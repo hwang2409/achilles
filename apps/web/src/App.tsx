@@ -4,6 +4,7 @@ import { ALREADY_NEW, PageChatHeader } from "./PageChatHeader";
 import { createContext, useCallback, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { createRunStore } from "@fulcrum/core";
+import { useApprovalIntent } from "./notify";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { CodeFence } from "./chat/CodeFence";
@@ -15,7 +16,7 @@ import type { ChildSendOwner } from "./agents/childSend";
 import { completePath, type ZetaClient } from "@fulcrum/zeta";
 import type { RenderShell } from "./surface/SurfaceRouter";
 import { chatHref, titleOf, useAgentNavAdapter, type Chat } from "./surface/AgentNavAdapter";
-import { surfaceHref, approvalIntent, chatsRoute, createRoute, pagesRoute, type SurfaceRoute } from "./surface/routes";
+import { surfaceHref, chatsRoute, createRoute, pagesRoute, type SurfaceRoute } from "./surface/routes";
 import { CreateLanding } from "./create/CreateLanding";
 import type { CreateModeOwner } from "./create/createMode";
 import { AuthErrorRecovery } from "./chat/AuthErrorRecovery";
@@ -458,17 +459,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   useEffect(() => subscribeRowWrites((remote) => { remoteReload.current = remote; reloadChats.current(); }), []);
   const building = nav.catalog.chats.some((chat) => chat.session_id === ready?.sessionId && chat.purpose === "page_build");
   const stateLabel = runStateLabel(state, composerActivity.queued, building);
-  useEffect(() => {
-    if (state !== "approval" || location.hash !== approvalIntent) return;
-    // as fulcrum's "jump to approval": the first enabled action, once the card has rendered
-    const frame = requestAnimationFrame(() => {
-      const action = document.querySelector<HTMLElement>("[data-part=approval-actions] button:not([aria-disabled=true])");
-      if (!action) return;
-      action.focus();
-      history.replaceState(history.state, "", location.pathname + location.search);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [state]);
+  useApprovalIntent(state === "approval");
   const title = ready?.title ?? "new chat";
   const newPageChatReason = !connected ? "new chat is off until zeta is back" : !canWrite ? readOnlyReason
     : active.creatingChat ? "creating chat…" : ready?.controlledElsewhere ? undefined : empty || (ready && !ready.sent) ? ALREADY_NEW
