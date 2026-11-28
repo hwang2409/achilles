@@ -1,5 +1,6 @@
 import { expect, jest, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
+import { readSessionTitles } from "../sessions/reads";
 import { createAgentRunsReader, sourceNote } from "./reads";
 
 const rich = (id = "a:1") => ({ run_id: id, session_id: "a", parent_run_id: null, status: "completed", agent_type: "worker", description: "check sample", accepts_follow_ups: false, turns_used: 2, tool_count: 0, current_step: "completed", started_at: "2026-01-02T00:00:00Z", finished_at: null, elapsed_seconds: 5 });
@@ -158,4 +159,10 @@ test("rows sharing a retry time reread once after it passes, never while a read 
     parked.resolve(catalog([]));
     await busy;
   } finally { jest.useRealTimers(); }
+});
+
+test("session titles for the agents view keep only real names and first messages", async () => {
+  const sessions = [{ session_id: "named", name: "synthetic name" }, { session_id: "typed", first_message_preview: "synthetic typed" }, { session_id: "0123456789abcdef" }];
+  const client = { features: [], request: async () => ({ sessions }) } as unknown as ZetaClient;
+  expect([...await readSessionTitles(client, new AbortController().signal)]).toEqual([["named", "synthetic name"], ["typed", "synthetic typed"]]);
 });
