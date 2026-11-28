@@ -24,14 +24,16 @@ test.each([
 
 test("200 retrying rows share one page clock, which stops with the last row", async () => {
   jest.useFakeTimers();
-  jest.setSystemTime(now);
+  // own the clock: fake timers move Date differently across bun versions
+  let clock = now;
+  const time = spyOn(Date, "now").mockImplementation(() => clock);
   const started = spyOn(globalThis, "setInterval");
   const stopped = spyOn(globalThis, "clearInterval");
   try {
     const ui = render(<ul>{Array.from({ length: 200 }, (_, index) => <li key={index}><RetryLine retry={retrying(40 + index)} /></li>)}</ul>);
     await act(async () => {});
     expect(started).toHaveBeenCalledTimes(1);
-    await act(async () => { jest.advanceTimersByTime(10_000); });
+    await act(async () => { clock += 10_000; jest.advanceTimersByTime(10_000); });
     expect(ui.container.querySelector("li")?.textContent).toBe("provider unavailable · retries in 30s");
     expect(started).toHaveBeenCalledTimes(1);
     ui.unmount();
@@ -40,7 +42,7 @@ test("200 retrying rows share one page clock, which stops with the last row", as
     render(<RetryLine retry={{ state: "stopped", startedAt: now, deadlineAt: now }} />);
     await act(async () => {});
     expect(started).toHaveBeenCalledTimes(1);
-  } finally { started.mockRestore(); stopped.mockRestore(); jest.useRealTimers(); }
+  } finally { started.mockRestore(); stopped.mockRestore(); time.mockRestore(); jest.useRealTimers(); }
 });
 
 test("the state filter offers suspended only when zeta negotiated child recovery", () => {

@@ -1,6 +1,6 @@
 import "../test-dom";
 // @ts-expect-error Bun supplies this module at test time; the web project does not install Bun types.
-import { afterEach, expect, jest, test } from "bun:test";
+import { afterEach, expect, jest, spyOn, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ChatAgents } from "./ChatAgents";
 import { createAgentRunsReader } from "./reads";
@@ -34,7 +34,9 @@ test("a run that ends after the report rereads once; a failed reread does not re
 
 test("a suspended child says when zeta retries, counts down, offers cancel and no message box", async () => {
   jest.useFakeTimers();
-  jest.setSystemTime(Date.parse("2026-11-08T00:00:00Z"));
+  // own the clock: fake timers move Date differently across bun versions
+  let clock = Date.parse("2026-11-08T00:00:00Z");
+  const time = spyOn(Date, "now").mockImplementation(() => clock);
   const suspended = { ...running, accepts_follow_ups: true, status: "suspended", current_step: "suspended: provider unavailable, retrying", suspension_reason: "provider_unavailable",
     retry_state: "retrying", retry_started_at: "2026-11-08T00:00:00+00:00", retry_deadline_at: "2026-11-08T01:00:00+00:00", next_retry_at: "2026-11-08T00:00:40+00:00" };
   // the attached root matches, so a running child with follow-ups would get the message box
@@ -51,12 +53,12 @@ test("a suspended child says when zeta retries, counts down, offers cancel and n
     expect(row.querySelector(".agents-state")?.textContent).toBe("suspended");
     expect(row.textContent).toContain("provider unavailable · retries in 40s");
     expect(row.querySelector("time")?.getAttribute("dateTime")).toBe("2026-11-08T00:00:40.000Z");
-    await act(async () => { jest.advanceTimersByTime(5000); });
+    await act(async () => { clock += 5000; jest.advanceTimersByTime(5000); });
     expect(row.textContent).toContain("retries in 35s");
-    await act(async () => { jest.advanceTimersByTime(40_000); });
+    await act(async () => { clock += 40_000; jest.advanceTimersByTime(40_000); });
     expect(row.textContent).toContain("retrying now…");
     expect(ui.container.querySelector('[data-write-surface="agents.cancel"]')).toBeTruthy();
     expect(ui.container.querySelector(".agents-composer")).toBeNull();
     expect(ui.container.querySelector(".agents-run-head")?.textContent).toContain("gives up at");
-  } finally { ui.unmount(); jest.useRealTimers(); }
+  } finally { ui.unmount(); time.mockRestore(); jest.useRealTimers(); }
 });
