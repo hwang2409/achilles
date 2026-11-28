@@ -230,7 +230,7 @@ function ContinueAction({ row, online, run }: { row: SessionRow; online: boolean
   useEffect(() => () => attempt.current?.abort(), []);
   const reason = pending ? "opening this session in chat…" : row.parent != null
     ? "child sessions cannot continue as top-level chats. open the parent session instead."
-    : row.inUse ? sessionOwned : !online ? "connect to zeta to continue this session in chat." : null;
+    : row.inUse && !row.resident ? sessionOwned : !online ? "connect to zeta to continue this session in chat." : null;
   const start = async () => {
     if (reason || attempt.current) return;
     const current = new AbortController();

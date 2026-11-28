@@ -51,6 +51,8 @@ export function PlainComposer(props: ComposerAdapterProps) {
     input.current.setSelectionRange(caret.current, caret.current);
     caret.current = null;
   });
+  // a send, a clear, or a remote edit changes the draft without an edit event: a waiting request or a shown list is then stale
+  useLayoutEffect(() => { if (input.current) paths.closeIfStale(input.current); }, [model.draft]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     // the two lists cannot both be open: slash needs a draft of only `/name`, a path token needs `@` after a space
@@ -128,7 +130,9 @@ export function PlainComposer(props: ComposerAdapterProps) {
           // after the path props: they set aria-controls even when closed, so the open slash menu must win
           {...(readOnly ? {} : slash.field)}
           onChange={readOnly ? undefined : (event) => { edit(event.target.value); paths.sync(event.target); }}
-          onSelect={readOnly ? undefined : (event) => paths.sync(event.currentTarget)}
+          // caret moves by key or pointer, not onSelect: a focus from code fires that too, and must not open a list
+          onKeyUp={readOnly ? undefined : (event) => paths.sync(event.currentTarget)}
+          onMouseUp={readOnly ? undefined : (event) => paths.sync(event.currentTarget)}
           onBlur={paths.close}
           onKeyDown={readOnly ? undefined : onKeyDown}
         />

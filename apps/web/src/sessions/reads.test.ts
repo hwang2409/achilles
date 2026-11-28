@@ -155,3 +155,15 @@ test("an older zeta has no attention place", async () => {
   const [a] = (await reader.catalog(signal())).items;
   expect(await reader.attention?.(a!, signal()).then(() => "listed", readError)).toBe("the attention list needs a newer zeta");
 });
+
+test("a resident in-use row is not owned elsewhere", async () => {
+  const { reader } = serve((method) => method === "list_sessions" ? { sessions: [
+    { ...row("grace"), in_use: true, resident: true }, { ...row("other"), in_use: true, resident: false },
+    { ...row("old"), in_use: true }, { ...row("bad"), in_use: true, resident: "yes" },
+  ], next_offset: null } : method === "status" ? { session: null } : { items: [], next_cursor: null });
+  const reply = await reader.catalog(signal());
+  expect(reply.items.map(({ id, inUse, resident }) => [id, inUse, resident])).toEqual([
+    ["grace", true, true], ["other", true, false], ["old", true, false],
+  ]);
+  expect(reply.omitted).toBe(1);
+});
