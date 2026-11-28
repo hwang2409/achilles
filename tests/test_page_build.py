@@ -137,13 +137,44 @@ def test_build_allows_only_registry_dependencies(monkeypatch, tmp_path: Path) ->
     ]
 
     allowed = ["1.2.3", "^1.2.0", "~1.2", ">=1 <2 || 3.x", "*", "latest", "1.0.0-beta.1"]
-    allowed += ["npm:left-pad@^1.3.0", "npm:@scope/pkg", "npm:@scope/pkg@2"]
+    allowed += ["npm:left-pad@^1.3.0", "npm:@scope/pkg", "npm:@scope/pkg@2", "npm:JSONStream@1"]
     for spec in allowed:
         before = len(calls)
         # the fake install does not resolve "dep", so the build fails after the install ran
         with pytest.raises(PageBuildError, match="invalid result"):
             build_page(tmp_path, "home", f"export default {before}", {"dep": spec})
         assert len(calls) == before + 1, f"{spec} must reach the install"
+
+
+def test_build_allows_only_registry_dependency_names(monkeypatch, tmp_path: Path) -> None:
+    calls, _ = _fake_containers(monkeypatch, _build_outputs())
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+    # bun joins a name onto the registry url, where "\\" acts as "//" and picks another host
+    rejected = [
+        "\\\\example.invalid\\probe",
+        "\\\\registry.yarnpkg.com\\left-pad",
+        "a\\b",
+        "//example.invalid/x",
+        "../secret",
+        "@scope/../../x",
+        "http://127.0.0.1:9/x",
+        "%2e%2e/x",
+        "a b",
+    ]
+    diagnostics = []
+    for name in rejected:
+        with pytest.raises(PageBuildError) as error:
+            build_page(tmp_path, "home", "export default 1", {name: "1.3.0"})
+        assert calls == [], f"{name!r} must not reach the networked install"
+        assert error.value.code == "compile_error"
+        diagnostics.append(error.value.diagnostics)
+    assert diagnostics == [f"package.json:1:1: invalid dependency name: {n}" for n in rejected]
+
+    for name in ["left-pad", "@scope/name", "JSONStream", "lodash.merge", "@types/react-dom"]:
+        before = len(calls)
+        with pytest.raises(PageBuildError, match="invalid result"):
+            build_page(tmp_path, "home", f"export default {before}", {name: "1.3.0"})
+        assert len(calls) == before + 1, f"{name} must reach the install"
 
 
 def test_build_requires_container_isolation(monkeypatch, tmp_path: Path) -> None:
@@ -190,11 +221,12 @@ def test_build_containers_are_locked_down(monkeypatch, tmp_path: Path) -> None:
             "--pids-limit=256",
             "--memory=1g",
             "--memory-swap=1g",
-            "--cpus=2",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges",
         ):
             assert flag in options, f"{flag} missing from {options}"
+        # docker exits 125 when --cpus exceeds the host cpu count, which fails every build
+        assert not [o for o in options if o.startswith("--cpus")], f"--cpus in {options}"
 
 
 def test_each_build_installs_with_its_own_package_cache(monkeypatch, tmp_path: Path) -> None:
