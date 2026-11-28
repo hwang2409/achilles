@@ -34,7 +34,7 @@ function mount(completePaths?: CompletePaths) {
   const type = (value: string) => act(() => { fireEvent.change(field, { target: { value } }); });
   const key = (name: string, init: KeyboardEventInit = {}) => act(() => { fireEvent.keyDown(field, { key: name, ...init }); });
   const options = () => [...result.container.querySelectorAll('[role="option"]')].map((option) => `${option.getAttribute("aria-selected") === "true" ? ">" : ""}${option.textContent}`);
-  return { field, type, key, options, submitted, switchChat, unmount: result.unmount, container: result.container, listbox: () => result.getByRole("listbox", { name: "path completions" }) };
+  return { field, type, key, options, submitted, switchChat, unmount: result.unmount, listbox: () => result.getByRole("listbox", { name: "path completions" }) };
 }
 
 test("the token rule matches zeta's: an @ at a word start, quoted or bare, up to the cursor", () => {
@@ -172,21 +172,28 @@ test("a quoted path inserts after the quote and keeps the text after the caret",
   expect(composer.submitted).toEqual([]);
 });
 
-test("an unmount or a chat switch inside the pause asks nothing and shows no list", async () => {
+const asking = () => {
   const asked: string[] = [];
   const complete: CompletePaths = async (text) => { asked.push(text); return entries(entry("src/", -1)); };
-  const switched = mount(complete);
-  await switched.type("@s");
+  return { asked, complete };
+};
+
+test("a chat switch inside the pause asks nothing and shows no list", async () => {
+  const { asked, complete } = asking();
+  const composer = mount(complete);
+  await composer.type("@s");
   // the app binds a new completer to each chat
-  await switched.switchChat((text, signal) => complete(text, signal));
+  await composer.switchChat((text, signal) => complete(text, signal));
   await settle();
   expect(asked).toEqual([]);
-  expect(switched.options()).toEqual([]);
-  cleanup();
-  const unmounted = mount(complete);
-  await unmounted.type("@s");
-  unmounted.unmount();
+  expect(composer.options()).toEqual([]);
+});
+
+test("an unmount inside the pause asks nothing", async () => {
+  const { asked, complete } = asking();
+  const composer = mount(complete);
+  await composer.type("@s");
+  composer.unmount();
   await settle();
   expect(asked).toEqual([]);
-  expect(unmounted.container.querySelector('[role="option"]')).toBeNull();
 });
