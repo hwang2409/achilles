@@ -1211,6 +1211,19 @@ test.each([["allow", "ask"], ["ask", "allow"]] as const)("an observer shows the 
   });
 });
 
+// zeta answers an observer's session_settings only for a chat it has open: for any other chat the model and mode are
+// unknown, so the composer shows neither (zeta's state_settings default would be some other chat's settings)
+test("an observer on a chat zeta does not have open shows no model and no auto-approve state", async () => {
+  const notOpen = { error: { code: -32003, message: "no view of that session" } };
+  await withApp("observer", { attached: true, page: { approval_mode: "allow" }, rpc: { session_settings: () => notOpen, state_settings: () => ({ result: { model: "default-model", provider: null, approval_mode: "allow", max_depth: 1 } }) } }, async (app, _writes, requests) => {
+    await waitFor(() => expect(requests).toContain("session_settings"));
+    await act(async () => {});
+    expect(app.container.querySelector('[data-part="composer-modes"]'), "the observer's composer bar did not render").not.toBeNull();
+    expect(app.container.querySelector('[data-part="composer-model"]')?.textContent ?? null).toBeNull();
+    expect(app.container.querySelector(tag("composer.auto-approve"))?.getAttribute("aria-checked") ?? null).toBeNull();
+  });
+});
+
 test("a create mode failure that cannot be retried shows once on a docked page", async () => {
   const expired = { error: { code: -32005, message: "refresh failed", data: { reason: "MCP HTTP 404: Session not found" } } };
   await withApp("controller", { ...docked, rpc: { mcp_refresh_tools: () => expired },
