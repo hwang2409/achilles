@@ -25,6 +25,7 @@ import { createLibraryWriter, writeAccess, type LibraryWriter } from "../library
 import type { CreateDraft, EditDraft } from "../library/LibraryEditor";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { useAgentNavAdapter } from "./AgentNavAdapter";
+import { subscribeRowWrites } from "../zeta/rowState";
 import { ModuleFrame, ModuleState } from "./ModuleState";
 import { chatsRoute, createRoute, matchSurfaceRoute, newChatIntent, surfaceHref, type SurfaceRoute } from "./routes";
 
@@ -150,6 +151,10 @@ function BuildShell({ client, children, ...props }: BuildShellProps & { client: 
 
 function CatalogShell({ renderShell, route, connectionStatus, banner, children, sessions }: { renderShell: RenderShell; route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode; sessions?: Pick<React.ComponentProps<typeof SessionsModule>, "client" | "connecting" | "retry" | "continueSession"> }) {
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
+  // a chat write in another tab of this browser loads the list again, as on a chat page, so this tab's notifications follow it
+  const reload = useRef(nav.catalog.reload);
+  reload.current = nav.catalog.reload;
+  useEffect(() => subscribeRowWrites(() => reload.current()), []);
   const newChat = () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent);
   return renderShell({ current: route, nav, banner, connectionStatus,
     newChat: { available: connectionStatus.connected, run: newChat },

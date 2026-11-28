@@ -173,6 +173,21 @@ const setting = (id: WriteSurfaceId, key: keyof ReturnType<typeof getSettings>, 
   }
   expect(writes).toEqual([]);
 } });
+// the browser's notification permission, answered "granted" on the first ask; the tab leader lock is never granted
+const withNotifications = (row: Row): Row => ({ ...row, check: async (...args) => {
+  const asks: string[] = [];
+  class FakeNotification { static permission: NotificationPermission = "default"; static async requestPermission() { asks.push("ask"); FakeNotification.permission = "granted"; return FakeNotification.permission; } }
+  const hadLocks = Boolean(navigator.locks);
+  Object.assign(globalThis, { Notification: FakeNotification });
+  if (!hadLocks) Object.defineProperty(navigator, "locks", { configurable: true, value: { request: () => new Promise(() => {}) } });
+  try {
+    await row.check(...args);
+    expect(asks).toEqual(["ask"]);
+  } finally {
+    Reflect.deleteProperty(globalThis, "Notification");
+    if (!hadLocks) Reflect.deleteProperty(navigator, "locks");
+  }
+} });
 const change = (element: HTMLElement, value: string) => act(async () => {
   fireEvent.change(element, { target: { value } });
   fireEvent.input(element, { target: { value } });
@@ -794,6 +809,7 @@ const rows: Record<WriteSurfaceId, Row> = {
   "settings.size": setting("settings.size", "size", ' button[aria-pressed="false"]'),
   "settings.density": setting("settings.density", "density", ' button[aria-pressed="false"]'),
   "settings.vim": setting("settings.vim", "vim"),
+  "settings.notify": withNotifications(setting("settings.notify", "notify")),
   "settings.auto-approve": setting("settings.auto-approve", "autoApproveDefault", "", true),
   "settings.reset": setting("settings.reset", "size", "", true),
   "shell.new-chat": button(tag("shell.new-chat"), "new_session"),

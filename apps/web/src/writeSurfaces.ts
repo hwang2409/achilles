@@ -50,6 +50,7 @@ export const WRITE_SURFACE = {
   settingsSize: "settings.size",
   settingsDensity: "settings.density",
   settingsVim: "settings.vim",
+  settingsNotify: "settings.notify",
   settingsAutoApprove: "settings.auto-approve",
   settingsReset: "settings.reset",
   settingsTelemetry: "settings.telemetry",
@@ -75,7 +76,7 @@ export const WRITE_SURFACES: readonly WriteSurfaceMetadata[] = [
   ["mcpAuthStart", "websocket", "visible"], ["mcpAuthCancel", "websocket", "visible"], ["mcpAuthLogout", "websocket", "visible"],
   ["mcpAdd", "websocket", "visible"], ["mcpEnabled", "websocket", "visible"], ["mcpTrusted", "websocket", "visible"], ["mcpRemove", "websocket", "visible"], ["mcpTest", "websocket", "visible"],
   ["pageChatNew", "http-and-websocket", "visible"], ["composerAutoApprove", "websocket", "visible"], ["composerCreateMode", "http-and-websocket", "visible"],
-  ["settingsTheme", "storage", "visible", "browser-only"], ["settingsUiFont", "storage", "visible", "browser-only"], ["settingsCodeFont", "storage", "visible", "browser-only"], ["settingsSize", "storage", "visible", "browser-only"], ["settingsDensity", "storage", "visible", "browser-only"], ["settingsVim", "storage", "visible", "browser-only"], ["settingsAutoApprove", "storage-and-shared-default", "visible"], ["settingsReset", "storage-and-shared-default", "visible"], ["settingsTelemetry", "websocket", "visible"],
+  ["settingsTheme", "storage", "visible", "browser-only"], ["settingsUiFont", "storage", "visible", "browser-only"], ["settingsCodeFont", "storage", "visible", "browser-only"], ["settingsSize", "storage", "visible", "browser-only"], ["settingsDensity", "storage", "visible", "browser-only"], ["settingsVim", "storage", "visible", "browser-only"], ["settingsNotify", "storage", "visible", "browser-only"], ["settingsAutoApprove", "storage-and-shared-default", "visible"], ["settingsReset", "storage-and-shared-default", "visible"], ["settingsTelemetry", "websocket", "visible"],
   ["passiveLastState", "persistence", "passive"], ["passiveFirstMessage", "persistence", "passive"], ["passiveTitle", "persistence", "passive"], ["passiveAttachment", "persistence", "passive"], ["passiveRepair", "persistence", "passive"],
 ].map(([key, channel, visibility, observer]) => ({ id: WRITE_SURFACE[key as keyof typeof WRITE_SURFACE], channel: channel as WriteSurfaceMetadata["channel"], visibility: visibility as WriteSurfaceMetadata["visibility"], observer: observer as WriteSurfaceMetadata["observer"] }));
 

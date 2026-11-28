@@ -22,6 +22,11 @@ describe("parseSettings", () => {
     expect(parseSettings(null)).toMatchObject({ theme: "auto", uiFont: "geist", codeFont: "system-mono", size: 15 });
   });
 
+  test("notifications are off by default and keep a stored choice", () => {
+    expect(parseSettings(null).notify).toBe(false);
+    expect(parseSettings(JSON.stringify({ notify: true })).notify).toBe(true);
+  });
+
   test("replaces old named palettes but still applies v1 font and size choices", () => {
     const palettes = ["github-light", "github-dark", "gruvbox-light", "gruvbox-dark", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "one-dark"];
     for (const theme of palettes) expect(parseSettings(JSON.stringify({ theme })).theme).toBe("auto");
@@ -54,6 +59,7 @@ describe("parseSettings", () => {
       size: 99,
       density: "compact",
       vim: "yes",
+      notify: "yes",
       autoApproveDefault: false,
       unknown: "ignored",
     }))).toEqual({

@@ -12,6 +12,7 @@ import {
   type UiFont,
 } from "./settings";
 import { wrapTab } from "./keyboard";
+import { allowNotifications, notificationsSupported } from "./notify";
 import "./surface/confirmation.css";
 import { WRITE_SURFACE } from "./writeSurfaces";
 import "./settings-dialog.css";
@@ -105,6 +106,24 @@ function AutoApprove({ open, on, canWrite, serverForcesAsk }: { open: boolean; o
   </div>;
 }
 
+// turning it on asks the browser once (only while it has not answered); a refusal leaves it off and says where to allow it.
+// the switch stays enabled while the browser asks, so focus stays on it
+function Notifications({ on }: { on: boolean }) {
+  const [asked, setAsked] = useState(false);
+  const supported = notificationsSupported();
+  const blocked = supported && Notification.permission === "denied";
+  const explanation = !supported ? "this browser cannot show notifications."
+    : blocked ? "the browser blocks notifications for this site. allow them in its site settings, then turn this on."
+    : on ? "on. a hidden tab tells you when a chat needs you or finishes." : "off. turning it on asks the browser for permission.";
+  const change = async (next: boolean) => {
+    if (!next) { updateSettings({ notify: false }); return; }
+    if (asked) return;
+    setAsked(true);
+    try { if (await allowNotifications()) updateSettings({ notify: true }); } finally { setAsked(false); }
+  };
+  return <div className="setting-explanation"><Toggle label="notifications" checked={on && !blocked} disabled={!supported} surface={WRITE_SURFACE.settingsNotify} onChange={(next) => void change(next)} /><span>{explanation}</span></div>;
+}
+
 export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrite }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canWrite: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const settings = useSettings();
@@ -131,6 +150,7 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrit
         <Row title="Fonts" description="Code uses a monospace font."><div className="font-options"><span>UI</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} surface={WRITE_SURFACE.settingsUiFont} onChange={(uiFont) => updateSettings({ uiFont })} /><span>Code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} surface={WRITE_SURFACE.settingsCodeFont} onChange={(codeFont) => updateSettings({ codeFont })} /></div></Row>
         <Row title="Size" description="App text and composers."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} surface={WRITE_SURFACE.settingsSize} onChange={(size) => updateSettings({ size })} /><span>Density</span><Segments label="density" value={settings.density} choices={densities} surface={WRITE_SURFACE.settingsDensity} onChange={(density) => updateSettings({ density })} /></div></Row>
         <Row title="Vim mode" description="Desktop only, in the composer."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} surface={WRITE_SURFACE.settingsVim} onChange={(vim) => updateSettings({ vim })} /><span>Starts in INSERT. Esc goes to NORMAL; Esc in NORMAL leaves the composer.</span></div></Row>
+        <Row title="Notifications" description="When this tab is hidden."><Notifications on={settings.notify} /></Row>
       </div>
       <section aria-label="new chat defaults and reset" aria-describedby={!canWrite ? "settings-lock-note" : undefined} className="settings-session">
         {!canWrite && <p id="settings-lock-note">only a tab that controls zeta can change auto-approve or reset.</p>}

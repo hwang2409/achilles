@@ -16,6 +16,7 @@ export type Settings = {
   size: 13 | 14 | 15 | 16;
   density: Density;
   vim: boolean;
+  notify: boolean;
   autoApproveDefault: boolean;
 };
 
@@ -27,6 +28,7 @@ export const defaultSettings: Settings = {
   size: 15,
   density: "comfortable",
   vim: false,
+  notify: false,
   autoApproveDefault: true,
 };
 
@@ -52,6 +54,7 @@ export function parseSettings(value: string | null): Settings {
     size: includes(sizes, input.size) ? input.size : defaultSettings.size,
     density: includes(densities, input.density) ? input.density : defaultSettings.density,
     vim: typeof input.vim === "boolean" ? input.vim : defaultSettings.vim,
+    notify: typeof input.notify === "boolean" ? input.notify : defaultSettings.notify,
     autoApproveDefault: typeof input.autoApproveDefault === "boolean" ? input.autoApproveDefault : defaultSettings.autoApproveDefault,
   };
 }
