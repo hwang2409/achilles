@@ -1481,3 +1481,31 @@ describe("composer focus through holds, swaps and stops", () => {
     });
   }, 20000);
 });
+
+test("a slash command refused during a turn gives its exact text back, but never over newer typing", async () => {
+  const replies: ((value: object) => void)[] = [];
+  const rpc = {
+    hello: (params: Record<string, unknown>) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: ["slash_list", "slash_run"] } } }),
+    slash_list: () => ({ result: { commands: [] } }),
+    slash_run: () => new Promise<object>((resolve) => replies.push(resolve)),
+  };
+  const busy = { error: { code: -32010, message: "a turn is already running" } };
+  await withApp("controller", { attached: true, rpc }, async (app, writes) => {
+    const field = () => select(app, '[data-part="composer"] textarea') as HTMLTextAreaElement;
+    const typed = "/review look at the parser,\n  then the tests";
+    await change(field(), typed);
+    await keydown(field(), "Enter");
+    expect(field().value).toBe("");
+    await act(async () => { replies.shift()!(busy); });
+    await waitFor(() => expect(field().value).toBe(typed));
+    expect(app.getByText("a turn is already running")).toBeTruthy();
+
+    await keydown(field(), "Enter");
+    expect(field().value).toBe("");
+    await change(field(), "newer text");
+    await act(async () => { replies.shift()!(busy); });
+    expect(field().value).toBe("newer text");
+    expect(writes.filter((write) => write === "slash_run")).toHaveLength(2);
+    expect(writes).not.toContain("send");
+  });
+});
