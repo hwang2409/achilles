@@ -80,7 +80,7 @@ summary[data-part="tool-header"]:focus-visible { outline-offset: 2px; }
 :is([data-part="tool-status"], [data-part="text-viewer-status"], [data-part="delivery-note"])::before {
   width: var(--g1-status-mark);
   height: var(--g1-status-mark);
-  border-radius: 50%;
+  border-radius: var(--g1-radius-dot);
 }
 [data-part="approval-actions"] button {
   min-height: var(--g1-control-height);
@@ -130,7 +130,7 @@ summary[data-part="reasoning-header"]:hover { background: transparent; color: va
 button[data-part="sub-agent"]:hover { background: var(--g1-hover); }
 [data-part="sub-agent-head"] { flex: 1; align-items: center; gap: 8px; }
 [data-part="sub-agent-status"] { align-items: center; color: var(--g1-muted); }
-[data-part="sub-agent-status"]::before { width: var(--g1-status-mark); height: var(--g1-status-mark); border-radius: 50%; transform: none; }
+[data-part="sub-agent-status"]::before { width: var(--g1-status-mark); height: var(--g1-status-mark); border-radius: var(--g1-radius-dot); transform: none; }
 [data-part="sub-agent-name"] { color: var(--g1-fg); font-weight: 600; }
 [data-part="sub-agent-meta"] { color: var(--g1-muted); }
 /* the chevron is drawn, not a glyph, so it sits on the card's vertical center */
