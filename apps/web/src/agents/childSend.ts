@@ -58,7 +58,8 @@ export function createChildSendOwner({ withControl }: Pick<Connection, "withCont
           return "refused" in response ? { message: response.refused } : response.value;
         } catch (error) {
           const code = error instanceof ZetaError ? undefined : rpcCode(error);
-          if (code === -32005 || code === -32003) return { message: "the child is no longer available for follow-up. refresh the run before trying again.", refreshAfter: Date.now() };
+          if (code === -32005) return { message: "this agent cannot take a message now.", refreshAfter: Date.now() };
+          if (code === -32003) return { message: "the child is no longer available for follow-up. refresh the run before trying again.", refreshAfter: Date.now() };
           return !dispatched || typeof code === "number" ? refused : unknown;
         }
       });

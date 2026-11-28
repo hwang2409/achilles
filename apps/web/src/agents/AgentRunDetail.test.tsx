@@ -73,21 +73,85 @@ test("a run that never ran a turn shows no elapsed time; one that ran shows it",
   expect(fields({ ...waiting, elapsedSeconds: 0.4 }).labels).not.toContain("elapsed at last refresh");
   expect(fields({ ...waiting, elapsedSeconds: 3.2 }).value).toBe("3s");
   expect(fields({ ...waiting, turnsUsed: 1, elapsedSeconds: 5 }).value).toBe("5s");
+  // a finished one-turn child under 1 s did work: "<1s", not "0s"
+  expect(fields({ ...waiting, status: "completed", retry: undefined, finishedAt: now + 400, turnsUsed: 1, elapsedSeconds: 0.4 } as unknown as typeof waiting).value).toBe("<1s");
 });
 
-test("child history shows loading only while the first read runs; an empty transcript says no activity yet", async () => {
-  let answer!: (value: unknown) => void;
-  const pending = new Promise<unknown>((resolve) => { answer = resolve; });
-  const client = { features: ["child_runs", "child_run_history"], request: (method: string) =>
-    method === "status" ? Promise.resolve({ session: { session_id: "a" } }) : pending } as unknown as ZetaClient;
-  const ui = render(<RunHistory client={client} row={waiting} />);
+// a zeta whose stored child transcript reads as the given pages in turn, the last one repeating (synthetic)
+const historyClient = (pages: unknown[][], reads: number[] = []) => ({ features: ["child_runs", "child_run_history"], request: (method: string) => {
+  if (method === "status") return Promise.resolve({ session: { session_id: "a" } });
+  reads.push(reads.length);
+  return Promise.resolve({ messages: pages[Math.min(reads.length - 1, pages.length - 1)], next_before: null, history_validator: { end: reads.length - 1, entry_id: null } });
+} } as unknown as ZetaClient);
+const settle = async () => { for (let tick = 0; tick < 8; tick++) await act(async () => { await Promise.resolve(); }); };
+const live = { ...waiting, status: "running" as const, retry: undefined, currentStep: "turn 1: admitting request" };
+
+test("an empty first read of a running run stays loading and rereads on the next row change", async () => {
+  // real zeta stores the task at spawn; a read in the first ~100 ms sees nothing yet (synthetic task text)
+  const reads: number[] = [];
+  const client = historyClient([[], [{ role: "user", content: "synthetic task" }]], reads);
+  const ui = render(<RunHistory client={client} row={live} />);
   try {
-    await act(async () => {});
+    await settle();
+    expect(reads).toHaveLength(1);
     expect(ui.container.textContent).toContain("reading child history");
-    await act(async () => { answer({ messages: [], next_before: null, history_validator: { end: 0, entry_id: null } }); });
-    for (let tick = 0; tick < 5; tick++) await act(async () => { await Promise.resolve(); });
+    expect(ui.container.textContent).not.toContain("run changed");
+    ui.rerender(<RunHistory client={client} row={{ ...live, currentStep: "turn 1: thinking" }} />);
+    await settle();
+    expect(reads).toHaveLength(2);
+    expect(ui.container.textContent).not.toContain("reading child history");
+    expect(ui.container.textContent).not.toContain("run changed");
+  } finally { ui.unmount(); }
+});
+
+test("a running run that is still empty after one reread says no activity yet", async () => {
+  const client = historyClient([[]]);
+  const ui = render(<RunHistory client={client} row={live} />);
+  try {
+    await settle();
+    ui.rerender(<RunHistory client={client} row={{ ...live, currentStep: "turn 1: thinking" }} />);
+    await settle();
     expect(ui.container.textContent).not.toContain("reading child history");
     expect(ui.container.textContent).toContain("no activity yet");
+  } finally { ui.unmount(); }
+});
+
+test("a running run whose history read fails after open shows the warning, not the skeleton", async () => {
+  let reads = 0;
+  const client = { features: ["child_runs", "child_run_history"], request: (method: string) => {
+    if (method === "status") return Promise.resolve({ session: { session_id: "a" } });
+    // the first page opens the read with nothing and an older page to fetch; that fetch fails
+    return ++reads === 1 ? Promise.resolve({ messages: [], next_before: 5, history_validator: { end: 5, entry_id: null } }) : Promise.reject(new Error("synthetic"));
+  } } as unknown as ZetaClient;
+  const ui = render(<RunHistory client={client} row={live} />);
+  try {
+    await settle();
+    await act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+    expect(reads).toBe(2);
+    expect(ui.container.textContent).toContain("could not read child history from zeta.");
+    expect(ui.container.textContent).not.toContain("reading child history");
+  } finally { ui.unmount(); }
+});
+
+// the original bug: a paused child with 0 turns and an empty transcript kept the skeleton forever
+test.each([
+  ["suspended", "no activity yet"], ["idle", "no activity yet"], ["waiting", "no activity yet"], ["unknown", "no activity yet"],
+  ["completed", "no stored messages"], ["canceled", "no stored messages"],
+])("a %s run with an empty transcript shows its final text, never the skeleton", async (status: string, words: string) => {
+  const reads: number[] = [];
+  const client = historyClient([[]], reads);
+  const row = { ...waiting, status, retry: undefined } as unknown as typeof waiting;
+  const ui = render(<RunHistory client={client} row={row} />);
+  try {
+    await settle();
+    expect(ui.container.textContent).not.toContain("reading child history");
+    expect(ui.container.textContent).toContain(words);
+    // and a row change rereads to the same final text
+    ui.rerender(<RunHistory client={client} row={{ ...row, currentStep: "later" }} />);
+    await settle();
+    expect(reads).toHaveLength(2);
+    expect(ui.container.textContent).not.toContain("reading child history");
+    expect(ui.container.textContent).toContain(words);
   } finally { ui.unmount(); }
 });
 

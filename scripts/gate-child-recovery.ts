@@ -74,7 +74,8 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
     // zeta's elapsed is wall time since start; a child with no turn yet never shows "0s", and its history read ends
     if (/elapsed at last refresh\s+0s/.test(await agents.locator(".agents-run-head").innerText())) throw new Error("a child that never ran a turn shows 0s elapsed");
     await agents.locator('.agents-activity [data-state="loading"]').waitFor({ state: "detached" });
-    if (await agents.locator(".agents-composer").count()) throw new Error("a suspended child offers the message box");
+    // zeta f5efa62d: child_run_list says a provider-suspended child this server owns accepts a send, which wakes it
+    await agents.locator(".agents-composer", { hasText: "sending wakes it now." }).waitFor();
     if (await agents.locator('[data-write-surface="agents.cancel"]').count() !== 1) throw new Error("a suspended child has no cancel");
     await capture(main, "child-suspended-1440");
     await main.setViewportSize({ width: 390, height: 844 });
@@ -103,10 +104,28 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
       await Bun.sleep(350);
       await capture(place, "agents-suspended-390");
     } finally { await place.close(); }
+    // a message wakes the child at once: send it with the provider back, well before zeta's next probe
+    const dialog = await openAgents();
+    const pausedRow = dialog.locator(".chat-agents-runs .agents-row", { hasText: task });
+    await pausedRow.click();
+    const box = dialog.getByRole("textbox", { name: "message run" });
+    await box.waitFor();
+    let probeAt = 0;
+    await waitFor(async () => {
+      probeAt = Date.parse(await pausedRow.locator("time").getAttribute("dateTime") ?? "");
+      if (probeAt - Date.now() >= 4000) return true;
+      const refresh = dialog.getByRole("button", { name: "refresh", exact: true });
+      if (await refresh.isEnabled()) await refresh.click();
+      return false;
+    }, "next probe at least 4 s away");
     await writeFile(online, "online\n");
-    // zeta probes at +5 s, then +10 s: the next probe after the flag lands within about 15 s
-    await main.locator(resumed).waitFor({ timeout: 25_000 });
-    const again = await openAgents();
+    await box.fill("synthetic wake-up message");
+    await dialog.locator('[data-write-surface="agents.send"]').click();
+    await dialog.getByText("message accepted by zeta.").waitFor();
+    await main.locator(resumed).waitFor({ state: "attached", timeout: Math.max(1000, probeAt - Date.now()) });
+    if (Date.now() >= probeAt) throw new Error("the child recovered only at zeta's probe time, not from the message");
+    console.log(`child recovery: a message to the suspended child woke it ${probeAt - Date.now()} ms before zeta's next probe`);
+    const again = dialog;
     const done = again.locator(".chat-agents-runs .agents-row", { hasText: task });
     // the dialog read the list when it opened; it also rereads on the resumed notice
     await waitFor(async () => await done.locator(".agents-state").getAttribute("data-status") !== "suspended", "recovered child leaves suspended");

@@ -40,6 +40,8 @@ export type AgentRun = {
   elapsedSeconds?: number;
   background?: boolean;
   acceptsFollowUps?: boolean;
+  /** zeta's own answer to "would child_run_send take a message now" (child_run_list rows only; absent from older zeta) */
+  acceptsSend?: boolean;
   /** reply and waiting come from the chat's live transcript row (withLiveRow) */
   waiting?: "needs approval" | "needs input";
   reply?: string;
@@ -81,7 +83,8 @@ function rich(v: unknown): AgentRun | undefined {
   const retry = retryOf(v);
   return { ...id, agentType: v.agent_type || undefined, status: catalogStatuses.find((s) => s === v.status) ?? "unknown",
     description: v.description, acceptsFollowUps: v.accepts_follow_ups, currentStep: v.current_step, turnsUsed: v.turns_used, toolCount: v.tool_count,
-    elapsedSeconds: v.elapsed_seconds, startedAt: Date.parse(v.started_at), finishedAt: v.finished_at === null ? undefined : Date.parse(v.finished_at), ...(retry && { retry }) };
+    elapsedSeconds: v.elapsed_seconds, startedAt: Date.parse(v.started_at), finishedAt: v.finished_at === null ? undefined : Date.parse(v.finished_at), ...(retry && { retry }),
+    ...(typeof v.accepts_send === "boolean" && { acceptsSend: v.accepts_send }) };
 }
 
 function stored(v: unknown): AgentRun | undefined {
@@ -134,6 +137,31 @@ export async function readAttachedRoot(client: ZetaClient, signal: AbortSignal) 
   return value.session.session_id;
 }
 
+// one child_run_list page; fulcrum's row parser drops zeta's retry and accepts_send fields, so they come from the raw row
+async function attachedPage(client: ZetaClient, attached: string, offset: number, signal: AbortSignal) {
+  let reply: unknown;
+  const reading = { features: client.features, request: (...call: Parameters<ZetaClient["request"]>) => client.request(...call).then((value) => reply = value) };
+  const result = await listChildRuns(reading, attached, { limit: 100, offset, signal, timeoutMs: 12000 });
+  if (result.kind !== "page") throw bad();
+  const raw = new Map(object(reply) && Array.isArray(reply.runs) ? reply.runs.flatMap((row) => object(row) && text(row.run_id) ? [[row.run_id, row] as const] : []) : []);
+  const rows = result.runs.flatMap((value) => {
+    const row = attachedRow(value, raw.get(value.runId));
+    return row?.sessionId === attached ? [row] : [];
+  });
+  return { rows, next: result.nextOffset, omitted: result.invalidRows + result.runs.length - rows.length };
+}
+
+// catalog rows lack accepts_send; child_run_list rows of the attached session carry it (zeta f5efa62d)
+async function acceptsSendOf(client: ZetaClient, sessionId: string, signal: AbortSignal) {
+  const accepts = new Map<string, boolean>();
+  for (let offset = 0; ;) {
+    const { rows, next } = await attachedPage(client, sessionId, offset, signal);
+    for (const row of rows) if (row.acceptsSend !== undefined) accepts.set(row.runId, row.acceptsSend);
+    if (next === undefined || next <= offset) return accepts;
+    offset = next;
+  }
+}
+
 /**
  * Owns the selected read source, report and continuation generation, and each run row: the report's row with the
  * run's live row (child_run_events) from this client's session store laid over it. Refresh retains the last valid report.
@@ -148,6 +176,8 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
   let recheck: ReturnType<typeof setTimeout> | undefined;
   const rechecked = new Set<number>();
   const denied = new Set<Source>();
+  // the report's attached session and its accepts_send answers, read once per report and reused by its continuation pages
+  let side: { sessionId?: string | null; accepts?: Map<string, boolean> } = {};
   const listeners = new Set<() => void>();
   // per run: when its live row last changed, the stop for that watch, and whether its end was reread
   const liveAt = new Map<string, number>();
@@ -194,22 +224,28 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     signal.throwIfAborted();
     if (source === "attached") {
       if (!attached || root && root !== attached) return { rows: [], omitted: 0 };
-      let reply: unknown;
-      const reading = { features: client.features, request: (...call: Parameters<ZetaClient["request"]>) => client.request(...call).then((value) => reply = value) };
-      const result = await listChildRuns(reading, attached, { limit: 100, offset: typeof cursor === "number" ? cursor : 0, signal, timeoutMs: 12000 });
-      if (result.kind !== "page") throw bad();
-      const raw = new Map(object(reply) && Array.isArray(reply.runs) ? reply.runs.flatMap((row) => object(row) && text(row.run_id) ? [[row.run_id, row] as const] : []) : []);
-      const rows = result.runs.flatMap((value) => {
-        const row = attachedRow(value, raw.get(value.runId));
-        return row?.sessionId === attached ? [row] : [];
-      });
-      return { rows: status ? rows.filter((row) => row.status === status) : rows, next: result.nextOffset, omitted: result.invalidRows + result.runs.length - rows.length };
+      const { rows, next, omitted } = await attachedPage(client, attached, typeof cursor === "number" ? cursor : 0, signal);
+      return { rows: status ? rows.filter((row) => row.status === status) : rows, next, omitted };
     }
     const state = source === "catalog" ? catalogStatuses.find((s) => s === status) : stateStatuses.find((s) => statusesForState[s] === status);
     if (status && !state) return { rows: [], omitted: 0 };
     const params = source === "catalog" ? { limit: 100, ...(cursor === undefined ? {} : { cursor }), ...(root ? { root_session_id: root } : {}), ...(state ? { state } : {}) }
       : { limit: 100, cursor: cursor ?? null, ...(root ? { session_id: root } : {}), ...(state ? { status: state } : {}) };
-    return page(await client.request(capabilities[source][1], params, { signal, timeoutMs: 12000 }), source, root);
+    const result = page(await client.request(capabilities[source][1], params, { signal, timeoutMs: 12000 }), source, root);
+    // a live run takes a message only when zeta says so: ask child_run_list for the attached session's answer, once per report
+    if (cursor === undefined) side = {};
+    const live = result.rows.filter((row) => !isTerminal(row.status));
+    if (!live.length || !supportsFeature(client, "child_runs") || !advertised("child_run_list")) return result;
+    try {
+      if (side.sessionId === undefined) side.sessionId = await readAttachedRoot(client, signal);
+      const { sessionId } = side;
+      if (!sessionId || !live.some((row) => row.sessionId === sessionId)) return result;
+      const accepts = side.accepts ??= await acceptsSendOf(client, sessionId, signal);
+      return { ...result, rows: result.rows.map((row) => row.sessionId === sessionId && accepts.has(row.runId) ? { ...row, acceptsSend: accepts.get(row.runId) } : row) };
+    } catch {
+      signal.throwIfAborted();
+      return result; // without zeta's answer the row keeps the status rule (a suspended one gets no message box)
+    }
   };
   const first = async (filters: AgentFilters, signal: AbortSignal) => {
     let attached: string | null = null;

@@ -6,7 +6,8 @@ import { fromZetaEvent, type ZetaClient } from "@fulcrum/zeta";
 import { AgentsModule } from "./AgentsModule";
 import { ChatAgents } from "./ChatAgents";
 import { createAgentRunsReader } from "./reads";
-const { act, cleanup, render } = await import("@testing-library/react");
+import { createChildSendOwner } from "./childSend";
+const { act, cleanup, fireEvent, render } = await import("@testing-library/react");
 
 afterEach(() => { cleanup(); document.body.replaceChildren(); });
 
@@ -63,6 +64,77 @@ test("a suspended child says when zeta retries, counts down, offers cancel and n
     expect(ui.container.querySelector(".agents-composer")).toBeNull();
     expect(ui.container.querySelector(".agents-run-head")?.textContent).toContain("gives up at");
   } finally { ui.unmount(); time.mockRestore(); jest.useRealTimers(); }
+});
+
+// a provider-suspended child of this chat, read from the run catalog (synthetic); child_run_list carries accepts_send
+const paused = { ...running, accepts_follow_ups: false, status: "suspended", current_step: "suspended: provider unavailable, retrying", suspension_reason: "provider_unavailable",
+  retry_state: "retrying", retry_started_at: "2026-11-08T00:00:00+00:00", retry_deadline_at: "2026-11-08T01:00:00+00:00", next_retry_at: "2099-01-01T00:00:00+00:00" };
+function pausedChat(accepts: boolean | undefined, sent: (text: string, row: Record<string, unknown>) => unknown = () => ({ accepted: true, run_id: "a:1" }), base: Record<string, unknown> = paused) {
+  const reads: string[] = [];
+  const row: Record<string, unknown> = { ...base, ...(accepts === undefined ? {} : { accepts_send: accepts }) };
+  const client = { features: ["agent_run_catalog_v1", "child_runs", "child_recovery"], request: async (method: string, params: { text?: string }) => {
+    reads.push(method);
+    if (method === "status") return { session: { session_id: "a" } };
+    if (method === "child_run_list") return { runs: [row] };
+    if (method === "child_run_send") return sent(params.text!, row);
+    return { revision: "sample", data: { items: [base] } };
+  } } as unknown as ZetaClient;
+  const send = createChildSendOwner({ withControl: async (run) => ({ value: await run(client) }) },
+    async (zeta, key, text) => { await zeta.request("child_run_send", { session_id: key.sessionId, run_id: key.runId, text }); return { kind: "accepted", runId: key.runId }; });
+  const store = { subscribe: () => () => {}, subscribeOutline: () => () => {}, getItem: () => undefined } as never;
+  const ui = render(<ChatAgents client={client} store={store} sessionId="a" title="chat" controls={{} as never} send={send}
+    initialRun="a:1" opener={null} onClose={() => {}} readRuns={(zeta) => createAgentRunsReader(zeta, () => true)} />);
+  return { ui, reads };
+}
+const settle = async () => { for (let tick = 0; tick < 20; tick++) await act(() => new Promise((resolve) => setTimeout(resolve, 0))); };
+
+test.each([[true, true], [false, false], [undefined, false]])("a suspended child with accepts_send %p shows a message box: %p", async (accepts: boolean | undefined, shown: boolean) => {
+  const { ui } = pausedChat(accepts);
+  try {
+    await settle();
+    const composer = ui.container.querySelector(".agents-composer");
+    expect(!!composer).toBe(shown);
+    if (composer) expect(composer.textContent).toContain("sending wakes it now.");
+  } finally { ui.unmount(); }
+});
+
+test("a send refused with -32005 says not now, keeps the draft, and rereads the list once", async () => {
+  const { ui, reads } = pausedChat(true, () => { throw Object.assign(new Error("synthetic refusal"), { code: -32005 }); });
+  try {
+    await settle();
+    const box = ui.getByRole("textbox", { name: "message worker" }) as HTMLTextAreaElement;
+    await act(async () => { fireEvent.change(box, { target: { value: "synthetic follow-up" } }); });
+    const catalogReads = () => reads.filter((method) => method === "agent_run_catalog").length;
+    const before = catalogReads();
+    await act(async () => { (ui.getByRole("button", { name: "send to worker" }) as HTMLButtonElement).click(); });
+    await settle();
+    expect(ui.container.querySelector(".agents-composer [role=status]")?.textContent).toBe("this agent cannot take a message now.");
+    expect(ui.container.textContent).not.toContain("32005");
+    expect((ui.getByRole("textbox", { name: "message worker" }) as HTMLTextAreaElement).value).toBe("synthetic follow-up");
+    expect(catalogReads() - before).toBe(1);
+  } finally { ui.unmount(); }
+});
+
+test("a send refused with -32005 whose reread says accepts_send false keeps the reason and drops the box", async () => {
+  const { ui } = pausedChat(true, (_, row) => { row.accepts_send = false; throw Object.assign(new Error("synthetic refusal"), { code: -32005 }); });
+  try {
+    await settle();
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "message worker" }), { target: { value: "synthetic follow-up" } }); });
+    await act(async () => { (ui.getByRole("button", { name: "send to worker" }) as HTMLButtonElement).click(); });
+    await settle();
+    expect(ui.queryByRole("textbox", { name: "message worker" })).toBeNull();
+    expect(ui.container.querySelector(".agents-composer[role=status]")?.textContent).toBe("this agent cannot take a message now.");
+  } finally { ui.unmount(); }
+});
+
+// zeta's accepts_send outranks the status rule for a running row too: a foreground child refuses every message
+test.each([[false, true, false], [true, false, true]])("a running child with accepts_send %p (follow-ups %p) shows a message box: %p", async (accepts: boolean, followUps: boolean, shown: boolean) => {
+  const { ui, reads } = pausedChat(accepts, undefined, { ...running, accepts_follow_ups: followUps });
+  try {
+    await settle();
+    expect(!!ui.queryByRole("textbox", { name: "message worker" })).toBe(shown);
+    expect(reads.filter((method) => method === "child_run_list")).toHaveLength(1);
+  } finally { ui.unmount(); }
 });
 
 test("a resumed notice in this chat rereads the list once, so the row leaves suspended without a refresh", async () => {
