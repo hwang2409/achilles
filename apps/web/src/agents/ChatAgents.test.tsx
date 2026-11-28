@@ -9,7 +9,9 @@ import { createAgentRunsReader } from "./reads";
 import { createChildSendOwner } from "./childSend";
 const { act, cleanup, fireEvent, render } = await import("@testing-library/react");
 
-afterEach(() => { cleanup(); document.body.replaceChildren(); });
+// a timed-out test skips its finally: restore its clocks here, or every later file runs on fake timers
+const restore: Array<() => void> = [];
+afterEach(() => { cleanup(); document.body.replaceChildren(); restore.splice(0).forEach((undo) => undo()); });
 
 const running = { run_id: "a:1", session_id: "a", parent_run_id: null, status: "running", agent_type: "worker", description: "check sample", accepts_follow_ups: false, turns_used: 1, tool_count: 0, current_step: "thinking", started_at: "2026-01-02T00:00:00Z", finished_at: null, elapsed_seconds: 5 };
 
@@ -256,7 +258,8 @@ async function bothViews(runId: string, reads: Array<{ at: number; status?: stri
   const send = { subscribe: () => () => {}, snapshot: () => draft } as never;
   const settle = async () => { for (let tick = 0; tick < 20; tick++) await act(async () => { await Promise.resolve(); }); };
   const pass = async (ms: number) => { await act(async () => { mono += ms; jest.advanceTimersByTime(ms); }); await settle(); };
-  await pass(reads[0].at);
+  // the first read is at reads[0].at; nothing is on screen yet, so no timer needs to run
+  mono = reads[0].at;
   const chat = render(<ChatAgents client={client} store={null} sessionId="a" title="chat" controls={{} as never} send={send}
     initialRun={runId} opener={null} onClose={() => {}} readRuns={(zeta) => createAgentRunsReader(zeta, () => true)} />);
   await settle();
@@ -266,38 +269,32 @@ async function bothViews(runId: string, reads: Array<{ at: number; status?: stri
   const shown = () => [[...chat.container.querySelectorAll(".agents-run-head dl div")].find((row) => row.querySelector("dt")?.textContent === "elapsed")?.querySelector("dd")?.textContent,
     place.container.querySelector(".agents-catalog .agents-row .agents-elapsed")?.textContent];
   const refresh = async (at: number) => { await pass(at - mono); fireEvent.click(place.getByRole("button", { name: "refresh now" })); await settle(); };
-  const stop = () => { chat.unmount(); place.unmount(); time.mockRestore(); monotonic.mockRestore(); jest.useRealTimers(); };
-  return { shown, pass, refresh, stop, now: () => mono };
+  restore.push(() => { time.mockRestore(); monotonic.mockRestore(); jest.useRealTimers(); });
+  return { shown, pass, refresh };
 }
 
 test("a live run's elapsed counts on from zeta's number, not from started_at on a browser clock 120 s ahead", async () => {
   const views = await bothViews("a:skew", [{ at: 500, elapsed: 5 }, { at: 500, elapsed: 5 }]);
-  try {
-    expect(views.shown()).toEqual(["5s", "5s"]);
-    await views.pass(3000);
-    expect(views.shown()).toEqual(["8s", "8s"]);
-  } finally { views.stop(); }
+  expect(views.shown()).toEqual(["5s", "5s"]);
+  await views.pass(3000);
+  expect(views.shown()).toEqual(["8s", "8s"]);
 });
 
 test("two views that read the run at different times show the same second", async () => {
   // the place reads 3.6 s after the dialog; zeta's number reached it 0.8 s late, so a count from that read alone is behind
   const views = await bothViews("a:apart", [{ at: 500, elapsed: 0.5 }, { at: 4100, elapsed: 3.3 }]);
-  try {
-    await views.pass(900);
-    expect(views.shown()).toEqual(["5s", "5s"]);
-    await views.pass(10_000);
-    expect(views.shown()).toEqual(["15s", "15s"]);
-  } finally { views.stop(); }
+  await views.pass(900);
+  expect(views.shown()).toEqual(["5s", "5s"]);
+  await views.pass(10_000);
+  expect(views.shown()).toEqual(["15s", "15s"]);
 });
 
 test("a run a restarted zeta resumed shows zeta's banked elapsed, which leaves out the downtime", async () => {
   // started 10 min ago on zeta's clock; zeta banked 30 s, the rest was downtime. a later read with a lower number wins
   const views = await bothViews("a:banked", [{ at: 600_000, elapsed: 600, status: "suspended" }, { at: 600_000, elapsed: 600, status: "suspended" }, { at: 602_000, elapsed: 30 }]);
-  try {
-    expect(views.shown()).toEqual(["10m 0s", "10m 0s"]);
-    await views.refresh(602_000);
-    expect(views.shown()).toEqual(["30s", "30s"]);
-    await views.pass(4000);
-    expect(views.shown()).toEqual(["34s", "34s"]);
-  } finally { views.stop(); }
+  expect(views.shown()).toEqual(["10m 0s", "10m 0s"]);
+  await views.refresh(602_000);
+  expect(views.shown()).toEqual(["30s", "30s"]);
+  await views.pass(4000);
+  expect(views.shown()).toEqual(["34s", "34s"]);
 });
