@@ -3,25 +3,24 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { supportsFeature } from "../zeta/connection";
 import type { ChildSendOwner } from "./childSend";
-import { readAcceptsSend, readAttachedRoot, rowKey, type AgentRun } from "./reads";
+import { readAttachedRoot, rowKey, type AgentRun } from "./reads";
 
 export function ChildComposer({ client, row, owner, readOnly, reportedAt, refreshing, refresh }: {
   client: ZetaClient | null; row: AgentRun; owner: ChildSendOwner; readOnly?: string; reportedAt: number; refreshing: boolean; refresh(): void;
 }) {
   const { sessionId, runId, agentType } = row;
-  // zeta's accepts_send is the send rule; catalog rows lack it, so a suspended one asks child_run_list,
-  // and other rows from an older zeta fall back to status
-  const lookup = row.acceptsSend === undefined && row.status === "suspended";
+  // zeta's accepts_send is the send rule; rows from an older zeta fall back to status (a suspended one gets no box)
   const sendable = client && supportsFeature(client, "child_runs") && agentType && row.finishedAt === undefined &&
-    (row.acceptsSend ?? (lookup || row.acceptsFollowUps && (row.status === "running" || row.status === "idle" || row.status === "waiting")));
+    (row.acceptsSend ?? (row.acceptsFollowUps && (row.status === "running" || row.status === "idle" || row.status === "waiting")));
   const inspect = sendable ? client : null;
-  const [attachment, setAttachment] = useState<{ client: ZetaClient; root: string | null; accepts?: boolean }>();
+  const [attachment, setAttachment] = useState<{ client: ZetaClient; root: string | null }>();
   useEffect(() => {
     if (!inspect) return;
     const abort = new AbortController();
     void readAttachedRoot(inspect, abort.signal).then(
-      async (root) => setAttachment({ client: inspect, root, accepts: lookup && root === sessionId ? await readAcceptsSend(inspect, { sessionId, runId }, abort.signal) : true }),
-    ).catch(() => { if (!abort.signal.aborted) setAttachment(undefined); });
+      (root) => setAttachment({ client: inspect, root }),
+      () => { if (!abort.signal.aborted) setAttachment(undefined); },
+    );
     return () => abort.abort();
   }, [inspect, reportedAt]);
   const id = rowKey(sessionId, runId);
@@ -29,7 +28,7 @@ export function ChildComposer({ client, row, owner, readOnly, reportedAt, refres
   const blocked = (outcome?.refreshAfter ?? -Infinity) >= reportedAt;
   // one reread per refusal: the row's state changed under the send
   useEffect(() => { if (blocked) refresh(); }, [outcome?.refreshAfter]);
-  if (!inspect || attachment?.client !== inspect || attachment.root !== sessionId || !attachment.accepts) return null;
+  if (!inspect || attachment?.client !== inspect || attachment.root !== sessionId) return null;
   const label = `send to ${agentType}`;
   return <div className="agents-composer" aria-label={`message ${agentType}`} role="group">
     <textarea aria-label={`message ${agentType}`} placeholder={`message ${agentType}`} value={text} rows={2} readOnly={pending}

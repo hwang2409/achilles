@@ -1,5 +1,6 @@
 import { expect, jest, test } from "bun:test";
-import type { ZetaClient } from "@fulcrum/zeta";
+import { createRunStore } from "@fulcrum/core";
+import { fromZetaEvent, type ZetaClient } from "@fulcrum/zeta";
 import { readSessionTitles } from "../sessions/reads";
 import { createAgentRunsReader, sourceNote } from "./reads";
 
@@ -175,4 +176,22 @@ test("session titles for the agents view keep only real names and first messages
   const sessions = [{ session_id: "named", name: "synthetic name" }, { session_id: "typed", first_message_preview: "synthetic typed" }, { session_id: "0123456789abcdef" }];
   const client = { features: [], request: async () => ({ sessions }) } as unknown as ZetaClient;
   expect([...await readSessionTitles(client, new AbortController().signal)]).toEqual([["named", "synthetic name"], ["typed", "synthetic typed"]]);
+});
+
+test("a live row older than the report does not replace the report's step", async () => {
+  let clock = 0;
+  const live = (step: string, toolCount: number) => ({ ...rich(), status: "running", current_step: step, tool_count: toolCount });
+  const replies = [catalog([live("turn 1: thinking", 0)]), catalog([live("turn 2: reading", 3)])];
+  const store = createRunStore((flush) => flush());
+  const client = { features: ["agent_run_catalog_v1", "child_run_events"], stores: new Map([["a", store]]), request: async () => replies.shift() } as unknown as ZetaClient;
+  const reader = createAgentRunsReader(client, () => true, () => clock);
+  try {
+    await reader.refresh();
+    clock = 1000;
+    for (const event of fromZetaEvent({ event: "child_progress", session_id: "a", run_id: "a:1", sequence: 2, child: live("turn 1: editing", 1) })) store.dispatch(event);
+    expect(reader.snapshot().report?.rows[0]).toMatchObject({ currentStep: "turn 1: editing", toolCount: 1 });
+    clock = 2000;
+    await reader.refresh();
+    expect(reader.snapshot().report?.rows[0]).toMatchObject({ currentStep: "turn 2: reading", toolCount: 3, elapsedSeconds: 5 });
+  } finally { reader.stop(); store.dispose(); }
 });

@@ -16,15 +16,21 @@ const terminal = ["completed", "failed", "canceled"] as const;
 // the chat transcript's sub-agent row says "done"; use the same word in agent views
 export const stateWord = (status: string) => status === "completed" ? "done" : status;
 export const isTerminal = (state: unknown): state is typeof terminal[number] => terminal.some((value) => value === state);
-// zeta's run catalog reports a run's live step, turns, and tool calls, but no reply and no waiting state: those come
-// from the chat transcript's live sub-agent row for the run (fulcrum's sub_agent item)
+// zeta's run catalog reports a run's step, turns, and tool calls, but no reply and no waiting state: those come
+// from the chat transcript's live sub-agent row for the run (fulcrum's sub_agent item, fed by child_run_events)
 const waiting: Record<string, AgentRun["waiting"]> = { waiting_approval: "needs approval", waiting_input: "needs input" };
-export function withLiveRow(row: AgentRun, live: { status: string; summary?: string; latestActivity?: string } | undefined): AgentRun {
+/** `since`: seconds the live row last changed after the report; then its step and tool calls are newer than the report's */
+export function withLiveRow(row: AgentRun, live: { status: string; summary?: string; latestActivity?: string; toolCount?: number } | undefined, since?: number): AgentRun {
   if (!live) return row;
   if (["done", "error", "canceled"].includes(live.status)) return live.summary ? { ...row, reply: live.summary } : row;
-  const shown = isTerminal(row.status) ? undefined : waiting[live.status];
+  if (isTerminal(row.status)) return row;
+  const shown = waiting[live.status];
   // a waiting run's step is what it waits on (the question, the approval), not the catalog's older step
-  return shown ? { ...row, waiting: shown, currentStep: live.latestActivity || shown } : row;
+  if (shown) return { ...row, waiting: shown, currentStep: live.latestActivity || shown };
+  if (since === undefined) return row;
+  // zeta's elapsed is wall time since the start, so it grew by the time between the report and the live change
+  return { ...row, currentStep: live.latestActivity || row.currentStep, toolCount: live.toolCount === undefined ? row.toolCount : Math.max(row.toolCount ?? 0, live.toolCount),
+    ...(row.elapsedSeconds === undefined ? {} : { elapsedSeconds: row.elapsedSeconds + since }) };
 }
 
 type Profile = { name: string; description: string; tools: string[] | null };
