@@ -2,13 +2,13 @@
 [data-part="composer"]:has(> .composer-paths) { position: relative; }
 .composer-paths {
   position: absolute; inset-inline: 0; bottom: calc(100% + 8px); z-index: 3;
-  padding: 4px; border: 1px solid var(--g1-border); border-radius: 16px; /* 12px rows + 4px padding */
+  padding: 4px; border: 1px solid var(--g1-border); border-radius: var(--g1-radius-container); /* rows: the container radius less the 4px padding, so square */
   background: var(--g1-bg); color: var(--fulcrum-fg); box-shadow: var(--g1-shadow-floating);
   font: calc(var(--achilles-ui-size, 14px) - 1px) / 20px var(--g1-font-mono);
 }
 .composer-paths ul { max-height: min(256px, 38dvh); overflow: auto; margin: 0; padding: 0; list-style: none; }
 .composer-paths li {
-  display: flex; align-items: center; min-height: 32px; padding: 0 8px; border-radius: 12px;
+  display: flex; align-items: center; min-height: 32px; padding: 0 8px; border-radius: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
 }
 .composer-paths li:hover { background: var(--g1-hover); }
