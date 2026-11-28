@@ -110,7 +110,6 @@ const FIELD = 'textarea[aria-label="message"], [role="textbox"]';
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps & { held?: boolean }; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const commandOpener = useRef<HTMLElement | null>(null);
-  const commands = useComposerCommands(client, chat, canWrite);
   const draft = useSyncExternalStore(
     (listener) => {
       const unsubscribeConfirm = draftStore.subscribeConfirm(sessionId, listener);
@@ -121,6 +120,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
+  const commands = useComposerCommands(client, chat, canWrite, draft);
   // a hold's end, or a swap that replaced the field the user typed in, gives focus back to this composer
   const editable = props.state !== "read-only";
   useLayoutEffect(() => { if (editable) returnFocusToComposer(slot.current?.querySelector<HTMLElement>(FIELD)); }, [editable]);
@@ -148,6 +148,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
       return commands.run(command, commandOpener.current);
     },
     commandOutput: commands.output && <CommandOutput commands={commands} opener={commandOpener.current} />,
+    slashCommands: commands.slashList,
     controls,
   };
   const composer = vim

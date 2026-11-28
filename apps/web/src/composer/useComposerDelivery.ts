@@ -6,6 +6,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+import type { SlashCommandInfo } from "@fulcrum/zeta";
 import { useRunStore, type ComposerIntent, type ComposerProps } from "@fulcrum/react";
 import {
   composerActivity,
@@ -39,6 +40,8 @@ export type ComposerAdapterProps = ComposerProps & {
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
   questionWaiting?: boolean;
   commandOutput?: ReactNode;
+  /** the session's slash commands for the "/" menu; `null` while unread or on a zeta without them */
+  slashCommands?: readonly SlashCommandInfo[] | null;
   /** the chat's modes and model, shown in the composer bar even when the composer is read-only */
   controls?: ReactNode;
   /** read-only for a moment (a swap is pending): the reason shows and send shows as off */

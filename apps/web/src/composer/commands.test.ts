@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseComposerInput } from "./commands";
+import { parseComposerInput, slashMatches } from "./commands";
 
 test.each([
   ["/accounts", { kind: "command", name: "accounts", arg: "" }],
@@ -18,4 +18,22 @@ test.each([
   ["", { kind: "send", text: "" }],
 ] as const)("parseComposerInput(%p)", (draft, expected) => {
   expect(parseComposerInput(draft)).toEqual(expected);
+});
+
+const rows = [{ name: "help" }, { name: "compact" }, { name: "accounts" }];
+test.each([
+  ["/", ["help", "compact", "accounts"]],
+  ["/c", ["compact"]],
+  ["/HE", ["help"]],
+  ["/nope", null],
+  ["/help now", null],
+  ["//help", null],
+  ["help", null],
+  ["", null],
+] as const)("slashMatches(%p)", (draft, expected) => {
+  expect(slashMatches(draft, rows)?.map((row) => row.name) ?? null).toEqual(expected as string[] | null);
+});
+
+test("no list yet shows no menu", () => {
+  expect(slashMatches("/", null)).toBeNull();
 });

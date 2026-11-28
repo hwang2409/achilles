@@ -15,6 +15,7 @@ import {
   type ComposerAdapterProps,
 } from "./useComposerDelivery";
 import { ComposerHint } from "./hint";
+import { useSlashMenu } from "./SlashMenu";
 
 // send while the composer is held: shown, and off
 export const HeldSend = () => <button type="button" data-part="composer-submit" aria-label="send message" disabled>send</button>;
@@ -39,8 +40,10 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
+  const slash = useSlashMenu(id, model.draft, props.slashCommands, edit, submit);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slash.onKeyDown(event)) return;
     if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
       cancel();
@@ -106,6 +109,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           placeholder={placeholder}
           aria-label={label}
           aria-describedby={readOnly ? undefined : `${id}-hint ${id}-message`}
+          {...(readOnly ? {} : slash.field)}
           readOnly={readOnly}
           onChange={readOnly ? undefined : (event) => edit(event.target.value)}
           onKeyDown={readOnly ? undefined : onKeyDown}
@@ -150,7 +154,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           {queues ? "queue" : steer ? "steer" : "send"}
         </button>
       </div>}
-    {!readOnly && props.commandOutput}
+    {!readOnly && (slash.menu || props.commandOutput)}
     </form>
   );
 }

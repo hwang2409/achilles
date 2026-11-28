@@ -19,3 +19,12 @@ export const COMPOSER_COMMANDS = ["accounts"] as const;
 export type ComposerCommand = (typeof COMPOSER_COMMANDS)[number];
 export const isComposerCommand = (name: string): name is ComposerCommand =>
   (COMPOSER_COMMANDS as readonly string[]).includes(name);
+
+/** The commands a "/prefix" draft (one word, no space yet) offers, in the server's order; `null` when no menu shows. */
+export function slashMatches<T extends { name: string }>(draft: string, commands: readonly T[] | null): T[] | null {
+  const match = /^\/([\w-]*)$/.exec(draft);
+  if (!match || !commands) return null;
+  const prefix = match[1].toLowerCase();
+  const rows = commands.filter((command) => command.name.toLowerCase().startsWith(prefix));
+  return rows.length ? rows : null;
+}

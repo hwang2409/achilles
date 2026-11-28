@@ -1,23 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ZetaClient } from "@fulcrum/zeta";
+import { listSlashCommands, MODEL_INPUT_IDS_FEATURE, runSlashCommand, sendModelInput, type SlashCommandInfo, type ZetaClient } from "@fulcrum/zeta";
 import { restorableFocus } from "../keyboard";
 import { WRITE_SURFACE } from "../writeSurfaces";
-import { listAccounts, safeAccountId, supportsRequest, type Account } from "../zeta";
+import { listAccounts, safeAccountId, supportsFeature, supportsRequest, type Account } from "../zeta";
 import { useAccountSwitch } from "../accounts/AccountSwitchReview";
 import { currentAccount, type ChatDestination } from "../accounts/accountSwitch";
 import "./composer-commands.css";
 
-type Output = { accounts: Account[] } | { text: string; error?: boolean };
+type Output = { accounts: Account[] } | { text: string; error?: boolean; command?: boolean };
 
-export function useComposerCommands(client: ZetaClient | null, chat: ChatDestination | null, canWrite: boolean) {
+const reason = (error: unknown) => (error instanceof Error && error.message) || "zeta did not answer.";
+
+/** `draft`: the composer's text; a draft that starts with "/" reads the session's slash commands once. */
+export function useComposerCommands(client: ZetaClient | null, chat: ChatDestination | null, canWrite: boolean, draft = "") {
   const sessionId = chat?.id ?? null;
   const openSwitch = useAccountSwitch();
   const [output, setOutput] = useState<Output | null>(null);
+  const [slashList, setSlashList] = useState<SlashCommandInfo[] | null>(null);
   const revision = useRef(0);
   const close = useCallback(() => { revision.current++; setOutput(null); }, []);
-  useEffect(() => { close(); return () => { revision.current++; }; }, [client, sessionId, canWrite, close]);
+  useEffect(() => { close(); setSlashList(null); return () => { revision.current++; }; }, [client, sessionId, canWrite, close]);
   const canList = Boolean(canWrite && client && sessionId && supportsRequest(client, "account_list"));
   const canSwitch = Boolean(canList && client && supportsRequest(client, "account_switch"));
+  // an older zeta (no slash requests, or no opaque model input) shows no menu and runs nothing
+  const canSlash = Boolean(canWrite && client && sessionId && supportsRequest(client, "slash_list") && supportsRequest(client, "slash_run") && supportsFeature(client, MODEL_INPUT_IDS_FEATURE));
+  const wantsList = canSlash && draft.startsWith("/") && slashList === null;
+  useEffect(() => {
+    if (!wantsList || !client || !sessionId) return;
+    let live = true;
+    // a failed read leaves an empty menu, so the draft still runs through slash_run on enter
+    listSlashCommands(client, sessionId).then((list) => list.commands, () => []).then((commands) => { if (live) setSlashList(commands); });
+    return () => { live = false; };
+  }, [wantsList, client, sessionId]);
 
   function switchTo(rows: Account[], to: string, opener: HTMLElement | null) {
     if (!chat || !canSwitch) return;
@@ -42,11 +56,36 @@ export function useComposerCommands(client: ZetaClient | null, chat: ChatDestina
     }
   }
 
+  async function slash(text: string) {
+    if (!client || !sessionId) return;
+    const request = ++revision.current;
+    const show = (next: Output | null) => { if (request === revision.current) setOutput(next); };
+    show({ text: `running ${text}…`, command: true });
+    try {
+      const result = await runSlashCommand(client, sessionId, text);
+      if (result.kind === "output") show({ text: result.text, command: true });
+      else if (result.kind === "error") show({ text: result.text, error: true });
+      else if (result.kind === "client_only") show({ text: `${text} runs only in the zeta terminal.`, error: true });
+      else if (result.kind === "unknown") show({ text: `${text} is not a command. use // to send it as a message.`, error: true });
+      else if (result.kind === "model_input" && result.input_id) {
+        // the prompt goes out as this command's own message; its echo shows it in the transcript
+        const sent = await sendModelInput(client, sessionId, result.input_id);
+        show("accepted" in sent ? null : { text: "zeta did not accept the command's message.", error: true });
+      } else show({ text: "zeta sent a reply this page cannot read.", error: true });
+    } catch (error) {
+      show({ text: reason(error), error: true });
+    }
+  }
+
   return {
-    output, close, canSwitch, switchTo,
+    output, close, canSwitch, switchTo, slashList: canSlash ? slashList : null,
     run(command: { name: string; arg: string }, opener: HTMLElement | null) {
       revision.current++;
       if (!canWrite) return false;
+      if (command.name !== "accounts" && canSlash) {
+        void slash(`/${command.name}${command.arg ? ` ${command.arg}` : ""}`);
+        return true;
+      }
       if (command.name !== "accounts") {
         setOutput({ text: `commands are not available here: /${command.name}. use // to send a literal slash.`, error: true });
         return false;
@@ -87,7 +126,7 @@ export function CommandOutput({ commands, opener }: { commands: ReturnType<typeo
   }, [open, opener, close]);
   if (!output) return null;
   return <div ref={panel} className="composer-command-output" role="group" aria-label="composer command result">
-    <p role={"error" in output && output.error ? "alert" : "status"}>{"accounts" in output ? (output.accounts.length ? "accounts" : "no accounts") : output.text}</p>
+    <p role={"error" in output && output.error ? "alert" : "status"} data-command-text={("command" in output && output.command) || undefined}>{"accounts" in output ? (output.accounts.length ? "accounts" : "no accounts") : output.text}</p>
     <button className="composer-command-close" type="button" onClick={() => { opener?.focus({ preventScroll: true }); close(); }}>close</button>
     {"accounts" in output && <ul>
       {output.accounts.map((account) => <li key={account.account}>
