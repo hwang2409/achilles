@@ -35,6 +35,7 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
   // (several notices in one burst share the read); the read adds no transcript rows, so it cannot loop
   useEffect(() => {
     if (!store || !reader) return;
+    reader.storesChanged();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stop = store.subscribeOutline(() => {
       const added = store.getOutlineSnapshot().change?.splices.flatMap((splice) => splice.items) ?? [];

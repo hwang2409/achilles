@@ -127,3 +127,39 @@ test("the agents place and the chat dialog show the same step and elapsed after 
     expect([row?.querySelector("small")?.textContent, row?.querySelector(".agents-elapsed")?.textContent]).toEqual(["running · turn 1: thinking", "9s"]);
   } finally { chat.unmount(); place.unmount(); store.dispose(); time.mockRestore(); }
 });
+
+test("the open dialog follows the session store a replay rejoin installs", async () => {
+  let clock = Date.parse("2026-11-08T00:00:00Z");
+  const time = spyOn(Date, "now").mockImplementation(() => clock);
+  const admitting = { ...running, turns_used: 0, current_step: "turn 1: admitting request", started_at: "2026-11-08T00:00:00Z", elapsed_seconds: 0.2 };
+  const first = createRunStore((flush) => flush());
+  const replaced = createRunStore((flush) => flush());
+  const stores = new Map([["a", first]]);
+  const client = { features: ["agent_run_catalog_v1", "child_run_events"], stores, request: async (method: string) => {
+    if (method === "agent_run_catalog") return { revision: "sample", data: { items: [admitting] } };
+    throw Object.assign(new Error("test rpc error"), { code: -32601 });
+  } } as unknown as ZetaClient;
+  const draft = { text: "", pending: false };
+  const send = { subscribe: () => () => {}, snapshot: () => draft } as never;
+  const dialog = (store: typeof first) => <ChatAgents client={client} store={store} sessionId="a" title="chat" controls={{} as never} send={send}
+    initialRun="a:1" opener={null} onClose={() => {}} readRuns={(zeta) => createAgentRunsReader(zeta, () => true)} />;
+  const chat = render(dialog(first));
+  const settle = async () => { for (let tick = 0; tick < 20; tick++) await act(() => new Promise((resolve) => setTimeout(resolve, 0))); };
+  const field = (label: string) => [...chat.container.querySelectorAll(".agents-run-head dl div")].find((row) => row.querySelector("dt")?.textContent === label)?.querySelector("dd")?.textContent;
+  const state = () => chat.container.querySelector(".agents-run-head .agents-state")?.textContent;
+  try {
+    await settle();
+    expect(field("current step")).toBe("turn 1: admitting request");
+    // the rejoin installs a new store in the client's map, and the chat's lease hands the dialog the new store
+    stores.set("a", replaced);
+    chat.rerender(dialog(replaced));
+    clock += 9000;
+    const progress = { ...admitting, tool_count: 1, current_step: "turn 1: thinking", elapsed_seconds: 9.2 };
+    await act(async () => { for (const event of fromZetaEvent({ event: "child_progress", session_id: "a", run_id: "a:1", sequence: 2, child: progress })) replaced.dispatch(event); });
+    await settle();
+    expect([field("current step"), field("tool calls")]).toEqual(["turn 1: thinking", "1"]);
+    await act(async () => { for (const event of fromZetaEvent({ event: "child_question", session_id: "a", data: { child_instance_id: "a:1", notification_id: "n-q", question: "continue?" } })) replaced.dispatch(event); });
+    await settle();
+    expect(state()).toBe("needs input");
+  } finally { chat.unmount(); first.dispose(); replaced.dispose(); time.mockRestore(); }
+});

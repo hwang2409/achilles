@@ -1,4 +1,4 @@
-import { listChildRuns, type ChildRunRow, type ZetaClient } from "@fulcrum/zeta";
+import { listChildRuns, type ChildRunRow, type SessionStore, type ZetaClient } from "@fulcrum/zeta";
 import { supportsFeature, supportsRequest } from "../zeta/connection";
 import { rpcCode } from "../zeta/historyRead";
 import { isTerminal, withLiveRow } from "./childControls";
@@ -151,7 +151,7 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
   const listeners = new Set<() => void>();
   // per run: when its live row last changed, the stop for that watch, and whether its end was reread
   const liveAt = new Map<string, number>();
-  const watches = new Map<string, () => void>();
+  const watches = new Map<string, { store: SessionStore; stop: () => void }>();
   const reread = new Set<string>();
   const liveItem = (row: AgentRun) => {
     const item = client.stores?.get(row.sessionId)?.getItem(`sub-agent:${row.runId}`);
@@ -171,13 +171,18 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
   };
   const watch = () => {
     const keys = new Set((state.report?.rows ?? []).map((row) => rowKey(row.sessionId, row.runId)));
-    for (const [key, stop] of watches) if (!keys.has(key)) { stop(); watches.delete(key); }
-    // shortcut: a session store this client opens after the report is watched from the next report; upgrade if a view needs it sooner
+    for (const [key, { stop }] of watches) if (!keys.has(key)) { stop(); watches.delete(key); }
+    // a replay rejoin replaces a session's store: follow the current one. fulcrum has no stores-changed event, so this
+    // runs on each report and when a view sees its store change (`storesChanged`)
+    // shortcut: the Agents place has no store of its own, so it follows a replaced or later-opened store at the next report
     for (const row of state.report?.rows ?? []) {
       const key = rowKey(row.sessionId, row.runId);
       const store = client.stores?.get(row.sessionId);
-      if (watches.has(key) || !store) continue;
-      watches.set(key, store.subscribe(`sub-agent:${row.runId}`, () => { liveAt.set(key, now()); show(); }));
+      const current = watches.get(key);
+      if (current?.store === store) continue;
+      current?.stop();
+      watches.delete(key);
+      if (store) watches.set(key, { store, stop: store.subscribe(`sub-agent:${row.runId}`, () => { liveAt.set(key, now()); show(); }) });
     }
   };
   const publish = (next: Snapshot) => { state = next; watch(); show(); };
@@ -287,7 +292,9 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     subscribe(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     refresh: (filters: AgentFilters = {}) => request(filters),
     more: () => request(state.report?.filters ?? {}, true),
-    stop() { pending?.abort(); pending = undefined; clearTimeout(recheck); recheck = undefined; watches.forEach((stop) => stop()); watches.clear(); },
+    stop() { pending?.abort(); pending = undefined; clearTimeout(recheck); recheck = undefined; watches.forEach(({ stop }) => stop()); watches.clear(); },
+    /** a view's session store changed (a replay rejoin installed a new one): watch the current stores and show them */
+    storesChanged: () => { watch(); show(); },
   };
 }
 
