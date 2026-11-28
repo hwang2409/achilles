@@ -70,7 +70,9 @@ async function loadUnsent(signal: AbortSignal) {
   } catch { return new Set<string>(); }
 }
 
-function StateTag({ state }: { state: SessionRow["status"] }) {
+// zeta reports "unknown" for a session an idle or busy tui or serve process holds; it cannot see that turn
+function StateTag({ state, held }: { state: SessionRow["status"]; held: boolean }) {
+  if (state === "unknown" && held) return <span className="sessions-state" data-status="elsewhere" title="held by another zeta process (tui or serve)">open elsewhere</span>;
   return <span className="sessions-state" data-status={state}>{state === "approval" ? "needs you" : state}</span>;
 }
 
@@ -173,7 +175,7 @@ function SessionCatalog({ result, online, id, owned, unsent, search, rowRefs, fo
           href={href(one.id)} aria-current={one.id === id ? "page" : undefined} onClick={(event) => follow(event, href(one.id))}>
           <span><strong title={one.title}>{one.title}</strong><small>{!!one.state?.attention && <><span className="sessions-row-attention">{one.state.attention} open<span className="sessions-visually-hidden">
             {one.state.attention === 1 ? " decision" : " decisions"}</span></span> · </>}{[one.project, short(one.id)].filter(Boolean).join(" · ")}</small></span>
-          <span>{owned.has(one.id) ? "achilles" : ""}</span><StateTag state={one.status} />
+          <span>{owned.has(one.id) ? "achilles" : ""}</span><StateTag state={one.status} held={one.inUse} />
           <span>{one.updated && <time dateTime={one.updated}>{timeLabel(one.updated)}</time>}</span>
         </a>
       </li>)}</ul>
@@ -211,7 +213,7 @@ function SessionDetail({ row, reader, view, owned, follow, continueSession }: {
   const attentionHref = href(row.id, "attention");
   const fields = (values: (readonly [string, ReactNode])[]) => values.filter(([, value]) => value !== undefined);
   return <>
-    <div className="sessions-title"><h2>{row.title}</h2><p><StateTag state={state} />{owned && " · achilles"}{row.project && <> · project {row.project}</>}</p></div>
+    <div className="sessions-title"><h2>{row.title}</h2><p><StateTag state={state} held={row.inUse} />{owned && " · achilles"}{row.project && <> · project {row.project}</>}</p></div>
     <ContinueAction row={row} online={!!reader} run={continueSession} />
     {view === "transcript" ? <SessionTranscript row={row} reader={reader} /> : view === "attention" ? <SessionAttention row={row} reader={reader} /> : <>
       <dl className="sessions-fields">{fields([

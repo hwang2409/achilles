@@ -30,6 +30,7 @@
 .sessions-state { display: inline-flex; align-items: center; gap: .55ch; color: var(--fulcrum-muted); white-space: nowrap; }
 .sessions-state::before { content: ""; width: var(--g1-status-mark); height: var(--g1-status-mark); flex: none; border: 1px solid currentColor; }
 .sessions-state:not([data-status="unknown"])::before { background: currentColor; }
+.sessions-state[data-status="elsewhere"]::before { content: none; }
 .sessions-state[data-status="running"] { color: var(--fulcrum-accent); }
 .sessions-state[data-status="approval"] { color: var(--fulcrum-warn); }
 .sessions-state[data-status="failed"] { color: var(--fulcrum-danger); }
