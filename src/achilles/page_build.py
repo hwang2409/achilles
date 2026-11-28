@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any
 
 _BUILD_IMAGE = "oven/bun@sha256:87416c977a612a204eb54ab9f3927023c2a3c971f4f345a01da08ea6262ae30e"
-_LOCAL_SPEC = re.compile(r"^(?:file|link):|^(?:/|[A-Za-z]:[\\/])")
+# A registry range or dist-tag: no "/", ":", "#" or "@", so no url, git, github, path or alias.
+# A leading "." or a tarball suffix makes npm-style resolvers read it as a local path.
+_RANGE = r"(?![.\s])(?!.*\.(?:tgz|tar|tar\.gz)$)[\w.^~<>=|*+ -]+"
+_REGISTRY_SPEC = re.compile(
+    rf"npm:(?:@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*(?:@{_RANGE})?|{_RANGE}", re.ASCII
+)
 _MAX_RESULT_BYTES = 16 * 1024 * 1024
 _MAX_DIAGNOSTIC_BYTES = 16 * 1024
 _STEP_TIMEOUT_SECONDS = 180
@@ -88,6 +93,13 @@ def _run_container(
                 "host.docker.internal:127.0.0.1",
                 "--user",
                 f"{os.getuid()}:{os.getgid()}",
+                # package scripts run here: bound forks, memory and cpu, and drop root powers
+                "--pids-limit=256",
+                "--memory=1g",
+                "--memory-swap=1g",
+                "--cpus=2",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges",
                 *mounts,
                 "--workdir=/workspace",
                 "--env=HOME=/tmp/home",
@@ -297,9 +309,9 @@ def build_page(
         for k, v in dependencies.items()
     ):
         raise PageBuildError("package.json:1:1: dependencies must be a string map")
-    local = next((value for value in dependencies.values() if _LOCAL_SPEC.match(value)), None)
-    if local is not None:
-        raise PageBuildError(f"package.json:1:1: local dependency paths are not allowed: {local}")
+    spec = next((v for v in dependencies.values() if not _REGISTRY_SPEC.fullmatch(v)), None)
+    if spec is not None:
+        raise PageBuildError(f"package.json:1:1: only registry dependencies are allowed: {spec}")
     docker = shutil.which("docker")
     if docker is None:
         raise PageBuildError(

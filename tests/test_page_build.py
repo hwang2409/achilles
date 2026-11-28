@@ -102,10 +102,48 @@ def _fake_containers(monkeypatch, outputs: list[tuple[bytes, bytes]], exit_codes
     return calls, processes
 
 
-def test_build_rejects_host_path_dependencies(tmp_path: Path) -> None:
-    for spec in ("file:../secret", "link:/secret", "/secret/package", "C:\\secret"):
-        with pytest.raises(PageBuildError, match="local dependency paths are not allowed"):
+def test_build_allows_only_registry_dependencies(monkeypatch, tmp_path: Path) -> None:
+    calls, _ = _fake_containers(monkeypatch, _build_outputs())
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+    rejected = [
+        "file:../secret",
+        "link:/secret",
+        "workspace:*",
+        "/secret/package",
+        "C:\\secret",
+        "./secret",
+        "../secret",
+        "~/secret",
+        "secret.tgz",
+        "http://192.168.5.2:8080/probe",
+        "https://example.invalid/pkg.tgz",
+        "git+https://example.invalid/pkg.git",
+        "git://example.invalid/pkg.git",
+        "github:owner/repo",
+        "owner/repo",
+        "owner/repo#main",
+        "npm:pkg@https://example.invalid/pkg.tgz",
+        "npm:pkg@file:../secret",
+        "npm:../secret",
+    ]
+    diagnostics = []
+    for spec in rejected:
+        with pytest.raises(PageBuildError) as error:
             build_page(tmp_path, "home", "export default 1", {"escape": spec})
+        assert calls == [], f"{spec} must not reach the networked install"
+        diagnostics.append(error.value.diagnostics)
+    assert diagnostics == [
+        f"package.json:1:1: only registry dependencies are allowed: {spec}" for spec in rejected
+    ]
+
+    allowed = ["1.2.3", "^1.2.0", "~1.2", ">=1 <2 || 3.x", "*", "latest", "1.0.0-beta.1"]
+    allowed += ["npm:left-pad@^1.3.0", "npm:@scope/pkg", "npm:@scope/pkg@2"]
+    for spec in allowed:
+        before = len(calls)
+        # the fake install does not resolve "dep", so the build fails after the install ran
+        with pytest.raises(PageBuildError, match="invalid result"):
+            build_page(tmp_path, "home", f"export default {before}", {"dep": spec})
+        assert len(calls) == before + 1, f"{spec} must reach the install"
 
 
 def test_build_requires_container_isolation(monkeypatch, tmp_path: Path) -> None:
@@ -137,6 +175,26 @@ def test_build_uses_network_only_for_scriptless_install(monkeypatch, tmp_path: P
     assert all("dst=/cache" not in value for command in calls[1:] for value in command)
     assert not any(str(Path.home()) in mount for mount in mounts)
     assert not any("docker.sock" in mount for mount in mounts)
+
+
+def test_build_containers_are_locked_down(monkeypatch, tmp_path: Path) -> None:
+    calls, _ = _fake_containers(monkeypatch, _build_outputs())
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+
+    build_page(tmp_path, "home", "export default 1", {})
+
+    assert len(calls) == 3
+    for command in calls:
+        options = command[: command.index(page_build._BUILD_IMAGE)]
+        for flag in (
+            "--pids-limit=256",
+            "--memory=1g",
+            "--memory-swap=1g",
+            "--cpus=2",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+        ):
+            assert flag in options, f"{flag} missing from {options}"
 
 
 def test_each_build_installs_with_its_own_package_cache(monkeypatch, tmp_path: Path) -> None:
@@ -448,7 +506,7 @@ def probe_root(monkeypatch):
         shutil.copytree(root / "probe", workspace / "probe")
         return original(docker, workspace, *args, **kwargs)
 
-    monkeypatch.setattr(page_build, "_LOCAL_SPEC", re.compile(r"(?!)"))
+    monkeypatch.setattr(page_build, "_REGISTRY_SPEC", re.compile(r".*"))
     monkeypatch.setattr(page_build, "effective_dependencies", dict)
     monkeypatch.setattr(page_build, "_install", install)
     try:
