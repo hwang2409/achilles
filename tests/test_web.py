@@ -1555,6 +1555,47 @@ def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: P
     assert "window.achilles" in bootstrap.text
 
 
+def test_gated_frame_reads_are_never_stored_by_the_browser(tmp_path: Path) -> None:
+    # a stored copy answers a later top-level visit from the cache, past the Sec-Fetch-Dest gate
+    root = tmp_path / "achilles"
+    store = PageStore(root)
+    digest = "a" * 64
+    (root / "bundles" / f"{digest}.js").write_text("export default 1")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+            "artifact_size,diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("home", 1, "source", "{}", digest, 16, None, None, "2025-01-01"),
+        )
+        db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+    from_frame = {"origin": "null", "sec-fetch-site": "cross-site", "sec-fetch-dest": "script"}
+    bearer = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+
+    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+        responses = {
+            "frame": client.get(
+                "/api/pages/home/frame",
+                headers={"sec-fetch-site": "same-origin", "sec-fetch-dest": "iframe"},
+            ),
+            "bootstrap": client.get(
+                "/api/pages/home/frame-bootstrap.js?revision=1", headers=from_frame
+            ),
+            "artifact": client.get(f"/api/pages/home/artifact/{digest}", headers=from_frame),
+            "records": client.get("/api/pages/home/records/books", headers=bearer),
+            "filtered records": client.get(
+                '/api/pages/home/records/books?field=title&equals="dune"', headers=bearer
+            ),
+        }
+
+    assert {name: r.status_code for name, r in responses.items()} == dict.fromkeys(responses, 200)
+    assert {name: r.headers.get("cache-control") for name, r in responses.items()} == (
+        dict.fromkeys(responses, "no-store")
+    )
+    assert responses["artifact"].text == "export default 1"
+    assert "etag" not in responses["artifact"].headers
+    assert "last-modified" not in responses["artifact"].headers
+
+
 def test_frame_routes_refuse_cross_site_and_rebound_requests(tmp_path: Path) -> None:
     root = tmp_path / "achilles"
     store = PageStore(root)
