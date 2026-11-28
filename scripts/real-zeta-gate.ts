@@ -1420,11 +1420,14 @@ with _database() as db:
   const morePagesResponse = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
   await page.keyboard.press("Enter");
   await waitForListChange(".page-list", pagesBeforeMore, morePagesResponse, "show more pages keyboard continuation");
-  const secondBatchPage = page.locator('.page-list a[href^="/gate-page-27"]');
+  // the first link of the second batch: which seeded page that is depends on how many pages this run created before
+  const secondBatchPage = page.locator(".page-list a.pages-card").nth(pagesBeforeMore);
   await gateWait.playwright(secondBatchPage, "waitFor", { state: "visible", timeout: 20000 });
   await waitFor(async () => await secondBatchPage.evaluate((element) => document.activeElement === element), "focused first new page link");
+  const secondBatchPath = new URL((await secondBatchPage.getAttribute("href")) ?? "", origin).pathname;
+  if (!secondBatchPath.startsWith("/gate-page-")) throw new Error(`the second page batch starts at ${secondBatchPath}, not a seeded page`);
   await secondBatchPage.click();
-  await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === "/gate-page-27");
+  await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === secondBatchPath);
   await page.goto(`${origin}/pages`);
   await gateWait.playwright(pageSection, "waitFor");
   const readingLink = page.locator('.page-list a[href^="/reading"]');
@@ -2117,6 +2120,8 @@ with _database() as db:
   await page.goto(`${origin}/allow`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   await page.setViewportSize({ width: 390, height: 760 });
+  // the layout follows the viewport on matchMedia's change event: read it once the narrow page chat rendered (sheet open or closed)
+  await gateWait.playwright(page.locator('.page-chat-sheet-closed, #page-chat-sheet[role="dialog"]'), "waitFor", { state: "attached" });
   const shellChat = page.locator(".page-chat");
   const shellComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
   const shellGeometry = await page.evaluate(() => {
@@ -2129,6 +2134,7 @@ with _database() as db:
       composerVisible: Boolean(composer && getComputedStyle(composer).display !== "none" && composer.getBoundingClientRect().height > 0),
       barCount: document.querySelectorAll(".page-chat-bar").length,
       dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
+      focused: document.activeElement?.closest("#message-composer") ? "composer" : document.activeElement?.tagName ?? null,
     };
   });
   if (!(await shellChat.count()) || !shellGeometry.chatClass.includes("page-chat-docked") || shellGeometry.transcriptHeight <= 0 || !shellGeometry.composerVisible || shellGeometry.barCount !== 1 || shellGeometry.dialogCount !== 1 || !(await shellComposer.isVisible()) || await shellComposer.isDisabled())
