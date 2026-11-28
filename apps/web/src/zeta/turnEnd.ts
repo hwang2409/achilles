@@ -29,6 +29,9 @@ export function teeRunEnds(transport: Transport, client: () => object | null): T
     ...(transport.onClose ? { onClose: (callback: (code?: number) => void) => transport.onClose!(callback) } : {}),
     onMessage: (callback) => transport.onMessage((text) => {
       if (takeParkedEvent(client(), text)) return;
+      // run_work's live events are for the background-task list, not the transcript: fulcrum would show each one as an
+      // unknown-event row. achilles shows no todo list, so todo_updated stops here too
+      if (takeRunWorkEvent(client(), text)) return;
       callback(text);
       if (!text.includes('"agent_end"')) return;
       let frame: { method?: unknown; params?: { event?: unknown; session_id?: unknown } };
@@ -37,6 +40,25 @@ export function teeRunEnds(transport: Transport, client: () => object | null): T
       if (owner && frame.method === "event" && frame.params?.event === "agent_end" && typeof frame.params.session_id === "string") publishRunEnd(owner, frame.params.session_id);
     }),
   };
+}
+
+const taskListeners = new WeakMap<object, Set<RunEndListener>>();
+function takeRunWorkEvent(owner: object | null, text: string) {
+  if (!text.includes('"background_task_updated"') && !text.includes('"todo_updated"')) return false;
+  let frame: { method?: unknown; params?: { event?: unknown; session_id?: unknown } };
+  try { frame = JSON.parse(text); } catch { return false; }
+  const event = frame.params?.event;
+  if (frame.method !== "event" || (event !== "background_task_updated" && event !== "todo_updated")) return false;
+  const sessionId = frame.params?.session_id;
+  if (owner && event === "background_task_updated" && typeof sessionId === "string") for (const listener of [...taskListeners.get(owner) ?? []]) listener(sessionId);
+  return true;
+}
+/** Calls `listener` with the session id of every `background_task_updated` frame (feature `run_work`) until the returned function runs. */
+export function onTaskUpdate(client: object, listener: RunEndListener): () => void {
+  let listeners = taskListeners.get(client);
+  if (!listeners) taskListeners.set(client, listeners = new Set());
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
 }
 
 /** Calls `listener` with the session id of every `agent_end` frame, in arrival order, until the returned function runs. */

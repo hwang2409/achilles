@@ -128,3 +128,33 @@ test("a session with no name and no first message is labelled, not shown by its 
   await screen.findByRole("region", { name: "session catalog" });
   expect(catalogTitles()).toEqual(["untitled · 01234567"]);
 });
+
+test("a running background task of an achilles chat links to that chat, the only place that can cancel it", async () => {
+  const items = (id: string) => [{ task_id: `${id}-task`, session_id: id, kind: "run_background", status: "running", started_ns: null, ended_ns: null, summary: null }];
+  const client = {
+    features: ["list_sessions_paging", "state_read_v1"],
+    request: async (method: string, params: { session_id?: string; collection?: string }) => {
+      if (method === "list_sessions") return { sessions: ["mine", "other"].map((id) => ({ session_id: id, name: `synthetic ${id}`, project_id: null })), next_offset: null };
+      if (method === "state_sessions") return { items: ["mine", "other"].map((id) => ({ ...state(id, 0), background_count: 1 })), next_cursor: null };
+      if (method === "state_session") return { collection: params.collection, session: { ...state(params.session_id!, 0), background_count: 1 },
+        items: params.collection === "background_tasks" ? items(params.session_id!) : [], next_cursor: null };
+      if (method === "status") return { session: null };
+      throw new Error(`unexpected ${method}`);
+    },
+  } as unknown as ZetaClient;
+  const chat = { session_id: "mine", purpose: "chat", page_id: "page", page_route: "/fixture", page_title: "fixture", title: "mine", last_state: "idle", created_at: "2026-01-01", updated_at: "2026-01-01" } as const;
+  const shown = (path: string) => {
+    history.replaceState(null, "", path);
+    return render(createElement(SessionsModule, { client, connecting: false, retry: () => {}, newChat: () => {}, chats: [chat], continueSession: async () => null, advertised: () => true }));
+  };
+  shown("/sessions/mine");
+  const tasks = (await screen.findByText(/^background tasks · 1/)).closest("details")!;
+  await within(tasks).findByText(/run_background · running/);
+  expect(within(tasks).getByRole("link", { name: "open the chat to cancel" }).getAttribute("href")).toBe("/fixture?chat=mine");
+  cleanup();
+  // a session no achilles chat holds has no chat to open
+  shown("/sessions/other");
+  const other = (await screen.findByText(/^background tasks · 1/)).closest("details")!;
+  await within(other).findByText(/run_background · running/);
+  expect(within(other).queryByRole("link")).toBeNull();
+});
