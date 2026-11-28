@@ -16,7 +16,7 @@ html, body, #root { height: 100%; overflow: hidden; }
 html, body { overscroll-behavior: none; }
 body { margin: 0; }
 /* the scrim behind a modal dialog is a token (transparent today: no dimming) */
-::backdrop { background: var(--g1-scrim, transparent); }
+::backdrop { background: var(--g1-scrim); }
 /* one size for body text, one for titles */
 h1, h2, h3, h4 { font-size: var(--g1-type-title); }
 small { font-size: inherit; }
