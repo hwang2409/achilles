@@ -3,7 +3,7 @@
 .sidebar-destinations { display: contents; }
 
 /* connection status as a quiet mark: muted when connected, warning while zeta is away */
-.brand-row > .surface-connection { flex: none; width: var(--g1-status-mark); height: var(--g1-status-mark); border-radius: 50%; background: var(--g1-warn-fill); }
+.brand-row > .surface-connection { flex: none; width: var(--g1-status-mark); height: var(--g1-status-mark); border-radius: var(--g1-radius-dot); background: var(--g1-warn-fill); }
 .brand-row > .surface-connection[data-connected="true"] { background: var(--g1-border); }
 .surface-actions { flex: none; display: grid; gap: var(--g1-space-2); margin: 0 var(--g1-sidebar-padding); }
 /* one 12px gap between every group: the brand row ends 8px below the search pill, plus 4px here */
