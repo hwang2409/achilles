@@ -88,7 +88,7 @@ test.each([
   { name: "accepted clear affects only its form", reply: accepted, kept: "", message: "message accepted by zeta." },
   { name: "wrong run acknowledgment keeps draft", reply: { ...accepted, runId: "different" }, kept: "fixture", message: unknown },
   { name: "observer refusal keeps draft without dispatch", refusal: true, kept: "fixture", message: refused },
-  { name: "terminal error keeps draft and requires refresh", error: Object.assign(new Error("terminal"), { code: -32005 }), blocked: true, kept: "fixture", message: "the child is no longer available for follow-up. refresh the run before trying again." },
+  { name: "terminal error keeps draft and requires refresh", error: Object.assign(new Error("terminal"), { code: -32005 }), blocked: true, kept: "fixture", message: "this agent cannot take a message now." },
   { name: "socket loss keeps draft and never resends", error: new ZetaError("closed", 1006), kept: "fixture", message: unknown },
 ] as const)("child send: $name", async (row) => {
   let requests = 0;

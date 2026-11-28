@@ -39,6 +39,8 @@ export type AgentRun = {
   elapsedSeconds?: number;
   background?: boolean;
   acceptsFollowUps?: boolean;
+  /** zeta's own answer to "would child_run_send take a message now" (child_run_list rows only; absent from older zeta) */
+  acceptsSend?: boolean;
   /** reply and waiting come from the chat's live transcript row (withLiveRow) */
   waiting?: "needs approval" | "needs input";
   reply?: string;
@@ -80,7 +82,8 @@ function rich(v: unknown): AgentRun | undefined {
   const retry = retryOf(v);
   return { ...id, agentType: v.agent_type || undefined, status: catalogStatuses.find((s) => s === v.status) ?? "unknown",
     description: v.description, acceptsFollowUps: v.accepts_follow_ups, currentStep: v.current_step, turnsUsed: v.turns_used, toolCount: v.tool_count,
-    elapsedSeconds: v.elapsed_seconds, startedAt: Date.parse(v.started_at), finishedAt: v.finished_at === null ? undefined : Date.parse(v.finished_at), ...(retry && { retry }) };
+    elapsedSeconds: v.elapsed_seconds, startedAt: Date.parse(v.started_at), finishedAt: v.finished_at === null ? undefined : Date.parse(v.finished_at), ...(retry && { retry }),
+    ...(typeof v.accepts_send === "boolean" && { acceptsSend: v.accepts_send }) };
 }
 
 function stored(v: unknown): AgentRun | undefined {
@@ -131,6 +134,18 @@ export async function readAttachedRoot(client: ZetaClient, signal: AbortSignal) 
   if (value.session === null) return null;
   if (!object(value.session) || !text(value.session.session_id)) throw bad();
   return value.session.session_id;
+}
+
+/** zeta's accepts_send for one child of the attached session, which only child_run_list rows carry; undefined when absent */
+export async function readAcceptsSend(client: ZetaClient, { sessionId, runId }: { sessionId: string; runId: string }, signal: AbortSignal) {
+  for (let offset = 0; ;) {
+    const reply: unknown = await client.request("child_run_list", { session_id: sessionId, offset, limit: 100 }, { signal, timeoutMs: 12000 });
+    if (!object(reply) || !Array.isArray(reply.runs)) throw bad();
+    const row: unknown = reply.runs.find((one) => object(one) && one.run_id === runId);
+    if (object(row)) return typeof row.accepts_send === "boolean" ? row.accepts_send : undefined;
+    if (!count(reply.next_offset) || reply.next_offset <= offset) return;
+    offset = reply.next_offset;
+  }
 }
 
 /** Owns the selected read source, report and continuation generation. Refresh retains the last valid report. */
