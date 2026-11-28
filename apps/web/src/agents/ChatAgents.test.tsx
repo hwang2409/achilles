@@ -69,15 +69,15 @@ test("a suspended child says when zeta retries, counts down, offers cancel and n
 // a provider-suspended child of this chat, read from the run catalog (synthetic); child_run_list carries accepts_send
 const paused = { ...running, accepts_follow_ups: false, status: "suspended", current_step: "suspended: provider unavailable, retrying", suspension_reason: "provider_unavailable",
   retry_state: "retrying", retry_started_at: "2026-11-08T00:00:00+00:00", retry_deadline_at: "2026-11-08T01:00:00+00:00", next_retry_at: "2099-01-01T00:00:00+00:00" };
-function pausedChat(accepts: boolean | undefined, sent: (text: string) => unknown = () => ({ accepted: true, run_id: "a:1" })) {
+function pausedChat(accepts: boolean | undefined, sent: (text: string, row: Record<string, unknown>) => unknown = () => ({ accepted: true, run_id: "a:1" }), base: Record<string, unknown> = paused) {
   const reads: string[] = [];
-  const row = { ...paused, ...(accepts === undefined ? {} : { accepts_send: accepts }) };
+  const row: Record<string, unknown> = { ...base, ...(accepts === undefined ? {} : { accepts_send: accepts }) };
   const client = { features: ["agent_run_catalog_v1", "child_runs", "child_recovery"], request: async (method: string, params: { text?: string }) => {
     reads.push(method);
     if (method === "status") return { session: { session_id: "a" } };
     if (method === "child_run_list") return { runs: [row] };
-    if (method === "child_run_send") return sent(params.text!);
-    return { revision: "sample", data: { items: [paused] } };
+    if (method === "child_run_send") return sent(params.text!, row);
+    return { revision: "sample", data: { items: [base] } };
   } } as unknown as ZetaClient;
   const send = createChildSendOwner({ withControl: async (run) => ({ value: await run(client) }) },
     async (zeta, key, text) => { await zeta.request("child_run_send", { session_id: key.sessionId, run_id: key.runId, text }); return { kind: "accepted", runId: key.runId }; });
@@ -112,6 +112,28 @@ test("a send refused with -32005 says not now, keeps the draft, and rereads the 
     expect(ui.container.textContent).not.toContain("32005");
     expect((ui.getByRole("textbox", { name: "message worker" }) as HTMLTextAreaElement).value).toBe("synthetic follow-up");
     expect(catalogReads() - before).toBe(1);
+  } finally { ui.unmount(); }
+});
+
+test("a send refused with -32005 whose reread says accepts_send false keeps the reason and drops the box", async () => {
+  const { ui } = pausedChat(true, (_, row) => { row.accepts_send = false; throw Object.assign(new Error("synthetic refusal"), { code: -32005 }); });
+  try {
+    await settle();
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "message worker" }), { target: { value: "synthetic follow-up" } }); });
+    await act(async () => { (ui.getByRole("button", { name: "send to worker" }) as HTMLButtonElement).click(); });
+    await settle();
+    expect(ui.queryByRole("textbox", { name: "message worker" })).toBeNull();
+    expect(ui.container.querySelector(".agents-composer[role=status]")?.textContent).toBe("this agent cannot take a message now.");
+  } finally { ui.unmount(); }
+});
+
+// zeta's accepts_send outranks the status rule for a running row too: a foreground child refuses every message
+test.each([[false, true, false], [true, false, true]])("a running child with accepts_send %p (follow-ups %p) shows a message box: %p", async (accepts: boolean, followUps: boolean, shown: boolean) => {
+  const { ui, reads } = pausedChat(accepts, undefined, { ...running, accepts_follow_ups: followUps });
+  try {
+    await settle();
+    expect(!!ui.queryByRole("textbox", { name: "message worker" })).toBe(shown);
+    expect(reads.filter((method) => method === "child_run_list")).toHaveLength(1);
   } finally { ui.unmount(); }
 });
 

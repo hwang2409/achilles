@@ -28,7 +28,9 @@ export function ChildComposer({ client, row, owner, readOnly, reportedAt, refres
   const blocked = (outcome?.refreshAfter ?? -Infinity) >= reportedAt;
   // one reread per refusal: the row's state changed under the send
   useEffect(() => { if (blocked) refresh(); }, [outcome?.refreshAfter]);
-  if (!inspect || attachment?.client !== inspect || attachment.root !== sessionId) return null;
+  // a refusal's reread can make the row unsendable: keep the reason, drop the box
+  if (!inspect) return outcome ? <p className="agents-composer" role="status">{outcome.message}</p> : null;
+  if (attachment?.client !== inspect || attachment.root !== sessionId) return null;
   const label = `send to ${agentType}`;
   return <div className="agents-composer" aria-label={`message ${agentType}`} role="group">
     <textarea aria-label={`message ${agentType}`} placeholder={`message ${agentType}`} value={text} rows={2} readOnly={pending}

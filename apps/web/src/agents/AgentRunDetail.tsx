@@ -114,13 +114,14 @@ export function RunHistory({ client, row }: { client: ZetaClient; row: AgentRun 
   const seen = useRef(revision);
   useEffect(() => { void owner.refresh(); return () => owner.close(); }, [owner]);
   useEffect(() => { if (seen.current !== revision) { seen.current = revision; void owner.changed(); } }, [owner, revision]);
-  // zeta stores a child's task at spawn, so a live run's empty transcript is a read that came before that write
-  const unwritten = !isTerminal(row.status) && !!result.result && !result.progress?.messages;
+  // zeta stores a child's task at spawn, so a running child's empty first read came before that write; a reread, a
+  // failed read, or any other state (suspended, idle, unknown) shows its final text instead of loading forever
+  const unwritten = (row.status === "running" || row.status === "finishing") && !!result.first && !result.warning && !!result.result && !result.progress?.messages;
   return <>
     {(result.loading || unwritten) && <ModuleState kind="loading" title="reading child history" />}
     {result.warning && <p role="status">{result.warning}</p>}
     {result.stale && <p role="status">run changed · refresh to read the latest stored history</p>}
     {!result.limited && <button type="button" disabled={result.loading} onClick={() => void owner.refresh()}>refresh transcript</button>}
-    {result.result && !unwritten && (result.progress?.complete && result.progress.messages === 0 ? <p>no stored messages</p> : <div className="agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
+    {result.result && !unwritten && (result.progress?.complete && result.progress.messages === 0 ? <p>{isTerminal(row.status) ? "no stored messages" : "no activity yet"}</p> : <div className="agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
   </>;
 }
