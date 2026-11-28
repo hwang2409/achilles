@@ -109,17 +109,14 @@ test("storage diff names keys only before, only after, and changed values; key o
     .toBe("only before: gone=x\nonly after: added=yyy...\nchanged: moved: old -> new");
 });
 
-test("no gate script compares JSON.stringify dumps of localStorage as strings; chromium lists keys in hash order, so use storageDiff", async () => {
-  const dump = /JSON\.stringify\(\s*(\{\s*\.\.\.\s*localStorage\s*\}|localStorage)\s*\)/;
+test("only storageSnapshot in gate-diagnostics.ts dumps localStorage; chromium lists keys in hash order, so a string compare of two dumps is flaky", async () => {
+  // any spread of localStorage or JSON.stringify(localStorage), on one line or many; no dump exists outside the helper, so none can be string-compared
+  const dump = /\.\.\.\s*localStorage\b|JSON\.stringify\(\s*localStorage\b/g;
   const found: string[] = [];
   for (const name of new Bun.Glob("*.ts").scanSync(import.meta.dir)) {
     if (name === "gate-diagnostics.ts" || name.endsWith(".test.ts")) continue;
-    const lines = (await Bun.file(`${import.meta.dir}/${name}`).text()).split("\n");
-    const dumpNames = lines.flatMap((line) => dump.test(line) ? [...line.matchAll(/(?:const|let|var)\s+(\w+)\s*=/g)].map((match) => match[1]) : []);
-    // shortcut: a line that string-compares and names a dump or a dump variable; data flow through other names is not traced
-    lines.forEach((line, index) => {
-      if (/[!=]==/.test(line) && (dump.test(line) || dumpNames.some((variable) => new RegExp(`\\b${variable}\\b`).test(line)))) found.push(`${name}:${index + 1}`);
-    });
+    const text = await Bun.file(`${import.meta.dir}/${name}`).text();
+    for (const match of text.matchAll(dump)) found.push(`${name}:${text.slice(0, match.index).split("\n").length}`);
   }
-  expect(found, `compare localStorage dumps with storageDiff (scripts/gate-diagnostics.ts), not as strings: ${found.join(", ")}`).toEqual([]);
+  expect(found, `dump localStorage with storageSnapshot(page) and compare dumps with storageDiff (scripts/gate-diagnostics.ts): ${found.join(", ")}`).toEqual([]);
 });
