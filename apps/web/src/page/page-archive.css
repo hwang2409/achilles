@@ -5,7 +5,7 @@
 .page-crumb-button { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 0; padding: 0 2px; border: 0; color: inherit; font: inherit; }
 .page-crumb-button > svg { flex: 0 0 auto; width: 12px; height: 12px; }
 .page-crumb-button:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
-.page-actions { position: fixed; z-index: 30; display: grid; min-width: 168px; margin-top: 8px; padding: 4px; background: var(--fulcrum-bg); color: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); border-radius: var(--g1-radius-control); box-shadow: 0 4px 6px rgba(0, 0, 0, .07), 0 2px 4px rgba(0, 0, 0, .05); }
+.page-actions { position: fixed; z-index: 30; display: grid; min-width: 168px; margin-top: 8px; padding: 4px; background: var(--fulcrum-bg); color: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); border-radius: var(--g1-radius-control); box-shadow: var(--g1-shadow-floating); }
 .page-actions button { min-height: 40px; padding-inline: 12px; text-align: start; }
 .page-title-edit { flex: 0 1 240px; min-width: 120px; min-height: 32px; padding: 2px 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; color: inherit; }
 .page-title-edit:focus-visible { outline: none; }
