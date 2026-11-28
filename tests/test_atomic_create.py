@@ -3,11 +3,11 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import homes
 import pytest
 from starlette.testclient import TestClient
 
 import achilles.pages as pages
-import achilles.web as web
 from achilles.pages import PageStore
 from achilles.tools import derived_output_schema
 
@@ -103,7 +103,7 @@ def creation_client(monkeypatch, tmp_path):
     )
     store = PageStore(root)
     store.set_create_mode("home", True)
-    app = web.create_app()
+    app = homes.app()
     with TestClient(app, client=("127.0.0.1", 1234), base_url="http://127.0.0.1") as client:
         yield root, store, client, initialize(client, store.ensure_credential("home"))
 
@@ -1123,7 +1123,7 @@ def test_restore_version_guards_over_public_interfaces(creation_client, monkeypa
         return
     if case == "route_bad_json":
         raw = TestClient(
-            web.create_app(),
+            homes.app(),
             base_url="http://127.0.0.1:8000",
             client=("127.0.0.1", 1234),
             raise_server_exceptions=False,
@@ -1196,7 +1196,7 @@ def test_page_code_lifecycle_through_real_mcp_requests(monkeypatch, tmp_path):
     monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
     store = PageStore(root)
     store.set_create_mode("home", True)
-    app = web.create_app()
+    app = homes.app()
     with TestClient(app, client=("127.0.0.1", 1234)) as client:
         home_headers = initialize(client, store.ensure_credential("home"))
         listed = mcp(client, home_headers, 2, "tools/list", {})

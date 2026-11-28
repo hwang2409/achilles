@@ -13,8 +13,9 @@ def private_proof_home() -> Path:
     if not raw or not worktree:
         raise RuntimeError("proof servers require ZETA_HOME and ZETA_PROOF_WORKTREE. " + _FIX)
     home = Path(raw).resolve()
-    default = (Path.home() / ".zeta").resolve()
-    if home == default or home.is_relative_to(default):
+    # casefold: macOS paths ignore case, so ~/.ZETA is ~/.zeta
+    default = Path(str((Path.home() / ".zeta").resolve()).casefold())
+    if Path(str(home).casefold()).is_relative_to(default):
         raise RuntimeError("proof servers never use ~/.zeta. " + _FIX)
     if (
         not home.is_relative_to(Path(tempfile.gettempdir()).resolve())

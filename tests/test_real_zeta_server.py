@@ -119,6 +119,12 @@ def test_proof_servers_refuse_a_missing_or_real_zeta_home(monkeypatch, tmp_path)
     monkeypatch.setenv("ZETA_HOME", str(tmp_path / "home/.zeta"))
     with pytest.raises(RuntimeError, match="never use ~/.zeta"):
         proof_home.private_proof_home()
+    # a worktree of HOME must not let a case variant of ~/.zeta through
+    monkeypatch.setenv("ZETA_PROOF_WORKTREE", str(tmp_path / "home"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "home/.ZETA/run"))
+    with pytest.raises(RuntimeError, match="never use ~/.zeta"):
+        proof_home.private_proof_home()
+    monkeypatch.setenv("ZETA_PROOF_WORKTREE", str(tmp_path / "worktree"))
     monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
     assert proof_home.private_proof_home() == (tmp_path / "zeta").resolve()
     assert list(tmp_path.iterdir()) == []

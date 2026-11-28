@@ -11,9 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
+import homes
 import pytest
 import uvicorn
-from homes import require_test_homes
 from starlette.testclient import TestClient
 
 import achilles.mcp_server as mcp_server
@@ -59,7 +59,7 @@ def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_p
     token = store.ensure_credential("home")
     other_token = store.ensure_credential("other")
     client = TestClient(
-        web.create_app(),
+        homes.app(),
         client=("127.0.0.1", 1234),
         headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"},
     )
@@ -182,7 +182,7 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
         "content-type": "application/json",
     }
     arguments = {"record_id": "note-1", "revision": 1, "text": "second"}
-    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+    with TestClient(homes.app(), client=("127.0.0.1", 1234)) as client:
         catalog = client.get("/api/pages/home/tools", headers=browser_headers).json()
         browser = client.post(
             "/api/pages/home/tools/update_note/invoke",
@@ -338,7 +338,7 @@ def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_pa
         "accept": "application/json, text/event-stream",
         "content-type": "application/json",
     }
-    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+    with TestClient(homes.app(), client=("127.0.0.1", 1234)) as client:
         browser = client.post(
             "/api/pages/home/tools/add_note/invoke",
             headers=browser_headers,
@@ -444,7 +444,7 @@ def test_list_tool_filters_by_record_id_through_mcp(monkeypatch, tmp_path: Path)
             },
         ).json()["result"]
 
-    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+    with TestClient(homes.app(), client=("127.0.0.1", 1234)) as client:
         initialized = client.post(
             "/mcp/",
             headers=mcp_headers,
@@ -505,7 +505,7 @@ def test_inspect_page_description_states_page_and_create_mode(monkeypatch, tmp_p
         ).json()["result"]["tools"]
         return next(tool for tool in listed if tool["name"] == "inspect_page")["description"]
 
-    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+    with TestClient(homes.app(), client=("127.0.0.1", 1234)) as client:
         initialized = client.post(
             "/mcp/",
             headers=mcp_headers,
@@ -572,9 +572,8 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
 
 
 def chat_client() -> TestClient:
-    require_test_homes()
     return TestClient(
-        web.create_app(),
+        homes.app(),
         client=("127.0.0.1", 1234),
         headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"},
     )
@@ -588,6 +587,8 @@ def chat_client() -> TestClient:
         ("/achilles-outside-temp", "tmp/zeta"),
         ("tmp/achilles", None),
         ("tmp/achilles", "home/.zeta"),
+        # the zeta checkout under the repo .cache is not a test home
+        ("tmp/achilles", str(Path(web.__file__).resolve().parents[2] / ".cache/zeta")),
     ],
 )
 def test_chat_client_refuses_a_real_home_before_opening_it(
@@ -904,7 +905,7 @@ def test_patch_chat_updates_fields_and_validates_input() -> None:
 
 
 def test_chat_routes_require_same_origin() -> None:
-    client = TestClient(web.create_app(), client=("127.0.0.1", 1234))
+    client = TestClient(homes.app(), client=("127.0.0.1", 1234))
     headers = {"host": "127.0.0.1:5190", "origin": "http://evil.test"}
     assert client.get("/api/chats", headers=headers).status_code == 403
     assert (
@@ -926,7 +927,7 @@ def test_chat_routes_require_same_origin() -> None:
 
 def test_json_routes_reject_a_body_that_is_not_a_json_object(tmp_path) -> None:
     token = PageStore(tmp_path / "achilles").ensure_credential("home")
-    client = TestClient(web.create_app(), client=("127.0.0.1", 1234), raise_server_exceptions=False)
+    client = TestClient(homes.app(), client=("127.0.0.1", 1234), raise_server_exceptions=False)
     headers = {"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"}
     bearer = {**headers, "authorization": f"Bearer {token}"}
     for method, path, sent in (
@@ -965,7 +966,7 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
         )
     home_token = store.ensure_credential("home")
     other_token = store.ensure_credential("other")
-    client = TestClient(web.create_app())
+    client = TestClient(homes.app())
     path = "/api/pages/home/tools/annotate_trace/rollback"
     headers = {"authorization": f"Bearer {other_token}", "origin": "http://testserver"}
     assert client.post(path, headers=headers, json={"version": 1}).status_code == 403
@@ -981,7 +982,7 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
 def test_records_reject_a_missing_or_invalid_json_body(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
-    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
+    client = TestClient(homes.app(), base_url="http://127.0.0.1")
     book = client.post("/api/pages/home/records/books", headers=own, json={"title": "dune"})
     path = f"/api/pages/home/records/books/{book.json()['record_id']}"
     for method, url in (("POST", "/api/pages/home/records/books"), ("PATCH", path)):
@@ -1003,7 +1004,7 @@ def test_runtime_error_rejects_a_bad_revision_and_keeps_the_first_error(tmp_path
         db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
     own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
     client = TestClient(
-        web.create_app(),
+        homes.app(),
         base_url="http://127.0.0.1",
         client=("127.0.0.1", 1234),
         raise_server_exceptions=False,
@@ -1023,7 +1024,7 @@ def test_runtime_error_rejects_a_bad_revision_and_keeps_the_first_error(tmp_path
 def test_bridge_insert_rejects_a_non_string_record_id_and_a_huge_body(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
-    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
+    client = TestClient(homes.app(), base_url="http://127.0.0.1")
     url = "/api/pages/home/records/books"
     for record_id in (7, ["a"], {"a": 1}, True):
         response = client.post(url, headers=own, json={"record_id": record_id})
@@ -1100,7 +1101,7 @@ def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
                 ") VALUES(?,?,?,?,?,?,?)",
                 ("home", "events", str(index), 1, json.dumps({"value": index}), stamp, stamp),
             )
-    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
+    client = TestClient(homes.app(), base_url="http://127.0.0.1")
     response = client.get(
         "/api/pages/home/records/events?limit=100",
         headers={"authorization": f"Bearer {token}"},
@@ -1165,7 +1166,7 @@ def test_filtered_records_observer_endpoint(
         )
 
     response = TestClient(
-        web.create_app(), base_url="http://127.0.0.1", raise_server_exceptions=False
+        homes.app(), base_url="http://127.0.0.1", raise_server_exceptions=False
     ).get(
         "/api/pages/home/records/items",
         params={"field": field, "equals": json.dumps(equals), "limit": limit},
@@ -1229,7 +1230,7 @@ def test_static_paths_are_contained(monkeypatch, tmp_path: Path) -> None:
         "/assets/../dist-secret/secret.txt",
         "/assets/link.txt",
     )
-    with running_http_app(web.create_app()) as port:
+    with running_http_app(homes.app()) as port:
         for path in paths:
             status, body = raw_get(port, path)
             assert status != 200, path
@@ -1271,7 +1272,7 @@ def test_discovery_requires_same_origin_loopback(
         )
     )
     monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
-    client = TestClient(web.create_app(), client=(peer, 1234))
+    client = TestClient(homes.app(), client=(peer, 1234))
     response = client.get("/api/zeta/discovery", headers=headers)
     assert response.status_code == 403
     assert "secret" not in response.text
@@ -1298,7 +1299,7 @@ def test_discovery_allows_browser_same_origin(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(web, "_static_root", lambda: static)
     monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
     client = TestClient(
-        web.create_app(),
+        homes.app(),
         client=("127.0.0.1", 1234),
         headers={
             "origin": "http://127.0.0.1:5190",
@@ -1331,7 +1332,7 @@ def test_forged_browser_headers_cannot_read_shell_secrets(monkeypatch, tmp_path:
     )
     monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
     client = TestClient(
-        web.create_app(),
+        homes.app(),
         client=("127.0.0.1", 1234),
         headers={
             "origin": "http://127.0.0.1:5190",
@@ -1348,7 +1349,7 @@ def test_forged_browser_headers_cannot_read_shell_secrets(monkeypatch, tmp_path:
 
 def test_non_ascii_shell_secret_is_forbidden() -> None:
     client = TestClient(
-        web.create_app(),
+        homes.app(),
         client=("127.0.0.1", 1234),
         headers={"origin": "http://127.0.0.1:5190", "host": "127.0.0.1:5190"},
     )
@@ -1375,7 +1376,7 @@ def test_discovery_rejects_invalid_port(monkeypatch, tmp_path: Path, port: objec
         )
     )
     monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
-    response = TestClient(web.create_app(), client=("127.0.0.1", 1234)).get(
+    response = TestClient(homes.app(), client=("127.0.0.1", 1234)).get(
         "/api/zeta/discovery",
         headers={"origin": "http://127.0.0.1:5190", "host": "127.0.0.1:5190"},
     )
@@ -1406,7 +1407,7 @@ def test_stopped_zeta_names_the_command_for_this_achilles(
     else:
         monkeypatch.delenv("ACHILLES_ZETA_DISCOVERY", raising=False)
     origin = f"http://127.0.0.1:{port}"
-    response = TestClient(web.create_app(), client=("127.0.0.1", 1234)).get(
+    response = TestClient(homes.app(), client=("127.0.0.1", 1234)).get(
         "/api/zeta/discovery", headers={"origin": origin, "host": f"127.0.0.1:{port}"}
     )
     assert response.status_code == 503
@@ -1582,7 +1583,7 @@ def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: P
 
     # what the sandboxed frame's script tags send: an opaque origin, cross-site, cors mode
     from_frame = {"origin": "null", "sec-fetch-site": "cross-site", "sec-fetch-dest": "script"}
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         frame = client.get(
             "/api/pages/home/frame",
             headers={"sec-fetch-site": "same-origin", "sec-fetch-dest": "iframe"},
@@ -1620,7 +1621,7 @@ def test_gated_frame_reads_are_never_stored_by_the_browser(tmp_path: Path) -> No
     from_frame = {"origin": "null", "sec-fetch-site": "cross-site", "sec-fetch-dest": "script"}
     bearer = {"authorization": f"Bearer {store.ensure_credential('home')}"}
 
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         responses = {
             "frame": client.get(
                 "/api/pages/home/frame",
@@ -1660,7 +1661,7 @@ def test_frame_routes_refuse_cross_site_and_rebound_requests(tmp_path: Path) -> 
     fetched = {"origin": "https://evil.example", "sec-fetch-site": "cross-site"}
     rebound = {"host": "evil.example"}  # dns rebinding: the attacker's name points at 127.0.0.1
 
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         statuses = {
             "fetch() frame": client.get(
                 "/api/pages/home/frame", headers=fetched | {"sec-fetch-dest": "empty"}
@@ -1698,7 +1699,7 @@ def test_fresh_home_is_plain_chat_and_a_codeless_page_keeps_the_notice(tmp_path:
             ("old", "/old", "old block page", "2025-01-01", "2025-01-01"),
         )
 
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         home = client.get("/api/pages/home").json()
         old = client.get("/api/pages/old").json()
 
@@ -1719,7 +1720,7 @@ def test_a_codeless_page_in_a_migrated_home_names_the_layout_backup(tmp_path: Pa
             ("old", "/old", "old block page", "2025-01-01", "2025-01-01"),
         )
 
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         old = client.get("/api/pages/old").json()
 
     backup = root / "achilles.sqlite3.pre-block-model-v3.backup"
@@ -1737,7 +1738,7 @@ def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) ->
         )
     own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
     other = {"authorization": f"Bearer {store.ensure_credential('other')}"}
-    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
+    client = TestClient(homes.app(), base_url="http://127.0.0.1")
     book = client.post("/api/pages/home/records/books", headers=own, json={"title": "dune"})
     theirs = client.post("/api/pages/other/records/books", headers=other, json={"title": "emma"})
     path = f"/api/pages/home/records/books/{book.json()['record_id']}"
@@ -1767,9 +1768,7 @@ def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) ->
 def test_a_duplicate_record_id_insert_is_a_409(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
-    client = TestClient(
-        web.create_app(), base_url="http://127.0.0.1", raise_server_exceptions=False
-    )
+    client = TestClient(homes.app(), base_url="http://127.0.0.1", raise_server_exceptions=False)
     url = "/api/pages/home/records/books"
     assert client.post(url, headers=own, json={"record_id": "r1"}).status_code == 200
     duplicate = client.post(url, headers=own, json={"record_id": "r1", "title": "again"})
@@ -1786,7 +1785,7 @@ def test_non_utf8_body_is_a_400_not_a_500(tmp_path: Path) -> None:
         "origin": "http://127.0.0.1:5190",
         "content-type": "application/json",
     }
-    client = TestClient(web.create_app(), client=("127.0.0.1", 1234), raise_server_exceptions=False)
+    client = TestClient(homes.app(), client=("127.0.0.1", 1234), raise_server_exceptions=False)
     for path in (
         "/api/pages/home/records/notes",
         "/api/pages/home/code/restore",
@@ -1834,7 +1833,7 @@ def test_render_page_follows_the_edit_gate_and_own_page_rule(tmp_path: Path) -> 
     def render(rpc, arguments):
         return rpc("tools/call", {"name": "render_page", "arguments": arguments})
 
-    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+    with TestClient(homes.app(), client=("127.0.0.1", 1234)) as client:
         home = _mcp(client, store.ensure_credential("home"))
         parent = _mcp(client, store.ensure_credential("parent"))
         listed = home("tools/list", {})["tools"]
@@ -1868,7 +1867,7 @@ def test_render_page_runs_two_at_once_and_a_third_is_busy(monkeypatch, tmp_path:
     monkeypatch.setattr(mcp_server, "RENDER_WAIT_SECONDS", 0.2, raising=False)
     call = {"name": "render_page", "arguments": {}}
     with (
-        TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client,
+        TestClient(homes.app(), client=("127.0.0.1", 1234)) as client,
         ThreadPoolExecutor(2) as pool,
     ):
         # one session runs its calls in order, so each render gets its own session
