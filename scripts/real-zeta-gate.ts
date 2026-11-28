@@ -547,8 +547,9 @@ with _database() as db:
   const dropParkChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...parkChats], env);
   if (!(await waitForExit(dropParkChats, 10_000)) || dropParkChats.exitCode !== 0) throw new Error(`park chat cleanup exited ${dropParkChats.exitCode}`);
   // the attention place on a zeta seeded with synthetic attention records
-  const attentionHome = join(temp, "attention-zeta");
-  const attentionDiscovery = join(attentionHome, "attention-ws.json");
+  // short: zeta binds a unix socket under the home, and macOS caps its path at 104 bytes
+  const attentionHome = join(temp, "attn");
+  const attentionDiscovery = join(attentionHome, "ws.json");
   await mkdir(attentionHome, { mode: 0o700 });
   const attentionServer = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/attention-server.py")], {
     ...env, ZETA_HOME: attentionHome, ZETA_ACCOUNT_HOME: attentionHome, ZETA_PROOF_DISCOVERY: attentionDiscovery,
