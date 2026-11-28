@@ -34,7 +34,6 @@ test("200 retrying rows share one page clock, which stops with the last row", as
   try {
     const ui = render(<ul>{Array.from({ length: 200 }, (_, index) => <li key={index}><RetryLine retry={retrying(40 + index)} /></li>)}</ul>);
     await act(async () => {});
-    expect(started).toHaveBeenCalledTimes(1);
     await act(async () => { clock += 10_000; jest.advanceTimersByTime(10_000); });
     expect(ui.container.querySelector("li")?.textContent).toBe("provider unavailable · retries in 30s");
     expect(started).toHaveBeenCalledTimes(1);
@@ -45,6 +44,23 @@ test("200 retrying rows share one page clock, which stops with the last row", as
     await act(async () => {});
     expect(started).toHaveBeenCalledTimes(1);
   } finally { started.mockRestore(); stopped.mockRestore(); time.mockRestore(); jest.useRealTimers(); }
+});
+
+test("the page clock ticks on the whole second, so every tab shows the same second at the same moment", async () => {
+  jest.useFakeTimers();
+  let clock = now + 300;
+  const time = spyOn(Date, "now").mockImplementation(() => clock);
+  const ui = render(<RetryLine retry={retrying(40)} />);
+  try {
+    await act(async () => {});
+    expect(ui.container.textContent).toBe("provider unavailable · retries in 40s");
+    await act(async () => { clock += 699; jest.advanceTimersByTime(699); });
+    expect(ui.container.textContent).toBe("provider unavailable · retries in 40s");
+    await act(async () => { clock += 1; jest.advanceTimersByTime(1); });
+    expect(ui.container.textContent).toBe("provider unavailable · retries in 39s");
+    await act(async () => { clock += 1000; jest.advanceTimersByTime(1000); });
+    expect(ui.container.textContent).toBe("provider unavailable · retries in 38s");
+  } finally { ui.unmount(); time.mockRestore(); jest.useRealTimers(); }
 });
 
 test("the state filter offers suspended only when zeta negotiated child recovery", () => {
@@ -60,21 +76,29 @@ test("the state filter offers suspended only when zeta negotiated child recovery
 const waiting = { runId: "a:1", sessionId: "a", parentRunId: null, agentType: "run", status: "suspended" as const, description: "work", currentStep: "suspended",
   turnsUsed: 0, toolCount: 0, elapsedSeconds: 0, startedAt: now, retry: retrying(40) };
 
-test("a run that never ran a turn shows no elapsed time; one that ran shows it", () => {
+test("a run that never ran a turn shows no elapsed time; one that ran shows it; a live run counts from its start", () => {
+  // a live run's elapsed counts on the page clock from its start; a finished run keeps zeta's number
+  const time = spyOn(Date, "now").mockImplementation(() => now);
   const fields = (row: typeof waiting) => {
     const ui = render(<AgentRunDetail chosen={row} title="chat" id="a:1" client={null} reportedAt={now} refreshing={false} refresh={() => {}} />);
     const labels = [...ui.container.querySelectorAll(".agents-run-head dt")].map((node) => node.textContent);
-    const value = [...ui.container.querySelectorAll(".agents-run-head div")].find((node) => node.querySelector("dt")?.textContent === "elapsed at last refresh")?.querySelector("dd")?.textContent;
+    const value = [...ui.container.querySelectorAll(".agents-run-head div")].find((node) => node.querySelector("dt")?.textContent === "elapsed")?.querySelector("dd")?.textContent;
     ui.unmount();
     return { labels, value };
   };
-  expect(fields(waiting).labels).not.toContain("elapsed at last refresh");
-  // real zeta reports a fraction of a second
-  expect(fields({ ...waiting, elapsedSeconds: 0.4 }).labels).not.toContain("elapsed at last refresh");
-  expect(fields({ ...waiting, elapsedSeconds: 3.2 }).value).toBe("3s");
-  expect(fields({ ...waiting, turnsUsed: 1, elapsedSeconds: 5 }).value).toBe("5s");
-  // a finished one-turn child under 1 s did work: "<1s", not "0s"
-  expect(fields({ ...waiting, status: "completed", retry: undefined, finishedAt: now + 400, turnsUsed: 1, elapsedSeconds: 0.4 } as unknown as typeof waiting).value).toBe("<1s");
+  try {
+    expect(fields(waiting).labels).not.toContain("elapsed");
+    // real zeta reports a fraction of a second
+    expect(fields({ ...waiting, startedAt: now - 400 }).labels).not.toContain("elapsed");
+    expect(fields({ ...waiting, startedAt: now - 3200 }).value).toBe("3s");
+    expect(fields({ ...waiting, turnsUsed: 1, startedAt: now - 5000 }).value).toBe("5s");
+    // the report's number is from its read, not now
+    expect(fields({ ...waiting, startedAt: now - 19_000, elapsedSeconds: 15 }).value).toBe("19s");
+    // a finished one-turn child under 1 s did work: "<1s", not "0s"
+    expect(fields({ ...waiting, status: "completed", retry: undefined, finishedAt: now + 400, turnsUsed: 1, elapsedSeconds: 0.4 } as unknown as typeof waiting).value).toBe("<1s");
+    // stored agent state has no elapsed: none is made up from its start
+    expect(fields({ ...waiting, startedAt: now - 5000, elapsedSeconds: undefined } as unknown as typeof waiting).labels).not.toContain("elapsed");
+  } finally { time.mockRestore(); }
 });
 
 // a zeta whose stored child transcript reads as the given pages in turn, the last one repeating (synthetic)
