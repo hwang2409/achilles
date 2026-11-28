@@ -15,3 +15,6 @@
   .chat-tasks-rows code { grid-column: 1 / -1; }
 }
 @media (max-width: 760px), (pointer: coarse) { .chat-tasks-rows button { min-width: 44px; min-height: 44px; } }
+/* the header chip with the running count: a live mark like a running agent, so it reads as work, not a plain action */
+.chat-actions .chat-tasks-chip { color: var(--fulcrum-accent); font-variant-numeric: tabular-nums; }
+.chat-tasks-chip::before { content: ""; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: .55ch; display: inline-block; background: currentColor; }
