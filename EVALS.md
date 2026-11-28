@@ -254,8 +254,10 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   most `max` (the agent tried, then stopped instead of looping).
 - `no_new_page` passes when every page after the run existed before it.
 - `browser_text` opens the page after every model step and reads the compiled
-  page's text; text that never shows fails the check (`agent_fail`), while a
-  browser or page that does not load is a `harness_error`.
+  page frame's text (the app shell around it is kept only as a diagnostic); text
+  that never shows, or a frame that never loads (a playwright `TimeoutError`),
+  fails the check (`agent_fail`). only a shell that does not become ready or a
+  non-timeout playwright error is a `harness_error`.
 - `answer_mentions` grades a step's final answer text (the snapshot keeps it as
   `answers[step_id]`). it names the `step` and a `value` list; any one value
   must appear, case-insensitively, as a whole token ("12" never matches "120",
