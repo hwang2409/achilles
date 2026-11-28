@@ -139,6 +139,23 @@ def test_build_uses_network_only_for_scriptless_install(monkeypatch, tmp_path: P
     assert not any("docker.sock" in mount for mount in mounts)
 
 
+def test_each_build_installs_with_its_own_package_cache(monkeypatch, tmp_path: Path) -> None:
+    calls, _ = _fake_containers(monkeypatch, _build_outputs())
+    monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
+
+    build_page(tmp_path, "home", "export default 1", {})
+    build_page(tmp_path, "other", "export default 2", {})
+
+    def cache(command: list[str]) -> str:
+        mount = next(value for value in command if value.endswith(",dst=/cache"))
+        return mount.removeprefix("type=bind,src=").removesuffix(",dst=/cache")
+
+    first_cache, second_cache = cache(calls[0]), cache(calls[3])
+    assert first_cache != second_cache, "a build must not share a package cache with another page"
+    assert not Path(first_cache).exists() and not Path(second_cache).exists()
+    assert not (tmp_path / "package-cache").exists()
+
+
 def test_oversized_output_is_bounded_and_removes_container(monkeypatch, tmp_path: Path) -> None:
     removed: list[str] = []
     process = _Process(b"x" * 1024)

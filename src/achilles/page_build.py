@@ -369,13 +369,9 @@ def _build(
     docker: str, root: Path, source: str, package: dict[str, Any], lockfile: str | None
 ) -> dict[str, Any]:
     workspace = Path(tempfile.mkdtemp(prefix="page-build-", dir=root / "build-cache")).resolve()
-    # a saved lockfile names its own download sources, so it gets a cache no other build reads
-    if lockfile is None:
-        package_cache = root / "package-cache"
-        package_cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-    else:
-        package_cache = Path(f"{workspace}-cache")
-        package_cache.mkdir(mode=0o700)
+    # bun trusts cached packages on reuse, so a cache one page could write is never shared
+    package_cache = Path(f"{workspace}-cache")
+    package_cache.mkdir(mode=0o700)
     try:
         (workspace / "src").mkdir()
         (workspace / "src/Page.tsx").write_text(source, encoding="utf-8")
@@ -406,5 +402,4 @@ def _build(
         }
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
-        if lockfile is not None:
-            shutil.rmtree(package_cache, ignore_errors=True)
+        shutil.rmtree(package_cache, ignore_errors=True)
