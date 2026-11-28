@@ -13,6 +13,7 @@ import { gatePathComplete } from "./gate-path-complete";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
 import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
+import { childRecoveryArtifacts, gateChildRecovery } from "./gate-child-recovery";
 import { gateParkedChats, parkArtifacts } from "./gate-park";
 import { attentionArtifacts, gateAttention } from "./gate-attention";
 import { gateGraceContinue, graceArtifacts } from "./gate-grace";
@@ -539,6 +540,25 @@ with _database() as db:
   const agentChats = (await chatIds()).filter((id) => !chatsBefore.has(id));
   const dropAgentChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...agentChats], env);
   if (!(await waitForExit(dropAgentChats, 10_000)) || dropAgentChats.exitCode !== 0) throw new Error(`agent chat cleanup exited ${dropAgentChats.exitCode}`);
+  // child recovery on a zeta whose child provider stays offline until the gate writes the flag file
+  const recoveryHome = join(temp, "recovery-zeta");
+  const recoveryCwd = join(temp, "recovery-cwd");
+  const recoveryDiscovery = join(recoveryHome, "ws.json");
+  await mkdir(recoveryHome, { mode: 0o700 });
+  await mkdir(recoveryCwd, { mode: 0o700 });
+  await Bun.write(join(recoveryHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
+  const recoveryServer = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/child-recovery-server.py")], {
+    ...env, ZETA_HOME: recoveryHome, ZETA_ACCOUNT_HOME: recoveryHome, ZETA_PROOF_DISCOVERY: recoveryDiscovery, ZETA_PROOF_CWD: recoveryCwd,
+  });
+  await waitFor(async () => await Bun.file(recoveryDiscovery).exists(), "child recovery zeta discovery");
+  const recoveryZeta = await readDiscovery(recoveryDiscovery);
+  const chatsBeforeRecovery = new Set(await chatIds());
+  await gateChildRecovery(browser, origin, { ...recoveryZeta, url: `ws://127.0.0.1:${recoveryZeta.port}` }, join(recoveryCwd, "provider-online"),
+    [recoveryHome], waitFor, screenshotDir);
+  await stop(recoveryServer);
+  const recoveryChats = (await chatIds()).filter((id) => !chatsBeforeRecovery.has(id));
+  const dropRecoveryChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...recoveryChats], env);
+  if (!(await waitForExit(dropRecoveryChats, 10_000)) || dropRecoveryChats.exitCode !== 0) throw new Error(`recovery chat cleanup exited ${dropRecoveryChats.exitCode}`);
   // session_park limits on a zeta whose turns stay busy until the gate releases them
   const parkHome = join(temp, "park-zeta");
   const parkDiscovery = join(parkHome, "park-ws.json");
@@ -3140,7 +3160,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts, ...parkArtifacts, ...attentionArtifacts, ...graceArtifacts, "park-new-chat-1440x900.png"],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts, ...childRecoveryArtifacts, ...parkArtifacts, ...attentionArtifacts, ...graceArtifacts, "park-new-chat-1440x900.png"],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
