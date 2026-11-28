@@ -24,7 +24,7 @@
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat",
-      "prompt": "rewrite this page to list the chores collection. each row has a button labeled 'Done <title>' that sets done to true, and a button labeled 'Delete <title>' that deletes the chore."
+      "prompt": "rewrite this page to list the chores collection. each row has a button labeled 'Done <title>' that sets done to true, and a button labeled 'Delete <title>' that deletes the chore. one click on 'Done <title>' sets done at once, and one click on 'Delete <title>' deletes that row at once: no confirm button, dialog, or second step."
     },
     {
       "id": "done-alpha",
@@ -59,7 +59,8 @@
     {
       "id": "no-errors",
       "type": "no_error",
-      "page": "home"
+      "page": "home",
+      "required": false
     }
   ]
 }
