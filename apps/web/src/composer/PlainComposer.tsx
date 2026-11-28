@@ -16,6 +16,7 @@ import {
   type ComposerAdapterProps,
 } from "./useComposerDelivery";
 import { ComposerHint } from "./hint";
+import { useSlashMenu } from "./SlashMenu";
 import { usePathCompletion } from "./pathCompletion";
 
 // send while the composer is held: shown, and off
@@ -42,6 +43,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
   // images cannot steer: with a turn running they wait for it, like a queued message
   const queues = model.sending || model.queue.length > 0 || (steer && model.images.length > 0);
   const { text: message, tone } = composerStatus(model);
+  const slash = useSlashMenu(id, model.draft, props.slashCommands, edit, submit);
   const caret = useRef<number | null>(null);
   const paths = usePathCompletion(props.completePaths, (value, at) => { caret.current = at; edit(value); });
   useLayoutEffect(() => {
@@ -53,7 +55,8 @@ export function PlainComposer(props: ComposerAdapterProps) {
   useLayoutEffect(() => { if (input.current) paths.closeIfStale(input.current); }, [model.draft]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (paths.onKeyDown(event)) return;
+    // the two lists cannot both be open: slash needs a draft of only `/name`, a path token needs `@` after a space
+    if (slash.onKeyDown(event) || paths.onKeyDown(event)) return;
     if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
       cancel();
@@ -124,6 +127,8 @@ export function PlainComposer(props: ComposerAdapterProps) {
           aria-describedby={readOnly ? undefined : `${id}-hint ${id}-message`}
           readOnly={readOnly}
           {...(readOnly ? {} : paths.fieldProps)}
+          // after the path props: they set aria-controls even when closed, so the open slash menu must win
+          {...(readOnly ? {} : slash.field)}
           onChange={readOnly ? undefined : (event) => { edit(event.target.value); paths.sync(event.target); }}
           // caret moves by key or pointer, not onSelect: a focus from code fires that too, and must not open a list
           onKeyUp={readOnly ? undefined : (event) => paths.sync(event.currentTarget)}
@@ -171,7 +176,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           {queues ? "queue" : steer ? "steer" : "send"}
         </button>
       </div>}
-    {!readOnly && props.commandOutput}
+    {!readOnly && (slash.menu || props.commandOutput)}
     </form>
   );
 }

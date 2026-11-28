@@ -6,6 +6,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+import type { SlashCommandInfo } from "@fulcrum/zeta";
 import { useRunStore, type ComposerIntent, type ComposerProps } from "@fulcrum/react";
 import {
   composerActivity,
@@ -32,8 +33,8 @@ export type ComposerAdapterProps = ComposerProps & {
   onDraftChange: (text: string) => void;
   /** Enter took this text out of the box; the stored draft drops it */
   onDraftSubmit: (sent: string) => void;
-  /** Runs a local slash command instead of sending to the model. Returns true when the draft should be cleared. */
-  onCommand?: (command: { name: string; arg: string }) => boolean;
+  /** Runs a local slash command instead of sending to the model; `draft` is the exact text it came from. Returns true when the draft should be cleared. */
+  onCommand?: (command: { name: string; arg: string }, draft: string) => boolean;
   /** the chat this composer shows; its submitted messages belong to the chat's owner in `chatQueues` */
   chatId: string;
   /** this chat was just created by the page's new-chat composer `fromNewChat`; that composer's owner moves here */
@@ -41,6 +42,8 @@ export type ComposerAdapterProps = ComposerProps & {
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
   questionWaiting?: boolean;
   commandOutput?: ReactNode;
+  /** the session's slash commands for the "/" menu; `null` while unread or on a zeta without them */
+  slashCommands?: readonly SlashCommandInfo[] | null;
   /** the chat's modes and model, shown in the composer bar even when the composer is read-only */
   controls?: ReactNode;
   /** read-only for a moment (a swap is pending): the reason shows and send shows as off */
@@ -58,8 +61,8 @@ export type DeliveryOptions = ComposerProps & {
   onDraftChange: (text: string) => void;
   onDraftSubmit: (sent: string) => void;
   isTurnRunning?: () => boolean;
-  /** Runs a local slash command instead of sending to the model. Returns true when the draft should be cleared. */
-  onCommand?: (command: { name: string; arg: string }) => boolean;
+  /** Runs a local slash command instead of sending to the model; `draft` is the exact text it came from. Returns true when the draft should be cleared. */
+  onCommand?: (command: { name: string; arg: string }, draft: string) => boolean;
 };
 
 export type ComposerDelivery = {
@@ -159,7 +162,7 @@ export function createComposerDelivery(options: DeliveryOptions, rows: Omit<Queu
         const parsed = parseComposerInput(model.draft);
         if (parsed.kind === "command") {
           // a slash command never reaches the model; the handler keeps or clears the draft
-          if (current.onCommand({ name: parsed.name, arg: parsed.arg })) apply({ type: "edit", draft: "" });
+          if (current.onCommand({ name: parsed.name, arg: parsed.arg }, model.draft)) apply({ type: "edit", draft: "" });
           return;
         }
         // "//text" sends the literal "/text"
