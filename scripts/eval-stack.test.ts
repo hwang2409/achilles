@@ -92,11 +92,13 @@ test("a SIGKILLed eval leaves no child of its stack alive", async () => {
     // the stack is up (achilles serve and zeta serve), then the eval is SIGKILLed, as a tool timeout does
     for (let i = 0; i < 1800 && !Buffer.concat(output).includes('"retained_state"') && child.exitCode === null; i++) await Bun.sleep(100); // a cold cache clones zeta first
     expect(Buffer.concat(output).toString(), "the eval stack did not start").toContain('"retained_state"');
-    pgids = new Set(descendants(child.pid!, processRows()).map(row => row.pgid));
-    expect(pgids.size, "the stack has no child process groups").toBeGreaterThan(1);
+    // plain pid/ppid/pgid columns: the long `ps eww` rows are only needed for the environment marker
+    const groups = () => Bun.spawnSync(["ps", "-axo", "pid=,ppid=,pgid="], { stdout: "pipe" }).stdout.toString().trim().split("\n").map(line => { const [pid, ppid, pgid] = line.trim().split(/\s+/).map(Number); return { pid, ppid, pgid, executable: "", command: line }; });
+    pgids = new Set(descendants(child.pid!, groups()).map(row => row.pgid));
+    expect(pgids.size, `the stack has no child process groups: ${Buffer.concat(output).toString().slice(-2000)}`).toBeGreaterThan(1);
     process.kill(child.pid!, "SIGKILL");
     // by pgid: macOS ps hides the environment (the marker) of some binaries
-    const alive = () => processRows().filter(row => pgids.has(row.pgid));
+    const alive = () => groups().filter(row => pgids.has(row.pgid));
     let survivors = alive();
     for (let i = 0; i < 50 && survivors.length; i++) { await Bun.sleep(100); survivors = alive(); }
     expect(survivors.map(row => `${row.pid} ${row.ppid} ${row.command.slice(0, 80)}`), "children of the SIGKILLed eval must exit within 5s").toEqual([]);
