@@ -62,7 +62,7 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
   }
   async function inspect(tab: Page, artifact?: string) {
     const state = await tab.evaluate(() => JSON.stringify([document.documentElement.outerHTML, location.href, history.state, history.length,
-      performance.getEntriesByType("navigation").map((entry) => entry.name), { ...localStorage }, { ...sessionStorage }]));
+      performance.getEntriesByType("navigation").map((entry) => entry.name), ...[localStorage, sessionStorage].map((store) => Object.entries(store))]));
     if (texts.some((key) => [state, ...consoleText, processLogs?.() ?? ""].some((line) => line.includes(mark(key))))) throw new Error("add canary escaped the form or outbound request");
     if (!await tab.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) throw new Error("add form overflows viewport");
     if (!artifact || !dir) return;
