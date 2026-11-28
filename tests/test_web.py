@@ -565,7 +565,7 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     assert home.stat().st_mode & 0o777 == 0o700
     assert (home / "achilles.sqlite3").stat().st_mode & 0o777 == 0o600
     with sqlite3.connect(home / "achilles.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
     for sidecar in (home / "achilles.sqlite3-wal", home / "achilles.sqlite3-shm"):
         if sidecar.exists():
             assert sidecar.stat().st_mode & 0o777 == 0o600
@@ -660,6 +660,102 @@ def test_page_index_is_safe_bounded_and_origin_protected(tmp_path: Path) -> None
     remainder = client.get(f"/api/pages?limit=200&before={capped['next']}").json()
     assert len(remainder["pages"]) == 1
     assert remainder["next"] is None
+
+
+def test_page_rename_archive_and_restore_through_the_api(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("reading", "/reading", "reading", "2025-01-01", "2025-01-01"),
+        )
+        db.execute(
+            "INSERT INTO chat(session_id,page_id,created_at,updated_at) VALUES(?,?,?,?)",
+            ("reading-chat", "reading", "2025-01-01", "2025-01-02"),
+        )
+    store.insert_record("reading", "books", {"title": "dune"})
+    client = chat_client()
+
+    def counts() -> tuple[int, int]:
+        with store.transaction() as db:
+            return (
+                db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0],
+                db.execute("SELECT COUNT(*) FROM code_revision").fetchone()[0],
+            )
+
+    before = counts()
+    renamed = client.patch("/api/pages/reading", json={"title": "  books  "})
+    assert renamed.status_code == 200
+    assert renamed.json() == {
+        "id": "reading",
+        "route": "/reading",
+        "title": "books",
+        "archived_at": None,
+    }
+    assert client.get("/api/pages/reading").json()["title"] == "books"
+    assert [page["title"] for page in client.get("/api/pages").json()["pages"]] == [
+        "home",
+        "books",
+    ]
+    chats = client.get("/api/chats").json()["chats"]
+    assert [chat["page_title"] for chat in chats] == ["books"]
+
+    archived = client.patch("/api/pages/reading", json={"archived": True})
+    assert archived.status_code == 200
+    stamp = archived.json()["archived_at"]
+    assert stamp
+    assert [page["id"] for page in client.get("/api/pages").json()["pages"]] == ["home"]
+    hidden = client.get("/api/pages?archived=1").json()["pages"]
+    assert [(page["id"], page["archived_at"]) for page in hidden] == [("reading", stamp)]
+    page = client.get("/api/pages/reading")
+    assert page.status_code == 200, "an archived page's route must stay reachable"
+    assert page.json()["archived_at"] == stamp
+    assert counts() == before
+
+    restored = client.patch("/api/pages/reading", json={"archived": False})
+    assert restored.json()["archived_at"] is None
+    assert [page["id"] for page in client.get("/api/pages").json()["pages"]] == [
+        "home",
+        "reading",
+    ]
+    assert client.get("/api/pages?archived=1").json()["pages"] == []
+    assert counts() == before
+
+    refused = client.patch("/api/pages/home", json={"archived": True})
+    assert refused.status_code == 409
+    assert refused.text == "home cannot be archived"
+    assert client.get("/api/pages/home").json()["archived_at"] is None
+
+
+@pytest.mark.parametrize(
+    "body, detail",
+    [
+        ({"title": ""}, "title must be a non-blank string"),
+        ({"title": "   "}, "title must be a non-blank string"),
+        ({"title": None}, "title must be a non-blank string"),
+        ({"title": "x" * 201}, "title must be at most 200 characters"),
+        ({"archived": "yes"}, "archived must be a boolean"),
+        ({"route": "/elsewhere"}, "provide only title or archived"),
+        ({}, "provide only title or archived"),
+    ],
+)
+def test_page_patch_refuses_bad_input(body, detail) -> None:
+    client = chat_client()
+    response = client.patch("/api/pages/home", json=body)
+    assert response.status_code == 400
+    assert response.text == detail
+    assert client.get("/api/pages/home").json()["title"] == "home"
+
+
+def test_page_patch_needs_same_origin_and_a_known_page() -> None:
+    client = chat_client()
+    assert client.patch("/api/pages/missing", json={"title": "x"}).status_code == 404
+    assert client.get("/api/pages?archived=yes").status_code == 400
+    response = client.patch(
+        "/api/pages/home", json={"title": "x"}, headers={"origin": "http://evil.test"}
+    )
+    assert response.status_code == 403
+    assert client.get("/api/pages/home").json()["title"] == "home"
 
 
 def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
@@ -1530,7 +1626,7 @@ def test_chats_from_a_database_without_the_sent_marker_stay_listed(tmp_path: Pat
         "untitled": (True, None, None),
     }
     with sqlite3.connect(home / "achilles.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
 
 
 def test_versions_lists_tool_versions_with_the_active_one(tmp_path: Path) -> None:

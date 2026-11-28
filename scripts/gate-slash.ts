@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "playwright";
 import type { GateWait } from "./gate-diagnostics";
+import { webSlashCommands } from "../apps/web/src/composer/commands";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 type Frame = { id?: number | string; method?: string; params?: { text?: string }; result?: { kind?: string; text?: string; commands?: { name?: string }[] } };
@@ -25,7 +26,10 @@ export async function gateSlashCommands(page: Page, requests: () => Frame[], wai
   await gateWait.playwright(menu.getByRole("option", { name: /^\/help/ }), "waitFor", { timeout: 20_000 });
   const listed = requests().slice(since).find((frame) => frame.result?.commands)?.result?.commands?.map((row) => row.name) ?? [];
   if (!listed.includes("help")) throw new Error(`slash_list did not list help: ${JSON.stringify(listed)}`);
-  if (await menu.getByRole("option").count() !== listed.length) throw new Error("the menu does not show every listed command");
+  if (!listed.includes("project-instructions")) throw new Error(`slash_list did not list project-instructions: ${JSON.stringify(listed)}`);
+  const shown = await menu.getByRole("option").locator("span").allInnerTexts();
+  const expected = webSlashCommands(listed.flatMap((name) => name ? [{ name }] : [])).map((row) => `/${row.name}`);
+  if (JSON.stringify(shown) !== JSON.stringify(expected)) throw new Error(`the menu shows ${JSON.stringify(shown)}, not the web commands ${JSON.stringify(expected)}`);
   await field.press("ArrowDown");
   await field.press("ArrowUp");
   await capture("slash-menu-1440x900");

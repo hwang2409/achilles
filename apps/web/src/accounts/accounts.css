@@ -1,11 +1,11 @@
 .accounts-place { padding: var(--g1-page-padding); container-type: inline-size; }
-.accounts-place > h2::first-letter { text-transform: uppercase; }
-.accounts-place > h2 { font-size: var(--g1-type-title); font-weight: var(--g1-weight-title); margin: 0; text-wrap: balance; }
+.accounts-place:focus { outline: none; }
 .account-rows { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--fulcrum-border); }
 .account-rows > li { display: grid; gap: 16px; padding: 16px; border-bottom: 1px solid var(--g1-rule); overflow-wrap: anywhere; }
 .account-identity h3 { font-size: 1em; margin: 0; }
 .account-identity p { display: flex; gap: 4px 12px; flex-wrap: wrap; margin: 6px 0 0; }
-.account-identity p, .account-usage p, .account-window time { color: var(--fulcrum-muted); }
+.account-identity p, .account-usage p, .account-window[data-reset-passed="true"] > div { color: var(--fulcrum-muted); }
+[data-limited="true"] .account-availability { color: var(--g1-warn); }
 .account-usage { display: grid; gap: 8px; }
 .account-usage p { margin: 0; }
 [data-available="false"] .account-availability, .account-usage [data-failed="true"] { color: var(--fulcrum-danger); }
