@@ -40,8 +40,15 @@ export function usePathCompletion(complete: CompletePaths | undefined, insert: (
     if (before !== dismissed.current) dismissed.current = null;
     const from = before === null || dismissed.current !== null ? null : pathTokenStart(before);
     if (!complete || before === null || from === null) { setList(null); return; }
-    // the shown list stays while the same token is edited, so it does not blink on every key
-    setList((shown) => (shown && pathTokenStart(shown.before) === from ? shown : null));
+    // the shown list stays while the same token is edited, so it does not blink on every key, but keeps only the
+    // entries that still match: zeta's rule is a prefix match, and an entry for a path with spaces adds a leading quote
+    const token = before.slice(from);
+    setList((shown) => {
+      if (!shown || pathTokenStart(shown.before) !== from) return null;
+      const kept = shown.entries.filter((entry) => entry.text.replace(/^"/, "").startsWith(token));
+      if (!kept.length) return null;
+      return { ...shown, entries: kept, active: Math.max(0, kept.indexOf(shown.entries[shown.active])) };
+    });
     const abort = new AbortController();
     pending.current = {
       abort,
@@ -100,8 +107,11 @@ export function usePathCompletion(complete: CompletePaths | undefined, insert: (
       "aria-controls": list ? listId : undefined,
       "aria-activedescendant": list ? optionId(list.active) : undefined,
     } : {},
-    /** call after every edit and caret move */
+    /** call after every user edit and caret move: only these open a list */
     sync: (field: HTMLTextAreaElement) => update(caretText(field)),
+    /** call after the draft changes from code (a send, a clear, a chat switch, a remote edit): a waiting request or
+     * a shown list for other text is stale. this never opens a list, so a restored draft that ends in `@x` shows none */
+    closeIfStale: (field: HTMLTextAreaElement) => { if (caretText(field) !== last.current) close(); },
     onKeyDown,
     close,
     list: (field: () => HTMLTextAreaElement | null) => list && (
