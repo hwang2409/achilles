@@ -84,12 +84,17 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
   return chosen;
 }
 
+const BROWSER_CLOSE_MS = 30_000;
 const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
 async function preflightBrowser(tasks: EvalTask[]) {
   if (!tasks.some(task => task.checks.some(check => check.type === "browser_text") || task.steps.some(step => step.kind === "browser_prompt" || step.kind === "page_action"))) return;
   console.error("eval setup: browser preflight");
-  try { const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true }); await browser.close(); }
+  let browser: { close(): Promise<void> };
+  try { const { chromium } = await import(playwrightModule()); browser = await chromium.launch({ headless: true }); }
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closed = await Promise.race([browser.close().then(() => true, () => true), new Promise<boolean>(resolveClose => { timer = setTimeout(() => resolveClose(false), BROWSER_CLOSE_MS); })]); clearTimeout(timer);
+  if (!closed) throw new Error(`browser preflight: chromium did not close within ${BROWSER_CLOSE_MS / 1000}s`);
 }
 
 // A seed with its own data_schema leaves output_schema out: the product derives it from the data schema.

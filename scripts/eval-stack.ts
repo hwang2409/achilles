@@ -12,8 +12,12 @@ export const DEFAULT_MAX_TURNS = 20;
 const RESERVED_PORTS = new Set([5190, 5191, 8765]);
 const HTTP_TIMEOUT_MS = 10_000;
 const DRAIN_MS = 5_000;
-// a peer eval on the same checkout holds the web lock through one sync or web repair (at most five 120 s steps)
-const LOCK_TIMEOUT_MS = 600_000;
+// a peer eval on the same checkout holds the web lock through one sync or web repair (two 10 s fetches and five 120 s steps, ~620 s)
+const LOCK_TIMEOUT_MS = 900_000;
+// each child runs in its own process group, so a SIGKILLed eval cannot clean up: a watchdog in that group kills the
+// group once the eval pid is gone, and leaves quietly once its own command ($$ after exec) has exited
+// shortcut: polls each second instead of a pipe (bun 1.3.13 closes a later child's extra stdio pipe); upgrade with bun
+const WATCHDOG = 'eval_pid=$1; shift; (while kill -0 "$eval_pid" && kill -0 $$; do /bin/sleep 1; done; kill -0 $$ && kill -KILL 0) >/dev/null 2>&1 & exec "$@"';
 async function within<T>(work: Promise<T>, timeoutMs: number): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { return await Promise.race([work, new Promise<undefined>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(undefined), timeoutMs); })]); } finally { clearTimeout(timer); }
@@ -34,6 +38,7 @@ async function freePort(excluding = new Set<number>()) {
     if (!RESERVED_PORTS.has(port) && !excluding.has(port)) return port;
   }
 }
+const reap = (pgid: number) => { try { process.kill(-pgid, "SIGKILL"); } catch {} };
 const pidAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 function processGroups() {
   const output = Bun.spawnSync(["ps", "-axo", "pid=,pgid="], { stdout: "pipe", stderr: "pipe" });
@@ -53,26 +58,31 @@ class ProcessOwner {
     const cancel = () => { void this.close(); }; this.detachAbort = () => signal?.removeEventListener("abort", cancel);
     signal?.addEventListener("abort", cancel, { once: true }); if (signal?.aborted) cancel();
   }
-  spawn(command: string, args: string[], options: Parameters<typeof spawn>[2]) {
+  // a done child's group still holds its watchdog (and any leftover descendant): it goes when the child exits, or for
+  // run() after its output drains, so a descendant that holds the pipe is reported, not silently killed
+  spawn(command: string, args: string[], options: Parameters<typeof spawn>[2], reapOnExit = true) {
     if (this.closing) throw new Error("eval process owner is closing");
-    const process = spawn(command, args, { ...options, detached: true }); const pgid = process.pid;
-    if (pgid) { this.groups.set(pgid, process); process.once("exit", () => { if (this.groups.get(pgid) === process) this.groups.delete(pgid); }); }
+    const process = spawn("/bin/sh", ["-c", WATCHDOG, "sh", String(globalThis.process.pid), command, ...args], { ...options, detached: true }); const pgid = process.pid;
+    if (pgid) { this.groups.set(pgid, process); process.once("exit", () => { if (this.groups.get(pgid) === process) this.groups.delete(pgid); if (reapOnExit) reap(pgid); }); }
     return process;
   }
   // every wait is bounded and names the child and its last output: a silent wait once held CI for 23 minutes
   async run(command: string, args: string[], cwd?: string, timeoutMs = 15_000) {
-    const process = this.spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] }); const label = [command, ...args.slice(0, 2)].join(" ");
+    const process = this.spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] }, false); const label = [command, ...args.slice(0, 2)].join(" ");
     const out: Buffer[] = []; const err: Buffer[] = []; let spawnError = "";
     const read = (stream: NodeJS.ReadableStream, chunks: Buffer[]) => new Promise<void>((resolveRead, reject) => { stream.on("data", chunk => chunks.push(Buffer.from(chunk))); stream.once("end", () => resolveRead()); stream.once("error", reject); });
     const drained = Promise.all([read(process.stdout!, out), read(process.stderr!, err)]);
     const exited = new Promise<number>(resolveExit => { process.once("exit", code => resolveExit(code ?? -1)); process.once("error", error => { spawnError = error.message; resolveExit(-1); }); });
     const lastOutput = () => Buffer.concat([...out, ...err]).toString().trim().slice(-500) || "(none)";
     const fail = (reason: string) => { process.stdout!.destroy(); process.stderr!.destroy(); return new Error(`${label} ${reason}; last output: ${lastOutput()}`); };
-    const exitCode = await within(exited, timeoutMs);
-    if (exitCode === undefined) { await this.stopGroup(process.pid!, process); throw fail(`timed out after ${timeoutMs / 1000}s`); }
-    // the child exited, so its output closes at once unless a process it started still holds the pipe
-    if (await within(drained.then(() => true), DRAIN_MS) === undefined) { try { globalThis.process.kill(-process.pid!, "SIGKILL"); } catch {} throw fail(`exited but its output stayed open for ${DRAIN_MS / 1000}s`); }
-    return { exitCode, stdout: Buffer.concat(out).toString(), stderr: `${Buffer.concat(err).toString()}${spawnError}` };
+    try {
+      const exitCode = await within(exited, timeoutMs);
+      if (exitCode === undefined) { await this.stopGroup(process.pid!, process); throw fail(`timed out after ${timeoutMs / 1000}s`); }
+      if (spawnError) throw fail(`failed to start: ${spawnError}`);
+      // the child exited, so its output closes at once unless a process it started still holds the pipe
+      if (await within(drained.then(() => true), DRAIN_MS) === undefined) throw fail(`exited but its output stayed open for ${DRAIN_MS / 1000}s`);
+      return { exitCode, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() };
+    } finally { if (process.pid) reap(process.pid); }
   }
   private async stopGroup(pgid: number, owned: ChildProcess) {
     const stillOwned = () => this.groups.get(pgid) === owned && owned.exitCode === null;
@@ -142,33 +152,34 @@ async function prepareTargetWeb(owner: ProcessOwner, achillesDir: string) {
 export function targetWebNeedsRepair(ok: boolean, body: string) { return !ok || /static file not found/i.test(body); }
 // evals sharing a checkout take turns: vite empties apps/web/dist while it builds, so a peer's repair breaks this check,
 // and two `uv run`s building one new venv at once let one import a half-installed package
-async function lockTargetWeb(owner: ProcessOwner, achillesDir: string) {
+async function withTargetWebLock(owner: ProcessOwner, achillesDir: string, work: () => Promise<void>) {
   const path = join(achillesDir, ".cache", "eval-web.lock"); await mkdir(join(achillesDir, ".cache"), { recursive: true });
   const holder = owner.spawn("uv", ["run", "--no-project", "python", "-c", "import fcntl, sys\nlock = open(sys.argv[1], 'a')\nfcntl.flock(lock, fcntl.LOCK_EX)\nprint('locked', flush=True)\nsys.stdin.read()", path], { stdio: ["pipe", "pipe", "ignore"] });
   const exited = new Promise<void>(resolveExit => { holder.once("exit", () => resolveExit()); holder.once("error", () => resolveExit()); });
   const locked = await within(Promise.race([new Promise<boolean>(resolveLock => holder.stdout!.once("data", () => resolveLock(true))), exited.then(() => false)]), LOCK_TIMEOUT_MS);
   if (locked === undefined) throw new Error(`timed out after ${LOCK_TIMEOUT_MS / 1000}s waiting for ${path}; another eval on this checkout holds it`);
   if (!locked) throw new Error(`could not lock ${path}`);
-  return async () => { holder.stdin!.end(); if (await within(exited.then(() => true), DRAIN_MS) === undefined) throw new Error(`lock holder for ${path} did not exit after release`); };
+  const release = async () => { holder.stdin!.end(); if (await within(exited.then(() => true), DRAIN_MS) === undefined) throw new Error(`lock holder for ${path} did not exit after release`); };
+  // a failed release must not hide why the work failed; the owner still kills a holder that stays
+  try { await work(); } catch (error) { await release().catch(() => {}); throw error; }
+  await release();
 }
 // inexact, so a developer checkout keeps its test group (pytest, ruff) in .venv
 async function syncTarget(owner: ProcessOwner, achillesDir: string) {
-  const release = await lockTargetWeb(owner, achillesDir);
-  try {
+  await withTargetWebLock(owner, achillesDir, async () => {
     const sync = await owner.run("uv", ["sync", "--inexact", "--project", achillesDir], undefined, 120_000);
     if (sync.exitCode) throw new Error(`could not sync achilles: ${sync.stderr.trim()}`);
-  } finally { await release(); }
+  });
 }
 async function ensureTargetWeb(owner: ProcessOwner, achillesDir: string, origin: string) {
-  const release = await lockTargetWeb(owner, achillesDir);
-  try {
+  await withTargetWebLock(owner, achillesDir, async () => {
     const response = await fetchDeadline(`${origin}/`);
     const body = await response.text();
     if (!targetWebNeedsRepair(response.ok, body)) return;
     await prepareTargetWeb(owner, achillesDir);
     const retry = await fetchDeadline(`${origin}/`); const retryBody = await retry.text();
     if (targetWebNeedsRepair(retry.ok, retryBody)) throw new Error(`target web is unavailable; run: cd ${join(achillesDir, "apps/web")} && bun run build`);
-  } finally { await release(); }
+  });
 }
 
 async function startupFailure(root: string, label: string) {
