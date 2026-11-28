@@ -1,0 +1,212 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "active_code_revision": 1
+      },
+      {
+        "id": "tally",
+        "alias": "tally",
+        "route": "/tally",
+        "active_code_revision": 3
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "tally",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "tally",
+        "version": 2,
+        "failed": 1,
+        "runtime_error": null
+      },
+      {
+        "page_id": "tally",
+        "version": 3,
+        "failed": 0,
+        "runtime_error": null
+      }
+    ],
+    "results": [
+      {
+        "page_id": "tally",
+        "chat_id": "tally-chat",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "data": {
+          "candidate": {
+            "revision": 2
+          }
+        }
+      },
+      {
+        "page_id": "tally",
+        "chat_id": "tally-chat",
+        "tool": "achilles__read_page_file",
+        "success": true,
+        "data": {
+          "revision": 2
+        }
+      },
+      {
+        "page_id": "tally",
+        "chat_id": "tally-chat",
+        "tool": "achilles__edit_page",
+        "success": true,
+        "data": {
+          "revision": 3
+        }
+      }
+    ],
+    "errors": [],
+    "browser": [
+      {
+        "page_id": "tally",
+        "text": "Synthetic Tally"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_code_revision": 1
+        },
+        {
+          "id": "tally",
+          "route": "/tally",
+          "title": "tally",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        },
+        {
+          "page_id": "tally",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        },
+        {
+          "page_id": "tally",
+          "version": 2,
+          "failed": 1,
+          "runtime_error": null
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "active_code_revision": 1
+      },
+      {
+        "id": "tally",
+        "alias": "tally",
+        "route": "/tally",
+        "active_code_revision": 3
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "tally",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "tally",
+        "version": 2,
+        "failed": 1,
+        "runtime_error": null
+      },
+      {
+        "page_id": "tally",
+        "version": 3,
+        "failed": 0,
+        "runtime_error": null
+      }
+    ],
+    "results": [
+      {
+        "page_id": "tally",
+        "chat_id": "tally-chat",
+        "tool": "achilles__write_page",
+        "success": true,
+        "data": {
+          "revision": 3
+        }
+      }
+    ],
+    "errors": [],
+    "browser": [
+      {
+        "page_id": "tally",
+        "text": "Tally"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_code_revision": 1
+        },
+        {
+          "id": "tally",
+          "route": "/tally",
+          "title": "tally",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        },
+        {
+          "page_id": "tally",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        },
+        {
+          "page_id": "tally",
+          "version": 2,
+          "failed": 1,
+          "runtime_error": null
+        }
+      ]
+    }
+  }
+}

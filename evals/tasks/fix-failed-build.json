@@ -1,0 +1,61 @@
+{
+  "id": "fix-failed-build",
+  "suite": "core",
+  "page_plan": [
+    {
+      "alias": "tally",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false,
+      "route": "/tally",
+      "code": {
+        "source": "import { createRoot } from \"react-dom/client\";\nfunction Page() { return <main><h1>Synthetic Tally</h1</main>; }\ncreateRoot(document.getElementById(\"root\")!).render(<Page />);\n",
+        "dependencies": {},
+        "expect_failed": true
+      }
+    }
+  ],
+  "agent_turns": 8,
+  "steps": [
+    {
+      "id": "fix",
+      "kind": "prompt",
+      "page": "tally",
+      "chat": "tally-chat",
+      "prompt": "the last build of this page failed. find out why and fix it with the smallest change."
+    }
+  ],
+  "checks": [
+    {
+      "id": "fixed",
+      "type": "code_changed",
+      "page": "tally",
+      "after_failed": true
+    },
+    {
+      "id": "renders",
+      "type": "browser_text",
+      "page": "tally",
+      "text": "Synthetic Tally"
+    },
+    {
+      "id": "no-new-page",
+      "type": "no_new_page",
+      "page": "tally"
+    },
+    {
+      "id": "edited",
+      "type": "successful_result",
+      "page": "tally",
+      "tool": "achilles__edit_page",
+      "required": false
+    },
+    {
+      "id": "read-failed-code",
+      "type": "successful_result",
+      "page": "tally",
+      "tool": "achilles__read_page_file",
+      "required": false
+    }
+  ]
+}

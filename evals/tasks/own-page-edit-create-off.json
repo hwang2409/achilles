@@ -1,0 +1,46 @@
+{
+  "id": "own-page-edit-create-off",
+  "suite": "core",
+  "page_plan": [
+    {
+      "alias": "notes",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false,
+      "route": "/field-notes"
+    }
+  ],
+  "agent_turns": 6,
+  "steps": [
+    {
+      "id": "edit",
+      "kind": "prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "change this page so its heading reads Synthetic Field Notes."
+    }
+  ],
+  "checks": [
+    {
+      "id": "changed",
+      "type": "code_changed",
+      "page": "notes"
+    },
+    {
+      "id": "renders",
+      "type": "browser_text",
+      "page": "notes",
+      "text": "Synthetic Field Notes"
+    },
+    {
+      "id": "no-new-page",
+      "type": "no_new_page",
+      "page": "notes"
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "notes"
+    }
+  ]
+}

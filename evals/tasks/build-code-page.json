@@ -23,7 +23,7 @@
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat",
-      "prompt": "make a new page at /reading-list titled Reading List. it shows the heading Synthetic Reading List and below it a short list of three made-up book titles."
+      "prompt": "make a new page at /reading-list titled Reading List. it shows the heading Synthetic Reading List and below it a list of three book titles: Synthetic Dune Copy, Synthetic Atlas, Synthetic Harbor."
     }
   ],
   "checks": [
@@ -44,6 +44,35 @@
       "type": "browser_text",
       "page": "reading",
       "text": "Synthetic Reading List"
+    },
+    {
+      "id": "code",
+      "type": "code_changed",
+      "page": "reading"
+    },
+    {
+      "id": "title-1",
+      "type": "browser_text",
+      "page": "reading",
+      "text": "Synthetic Dune Copy"
+    },
+    {
+      "id": "title-2",
+      "type": "browser_text",
+      "page": "reading",
+      "text": "Synthetic Atlas"
+    },
+    {
+      "id": "title-3",
+      "type": "browser_text",
+      "page": "reading",
+      "text": "Synthetic Harbor"
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "home",
+      "required": false
     }
   ],
   "goal_capabilities": [
