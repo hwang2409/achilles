@@ -34,24 +34,21 @@
 /* a row is the link card plus its actions; the actions sit outside the link, so they are real buttons */
 .pages-row { display: flex; align-items: stretch; border-bottom: 1px solid var(--g1-rule); }
 .pages-row > .pages-card { flex: 1 1 auto; min-width: 0; border-bottom: 0; }
-.pages-row-actions { display: flex; align-items: center; gap: 4px; padding-inline-end: var(--g1-space-4); }
+/* a fixed actions column, so the route and date columns line up on every row (home has no archive) */
+.pages-row-actions { flex: 0 0 152px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding-inline-end: var(--g1-space-4); }
 .pages-row-actions button { color: var(--fulcrum-muted); }
 .pages-row-actions button:hover, .pages-row-actions button:focus-visible { color: var(--g1-fg); }
 .pages-row > .page-edit-error { margin: 0; padding: 0 16px 8px; }
 .pages-row { flex-wrap: wrap; }
 .pages-row > .page-edit-error { flex-basis: 100%; }
 .pages-archived { margin-top: var(--g1-space-4); }
-.pages-archived > summary { min-height: 40px; display: flex; align-items: center; color: var(--fulcrum-muted); cursor: pointer; list-style-position: inside; }
-.pages-archived > summary::before { content: "▸"; margin-inline-end: 8px; font-size: 10px; }
-.pages-archived[open] > summary::before { content: "▾"; }
-.pages-archived > summary::-webkit-details-marker { display: none; }
-.pages-archived > summary { list-style: none; }
+.pages-archived > summary { min-height: 40px; display: flex; align-items: center; color: var(--fulcrum-muted); cursor: pointer; }
 .pages-archived > summary:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 .pages-archived-note { margin: var(--g1-space-2) 0; color: var(--fulcrum-muted); }
 .pages-archived .link-button { min-height: 0; padding: 0; border: 0; background: none; color: var(--fulcrum-accent); font: inherit; text-decoration: underline; }
 .pages-row[data-archived] h2 { color: var(--fulcrum-muted); }
 
 @media (max-width: 599px) {
-  .pages-row-actions { padding-inline-end: var(--g1-space-2); }
+  .pages-row-actions { flex-basis: auto; padding-inline-end: var(--g1-space-2); }
   .pages-row-actions button { min-height: 44px; }
 }

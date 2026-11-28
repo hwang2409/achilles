@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { NavIcon } from "../surface/SurfaceNav";
 import { useInlineRename } from "../useInlineRename";
 import "./page-archive.css";
 
@@ -73,7 +74,7 @@ export function PageCrumbMenu({ page, onChanged }: { page: { id: string; title: 
   }, [edit.editing]);
   if (edit.editing) return edit.input("page title");
   return <span className="page-crumb-menu" onKeyDown={keys}>
-    <button ref={trigger} type="button" className="page-crumb-button" title={page.title} aria-haspopup="true" aria-expanded={open} aria-controls={open ? "page-actions" : undefined} aria-busy={edit.pending || undefined} onClick={() => setOpen((value) => !value)}>{page.title}<span aria-hidden="true">▾</span></button>
+    <button ref={trigger} type="button" className="page-crumb-button" title={page.title} aria-haspopup="true" aria-expanded={open} aria-controls={open ? "page-actions" : undefined} aria-busy={edit.pending || undefined} onClick={() => setOpen((value) => !value)}>{page.title}<NavIcon d="M4 6l4 4 4-4" /></button>
     {open && <div className="page-actions" id="page-actions" ref={menu} role="group" aria-label={`${page.title} actions`}>
       <button type="button" onClick={() => choose(edit.startRename)}>rename page</button>
       <button type="button" onClick={() => choose(() => void edit.archive())}>archive page</button>
