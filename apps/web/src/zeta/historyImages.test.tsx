@@ -16,7 +16,7 @@ afterEach(() => { cleanup(); document.body.replaceChildren(); URL.createObjectUR
 const IMAGE = Uint8Array.from({ length: 10 }, (_, index) => index + 1);
 const CHUNK = 4;
 type Read = { handle: string; offset: number };
-type Content = { size?: number; missing?: boolean };
+type Content = { size?: number; missing?: boolean; notOwned?: boolean };
 
 /** A fake zeta: it grants the asked features it offers, and serves content_read in CHUNK-byte chunks. */
 async function fakeZeta(content: Content = {}) {
@@ -35,6 +35,9 @@ async function fakeZeta(content: Content = {}) {
       }
       if (method !== "content_read") throw new Error(`unexpected ${method}`);
       reads.push(params);
+      // zeta f5efa62d: content_read reads the connection's own session (connections.py:1083-1100), so a tab that does not
+      // hold the chat gets "session is not active"
+      if (content.notOwned) { reply({ jsonrpc: "2.0", id, error: { code: -32003, message: "session is not active" } }); return; }
       if (content.missing) { reply({ jsonrpc: "2.0", id, error: { code: -32012, message: "content not found", data: { code: "content_not_found" } } }); return; }
       const size = content.size ?? IMAGE.length;
       const data = IMAGE.subarray(params.offset, params.offset + CHUNK);
@@ -97,4 +100,16 @@ test("an image zeta no longer has says so instead of failing", async () => {
   const { ui } = await shown(client);
   expect(ui.container.querySelector("[data-part=image]")?.getAttribute("data-state")).toBe("unavailable");
   expect(ui.container.querySelector("[data-part=image-placeholder]")?.textContent).toContain("image no longer available");
+});
+
+// pins today's limit: when zeta lets content_read name a session, a held-elsewhere tab can load the image and this changes
+test("a tab that does not hold the chat gets a clear rejection and fulcrum's retryable failure, not a crash", async () => {
+  const { client, reads } = await fakeZeta({ notOwned: true });
+  const { ui } = await shown(client);
+  expect(ui.container.querySelector("[data-part=image]")?.getAttribute("data-state")).toBe("error");
+  expect(ui.container.querySelector("[data-part=image-placeholder]")?.textContent).toBe("image failed to loadretry");
+  expect(ui.container.querySelector("[data-part=image-placeholder] [data-action=retry]")).not.toBeNull();
+  expect(reads.every((read) => read.offset === 0)).toBe(true);
+  const loader = (connection as { historyImageLoader?: (client: ZetaClient) => LoadMedia | undefined }).historyImageLoader?.(client);
+  await expect(loader?.({ type: "image", source: { kind: "lazy", key: "mc:u-1:1" } }, new AbortController().signal)).rejects.toMatchObject({ code: -32003, message: "session is not active" });
 });
