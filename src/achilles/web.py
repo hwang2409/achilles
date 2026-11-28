@@ -311,13 +311,17 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         code = await anyio.to_thread.run_sync(store.page_code, row["id"])
         if not code or code["digest"] != request.path_params["digest"]:
             raise HTTPException(404, "artifact not found")
-        return FileResponse(
-            store.root / "bundles" / f"{code['digest']}.js",
+        bundle = store.root / "bundles" / f"{code['digest']}.js"
+        # a plain body: FileResponse adds etag and last-modified, which no-store makes dead
+        return Response(
+            await anyio.to_thread.run_sync(bundle.read_bytes),
             media_type="text/javascript",
             headers={
                 # the sandboxed frame has the opaque origin "null"; no real site reads or runs it
                 "access-control-allow-origin": "null",
                 "cross-origin-resource-policy": "same-origin",
+                # a cached copy would answer a top-level visit without the Sec-Fetch-Dest check
+                "cache-control": "no-store",
             },
         )
 
@@ -560,6 +564,9 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             raise HTTPException(400, "body must be a JSON object")
         return body
 
+    def records_headers(total: int) -> dict:
+        return {"x-achilles-total": str(total), "cache-control": "no-store"}
+
     async def records(request):
         page_id = await page_bearer(request)
         collection = request.path_params["collection"]
@@ -593,9 +600,9 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
                 )
             except (json.JSONDecodeError, ValidationError) as exc:
                 raise HTTPException(400, "invalid record filter") from exc
-            return JSONResponse(records, headers={"x-achilles-total": str(total)})
+            return JSONResponse(records, headers=records_headers(total))
         records, total = await anyio.to_thread.run_sync(store.records, page_id, collection, limit)
-        return JSONResponse(records, headers={"x-achilles-total": str(total)})
+        return JSONResponse(records, headers=records_headers(total))
 
     async def record(request):
         page_id = await page_bearer(request)
