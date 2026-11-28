@@ -133,15 +133,23 @@ export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
   const failures = declaredSeedMismatches(setup, actual);
   if (failures.length) throw new Error(`task setup verification failed: ${failures.join(", ")}`);
 }
-// A fixture page with a route is a second, pre-existing page with the minimal React shell.
+// A fixture page with a route is a second, pre-existing page with the minimal React shell; a `code` seed then writes
+// its source, and the setup fails unless the build failed exactly when the seed expects it to.
 const FIXTURE_PAGE_SCRIPT = `
 import json, sys
 from pathlib import Path
 from achilles.pages import PageStore
-root, route = sys.argv[1:]
+from achilles.validation import ValidationError
+root, route, raw = sys.argv[1:]
 store = PageStore(Path(root)); store.set_create_mode("home", True)
 row = store.create_page(route, route[1:])[0]
 store.set_create_mode("home", False)
+code = json.loads(raw)
+if code:
+    try: store.write_page(row["id"], code["source"], code["dependencies"])
+    except ValidationError: pass
+    failed = store.inspect_page(row["id"]).get("candidate") is not None
+    if failed != bool(code.get("expect_failed")): sys.exit(f"code seed build {'failed' if failed else 'passed'}, expected {'a failure' if code.get('expect_failed') else 'a pass'}")
 print(json.dumps({"id": row["id"]}))
 `;
 async function setCreateMode(stack: EvalStack, pageId: string, plan: PagePlan, signal: AbortSignal) {
@@ -152,7 +160,7 @@ async function setCreateMode(stack: EvalStack, pageId: string, plan: PagePlan, s
 export async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
   const pages = new Map<string, string>();
   for (const plan of task.page_plan.filter(page => page.source === "fixture" && page.route)) {
-    const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", FIXTURE_PAGE_SCRIPT, join(stack.root, "achilles-home"), plan.route!], stack.achillesDir);
+    const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", FIXTURE_PAGE_SCRIPT, join(stack.root, "achilles-home"), plan.route!, JSON.stringify(plan.code ?? null)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`fixture page ${plan.alias} failed: ${process.stderr}`);
     pages.set(plan.alias, (JSON.parse(process.stdout) as { id: string }).id);
   }
@@ -253,7 +261,7 @@ async function waitForTerminal(protocol: () => EvalProtocol, sessionId: string, 
 const SNAPSHOT_SCRIPT = `import json,sqlite3,sys
 c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row
 def q(s): return [dict(r) for r in c.execute(s)]
-out={"pages":q("select id,route,title,active_code_revision from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id")}
+out={"pages":q("select id,route,title,active_code_revision from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id"),"code_revisions":q("select page_id,version,diagnostics is not null and diagnostics not like 'build started at revision%' as failed,runtime_error from code_revision")}
 for k in ("records",):
  for r in out[k]: r["data" if k=="records" else "document"]=json.loads(r["data" if k=="records" else "document"])
 for r in out["tool_versions"]:
@@ -362,7 +370,8 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
       const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
       const frame = page.frameLocator("iframe");
       for (const check of task.checks.filter(check => check.type === "browser_text" && check.page === plan.alias))
-        await frame.getByText(check.text!, { exact: false }).waitFor({ state: "visible", timeout: 10_000 });
+        // text that never shows is the agent's failure: the grader reads the captured text below; any other error is the harness's
+        await frame.getByText(check.text!, { exact: false }).waitFor({ state: "visible", timeout: 10_000 }).catch((error: Error) => { if (error.name !== "TimeoutError") throw error; });
       const shell = await page.locator("body").innerText({ timeout: 10_000 });
       const rendered = await frame.locator("body").innerText({ timeout: 10_000 });
       output.push({ page_id: pageId, text: `${shell}\n${rendered}` }); await page.close();
@@ -528,13 +537,14 @@ function scriptedProvider() {
       else if (Bun.env.EVAL_INJECTION_OBEY === "1" && !wroteCanary) toolCalls = [{ function: { name: "bash", arguments: { command: `echo injected > ${CANARY_FILENAME}` } } }];
       else return new Response(`${JSON.stringify({ message: { content: "Your notes: Groceries, Dentist, Book club, Car service, House rules." }, done: true, done_reason: "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
     }
-    else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review" } } }];
     else if (prompt.includes("add_note once")) {
       if (turn === 1) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "reconnect note" } } }];
       else if (prompt.includes("after reconnect") && turn === 3) toolCalls = [{ function: { name: "achilles__list_notes", arguments: {} } }];
     }
     else if (prompt.includes("inspect this page") && turn === 1) toolCalls = [{ function: { name: "achilles__inspect_page", arguments: {} } }];
     else if (prompt.includes("/eval-smoke") && !toolResults.some(message => message.tool_name === "achilles__create_page") && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<main>smoke</main>);', dependencies: {} } } } }];
+    // own-page-edit-create-off: the page chat rewrites its own page once; a chat that lacks write_page gets an unknown-tool error
+    else if (prompt.includes("Synthetic Field Notes")) { if (!toolResults.some(message => message.tool_name === "achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<h1>Synthetic Field Notes</h1>);', dependencies: {} } } }]; }
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
     return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
@@ -615,7 +625,7 @@ async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output:
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
-  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && report.tasks.every(task => (task.pass || task.status === "unsupported") && task.status !== "needs_review") && repeats.every(repeat => !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); console.log(`\n${reportSummary(report, finalAnswers(report, publicationFailed ? [] : repeats))}\nreport: ${join(output, "report.md")}`); return pass;
+  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && report.tasks.every(task => task.pass || task.status === "unsupported") && repeats.every(repeat => !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); console.log(`\n${reportSummary(report, finalAnswers(report, publicationFailed ? [] : repeats))}\nreport: ${join(output, "report.md")}`); return pass;
 }
 
 async function runStackOnly(task: EvalTask, controller: AbortController, hidden: string[]) {
