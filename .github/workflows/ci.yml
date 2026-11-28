@@ -69,6 +69,7 @@ jobs:
 
   evals:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-browser-checks
@@ -82,7 +83,8 @@ jobs:
         run: uv sync --group test && uv run pytest tests/test_render_page.py
         env:
           ACHILLES_RENDER_TESTS: required
-      - run: |
+      - timeout-minutes: 10
+        run: |
           set +e
           EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 BASE=none REPORT_DIR=.cache/eval-ci-setup bun scripts/eval.ts
           status=$?
@@ -100,6 +102,7 @@ jobs:
           raise SystemExit(int(os.environ['STATUS']))
           PY
       - name: eval setup accepts the baseline achilles revision
+        timeout-minutes: 10
         run: |
           git fetch --depth=1 origin a5a8ea4a8c26635d7bb9dae1da23e3272b8cc6c7
           git worktree add --detach .cache/achilles-baseline a5a8ea4a8c26635d7bb9dae1da23e3272b8cc6c7

@@ -3,7 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { retryAddressInUse } from "./eval-stack";
+import { retryAddressInUse, startEvalStack } from "./eval-stack";
 
 type ProcessRow = { pid: number; ppid: number; pgid: number; executable: string; command: string };
 function processRows() {
@@ -60,3 +60,23 @@ test("address collision retries the complete start attempt", async () => {
   let calls = 0; const result = await retryAddressInUse(async () => { calls += 1; if (calls === 1) throw new Error("EADDRINUSE"); return "started"; });
   expect(result).toBe("started"); expect(calls).toBe(2);
 });
+
+test("a setup child that exits but leaves its output open fails with a named error, not a silent hang", async () => {
+  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
+  const marker = await mkdtemp(join("/tmp", "achilles-eval-stall-")); const pidFile = join(marker, "holder.pid"); const path = process.env.PATH; const controller = new AbortController();
+  // `uv sync` exits at once but its background child keeps the output pipe open, as a stuck descendant would
+  await writeFile(join(marker, "uv"), `#!/bin/sh\n[ "$1" = sync ] && { sleep 600 & echo $! > ${JSON.stringify(pidFile)}; exit 0; }\nexec ${JSON.stringify(Bun.which("uv")!)} "$@"\n`); await chmod(join(marker, "uv"), 0o755);
+  process.env.PATH = `${marker}:${path}`;
+  try {
+    const start = startEvalStack({ model: "ollama/qwen3:4b", signal: controller.signal }).then(() => "started", (error: Error) => error);
+    for (let i = 0; i < 1500 && !await Bun.file(pidFile).exists(); i++) await Bun.sleep(100); // a cold cache clones zeta first
+    const holder = Number(await Bun.file(pidFile).text());
+    const outcome = await Promise.race([start, Bun.sleep(15_000).then(() => "still waiting")]);
+    expect(String(outcome), "the stalled stage must fail within its bound").toMatch(/uv sync --project exited but its output stayed open for 5s; last output: \(none\)/);
+    expect(() => process.kill(holder, 0), "the stalled child's process group must be killed").toThrow();
+  } finally {
+    process.env.PATH = path; controller.abort();
+    const holder = Number(await Bun.file(pidFile).text().catch(() => "0")); if (holder) { try { process.kill(holder, "SIGKILL"); } catch {} }
+    await rm(marker, { recursive: true, force: true });
+  }
+}, 180_000);

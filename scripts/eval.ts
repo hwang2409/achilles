@@ -87,6 +87,7 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
 const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
 async function preflightBrowser(tasks: EvalTask[]) {
   if (!tasks.some(task => task.checks.some(check => check.type === "browser_text") || task.steps.some(step => step.kind === "browser_prompt" || step.kind === "page_action"))) return;
+  console.error("eval setup: browser preflight");
   try { const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true }); await browser.close(); }
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
@@ -646,9 +647,10 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
   const provider = options.scripted ? scriptedProvider() : undefined; let stack: EvalStack | undefined; let result: ReturnType<typeof gradeTask> | undefined; let snapshot: EvalSnapshot | undefined; let failed = false; let stopSuite = false; let catalog: string[] = [];
   const retainedRoot = options.keep ? resolve(new URL(`../.cache/evals/${options.runId}/repeat-${index + 1}`, import.meta.url).pathname) : undefined;
   try {
+    console.error(`eval task ${task.id} repeat ${index + 1}: start`);
     stack = await startEvalStack({ achillesDir: options.achillesDir, zetaRev: Bun.env.ZETA_REV, model: options.scripted ? "ollama/qwen3:4b" : Bun.env.MODEL, ollamaBaseUrl: provider?.url, maxTurns: task.agent_turns, liveTools: task.live_tools, signal: options.signal, beforeDelete: root => sanitizeAndScanRoot(root, options.hidden) });
     options.hidden.push(...hiddenValues(stack.accountHome));
-    if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 }, status: "pass" } as ReturnType<typeof gradeTask>; }
+    if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); console.error(`eval task ${task.id}: prepare page`); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 }, status: "pass" } as ReturnType<typeof gradeTask>; }
     else {
       const classification = await classifyTaskSupport(stack, task, options.hidden);
       if (classification) { result = classification; failed = classification.status === "harness_error"; snapshot = failed ? await databaseSnapshot(stack).catch(() => ({})) : await databaseSnapshot(stack); }

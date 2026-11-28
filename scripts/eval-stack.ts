@@ -11,6 +11,15 @@ export const LIVE_TOOL_POLICY = "settings-default (full tool set incl. bash, edi
 export const DEFAULT_MAX_TURNS = 20;
 const RESERVED_PORTS = new Set([5190, 5191, 8765]);
 const HTTP_TIMEOUT_MS = 10_000;
+const DRAIN_MS = 5_000;
+// a peer eval on the same checkout holds the web lock through one sync or web repair (at most five 120 s steps)
+const LOCK_TIMEOUT_MS = 600_000;
+async function within<T>(work: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { return await Promise.race([work, new Promise<undefined>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(undefined), timeoutMs); })]); } finally { clearTimeout(timer); }
+}
+const started = performance.now();
+const progress = (stage: string) => console.error(`eval setup: ${stage} (${((performance.now() - started) / 1000).toFixed(1)}s)`);
 export type CleanupProof = { pids: number[]; pgids: number[]; process_groups: Array<{ pgid: number; pids: number[] }>; ports: number[]; pids_dead: boolean; pgids_dead: boolean; ports_closed: boolean; discovery_pid_dead: boolean; discovery_cleaned: boolean };
 export type EvalStackConfig = { achillesDir?: string; zetaRev?: string; model?: string; accountHome?: string; ollamaBaseUrl?: string; maxTurns?: number; root?: string; signal?: AbortSignal; liveTools?: boolean; beforeDelete?: (root: string) => Promise<void> };
 export type EvalStack = { achillesOrigin: string; zetaOrigin: string; achillesDir: string; achillesSha: string; zetaSha: string; provider: string; model: string; root: string; accountHome: string; toolPolicy: string; cleanup?: CleanupProof; run(command: string, args: string[], cwd?: string, timeoutMs?: number): Promise<{ exitCode: number; stdout: string; stderr: string }>; restartZeta(): Promise<{ killed_pid: number; started_pid: number }>; close(): Promise<CleanupProof> };
@@ -50,14 +59,20 @@ class ProcessOwner {
     if (pgid) { this.groups.set(pgid, process); process.once("exit", () => { if (this.groups.get(pgid) === process) this.groups.delete(pgid); }); }
     return process;
   }
+  // every wait is bounded and names the child and its last output: a silent wait once held CI for 23 minutes
   async run(command: string, args: string[], cwd?: string, timeoutMs = 15_000) {
-    const process = this.spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
-    const read = (stream: NodeJS.ReadableStream) => new Promise<string>((resolveRead, reject) => { const chunks: Buffer[] = []; stream.on("data", chunk => chunks.push(Buffer.from(chunk))); stream.once("end", () => resolveRead(Buffer.concat(chunks).toString())); stream.once("error", reject); });
-    const stdout = read(process.stdout!); const stderr = read(process.stderr!); let timer: ReturnType<typeof setTimeout>; let spawnError = "";
+    const process = this.spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] }); const label = [command, ...args.slice(0, 2)].join(" ");
+    const out: Buffer[] = []; const err: Buffer[] = []; let spawnError = "";
+    const read = (stream: NodeJS.ReadableStream, chunks: Buffer[]) => new Promise<void>((resolveRead, reject) => { stream.on("data", chunk => chunks.push(Buffer.from(chunk))); stream.once("end", () => resolveRead()); stream.once("error", reject); });
+    const drained = Promise.all([read(process.stdout!, out), read(process.stderr!, err)]);
     const exited = new Promise<number>(resolveExit => { process.once("exit", code => resolveExit(code ?? -1)); process.once("error", error => { spawnError = error.message; resolveExit(-1); }); });
-    const exitCode = await Promise.race([exited, new Promise<number>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(-1), timeoutMs); })]); clearTimeout(timer!);
-    if (exitCode === -1 && process.pid) await this.stopGroup(process.pid, process);
-    return { exitCode, stdout: await stdout, stderr: `${await stderr}${spawnError}` };
+    const lastOutput = () => Buffer.concat([...out, ...err]).toString().trim().slice(-500) || "(none)";
+    const fail = (reason: string) => { process.stdout!.destroy(); process.stderr!.destroy(); return new Error(`${label} ${reason}; last output: ${lastOutput()}`); };
+    const exitCode = await within(exited, timeoutMs);
+    if (exitCode === undefined) { await this.stopGroup(process.pid!, process); throw fail(`timed out after ${timeoutMs / 1000}s`); }
+    // the child exited, so its output closes at once unless a process it started still holds the pipe
+    if (await within(drained.then(() => true), DRAIN_MS) === undefined) { try { globalThis.process.kill(-process.pid!, "SIGKILL"); } catch {} throw fail(`exited but its output stayed open for ${DRAIN_MS / 1000}s`); }
+    return { exitCode, stdout: Buffer.concat(out).toString(), stderr: `${Buffer.concat(err).toString()}${spawnError}` };
   }
   private async stopGroup(pgid: number, owned: ChildProcess) {
     const stillOwned = () => this.groups.get(pgid) === owned && owned.exitCode === null;
@@ -131,8 +146,10 @@ async function lockTargetWeb(owner: ProcessOwner, achillesDir: string) {
   const path = join(achillesDir, ".cache", "eval-web.lock"); await mkdir(join(achillesDir, ".cache"), { recursive: true });
   const holder = owner.spawn("uv", ["run", "--no-project", "python", "-c", "import fcntl, sys\nlock = open(sys.argv[1], 'a')\nfcntl.flock(lock, fcntl.LOCK_EX)\nprint('locked', flush=True)\nsys.stdin.read()", path], { stdio: ["pipe", "pipe", "ignore"] });
   const exited = new Promise<void>(resolveExit => { holder.once("exit", () => resolveExit()); holder.once("error", () => resolveExit()); });
-  if (!await Promise.race([new Promise<boolean>(resolveLock => holder.stdout!.once("data", () => resolveLock(true))), exited.then(() => false)])) throw new Error(`could not lock ${path}`);
-  return async () => { holder.stdin!.end(); await exited; };
+  const locked = await within(Promise.race([new Promise<boolean>(resolveLock => holder.stdout!.once("data", () => resolveLock(true))), exited.then(() => false)]), LOCK_TIMEOUT_MS);
+  if (locked === undefined) throw new Error(`timed out after ${LOCK_TIMEOUT_MS / 1000}s waiting for ${path}; another eval on this checkout holds it`);
+  if (!locked) throw new Error(`could not lock ${path}`);
+  return async () => { holder.stdin!.end(); if (await within(exited.then(() => true), DRAIN_MS) === undefined) throw new Error(`lock holder for ${path} did not exit after release`); };
 }
 // inexact, so a developer checkout keeps its test group (pytest, ruff) in .venv
 async function syncTarget(owner: ProcessOwner, achillesDir: string) {
@@ -196,20 +213,20 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
   })();
   try {
     config.signal?.throwIfAborted();
-    await syncTarget(owner, achillesDir);
+    progress("achilles sync"); await syncTarget(owner, achillesDir);
     const achillesLog = openSync(join(root, "achilles-home/serve.log"), "w"); const achillesProcess = owner.spawn("uv", ["run", "--no-sync", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
-    await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
+    progress("achilles serve"); await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); progress("target web"); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
     // a live-tools task drops the narrow eval tool policy so the session carries zeta's full default tool set, exactly
     // like a `make dev` / achilles serve page chat; the achilles__* MCP tools stay available either way
     const toolArgs = config.liveTools ? [] : ["--tools", TOOL_POLICY];
     const spawnZeta = () => { const zetaLog = openSync(join(root, "zeta-home/serve.log"), "a"); const child = owner.spawn("uv", ["run", "--project", zeta, "zeta", "--yolo", "--max-turns", String(config.maxTurns ?? DEFAULT_MAX_TURNS), "serve", "--ws", String(zetaPort), "--ws-origin", achillesOrigin, "--provider", selected.provider, "--model", selected.model, ...toolArgs, "--cwd", join(root, "page-workspaces"), "--no-auto-memory"], { cwd: root, env, stdio: ["ignore", zetaLog, zetaLog] }); closeSync(zetaLog); return child; };
-    let zetaProcess = spawnZeta();
+    progress("zeta serve"); let zetaProcess = spawnZeta();
     const discovery = await waitForDiscovery(root, zetaProcess, config.signal);
     // the same serve again on the same port and home; the stale discovery file goes first so the wait sees the new process
     const restartZeta = async () => {
       const killed_pid = zetaProcess.pid!; await owner.kill(zetaProcess); await rm(join(root, "zeta-home/run/serve.ws.json"), { force: true });
       zetaProcess = spawnZeta(); await waitForDiscovery(root, zetaProcess, config.signal); return { killed_pid, started_pid: zetaProcess.pid! };
-    }; const preflight = await connectEvalProtocol(discovery); await preflight.close();
+    }; progress("zeta protocol"); const preflight = await connectEvalProtocol(discovery); await preflight.close(); progress("stack ready");
     stack = { root, achillesDir, achillesSha: shas.achilles, zetaSha: shas.zeta, achillesOrigin, zetaOrigin, provider: selected.provider, model: selected.model, accountHome, toolPolicy: config.liveTools ? LIVE_TOOL_POLICY : TOOL_POLICY, run: (command, args, cwd, timeoutMs) => owner.run(command, args, cwd, timeoutMs), restartZeta, close };
     return stack;
   } catch (error) {
@@ -238,8 +255,8 @@ export async function startEvalStack(config: EvalStackConfig = {}): Promise<Eval
   return retryAddressInUse(async () => {
     const owner = new ProcessOwner(config.signal); const achillesDir = resolve(config.achillesDir ?? new URL("..", import.meta.url).pathname); const root = resolve(config.root ?? await mkdtemp(join(Bun.env.TMPDIR ?? "/tmp", "achilles-eval-")));
     try {
-      const selectedZeta = await zetaCheckout(owner, achillesDir, config.zetaRev); const zeta = selectedZeta.zeta; const shas = { achilles: await gitSha(owner, achillesDir), zeta: selectedZeta.sha };
-      const sourceHome = resolve(Bun.env.ZETA_HOME ?? join(Bun.env.HOME ?? "", ".zeta")); const selected = await selectedModel(owner, zeta, sourceHome, config.model); const accountHome = config.accountHome ?? Bun.env.EVAL_ACCOUNT_HOME ?? sourceHome;
+      progress("zeta checkout"); const selectedZeta = await zetaCheckout(owner, achillesDir, config.zetaRev); const zeta = selectedZeta.zeta; const shas = { achilles: await gitSha(owner, achillesDir), zeta: selectedZeta.sha };
+      const sourceHome = resolve(Bun.env.ZETA_HOME ?? join(Bun.env.HOME ?? "", ".zeta")); progress("model selection"); const selected = await selectedModel(owner, zeta, sourceHome, config.model); const accountHome = config.accountHome ?? Bun.env.EVAL_ACCOUNT_HOME ?? sourceHome;
       return await startAttempt(config, owner, root, achillesDir, zeta, selected, shas, accountHome);
     } catch (error) { await owner.close(); if (config.beforeDelete) await config.beforeDelete(root); await rm(root, { recursive: true, force: true }); throw error; }
   });

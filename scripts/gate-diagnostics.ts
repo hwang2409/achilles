@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import type { Page } from "../apps/web/node_modules/playwright";
 
 const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential|secret|password/i;
 export const appShortcut = (key: string) => `ControlOrMeta+${key}`;
@@ -163,7 +164,11 @@ export const redactArtifact = (line: string, secrets: readonly string[] = [], ho
   return home.length > 1 ? text.split(home).join("~") : text;
 };
 
-/** key-level diff of two `JSON.stringify({ ...localStorage })` dumps, for a failed restore check; "" when both hold the same keys and values, in any order */
+/** the one localStorage dump in the gate scripts; compare two dumps only with storageDiff, never as strings (chromium lists keys in hash order) */
+export const storageSnapshot = (page: Page): Promise<string> =>
+  page.evaluate(() => JSON.stringify({ ...localStorage }));
+
+/** key-level diff of two storageSnapshot dumps, for every gate storage compare; "" when both hold the same keys and values, in any order */
 export function storageDiff(before: string, after: string, limit = 200): string {
   const [a, b] = [before, after].map((dump) => JSON.parse(dump) as Record<string, string>);
   const cut = (value: string) => value.length > limit ? `${value.slice(0, limit)}...` : value;

@@ -108,3 +108,15 @@ test("storage diff names keys only before, only after, and changed values; key o
   expect(storageDiff(JSON.stringify({ gone: "x", same: "s", moved: "old" }), JSON.stringify({ moved: "new", same: "s", added: "y".repeat(5) }), 3))
     .toBe("only before: gone=x\nonly after: added=yyy...\nchanged: moved: old -> new");
 });
+
+test("only storageSnapshot in gate-diagnostics.ts dumps localStorage; chromium lists keys in hash order, so a string compare of two dumps is flaky", async () => {
+  // any spread of localStorage or JSON.stringify(localStorage), on one line or many; no dump exists outside the helper, so none can be string-compared
+  const dump = /\.\.\.\s*localStorage\b|JSON\.stringify\(\s*localStorage\b/g;
+  const found: string[] = [];
+  for (const name of new Bun.Glob("*.ts").scanSync(import.meta.dir)) {
+    if (name === "gate-diagnostics.ts" || name.endsWith(".test.ts")) continue;
+    const text = await Bun.file(`${import.meta.dir}/${name}`).text();
+    for (const match of text.matchAll(dump)) found.push(`${name}:${text.slice(0, match.index).split("\n").length}`);
+  }
+  expect(found, `dump localStorage with storageSnapshot(page) and compare dumps with storageDiff (scripts/gate-diagnostics.ts): ${found.join(", ")}`).toEqual([]);
+});
