@@ -141,7 +141,7 @@ function SessionCatalog({ result, online, id, owned, unsent, search, rowRefs, fo
   search: RefObject<HTMLInputElement | null>; rowRefs: RefObject<Map<string, HTMLAnchorElement>>; follow: Follow;
 }) {
   const { data, error, refreshing, refresh } = result;
-  const rows = data.items.filter((one) => one.id === id || !unsent?.has(one.id));
+  const rows = data.items.filter((one) => one.id === id || !!one.preview || !unsent?.has(one.id));
   const [query, setQuery] = useState("");
   const [projectFilter, setProject] = useState("any");
   const [statusFilter, setStatus] = useState("any");

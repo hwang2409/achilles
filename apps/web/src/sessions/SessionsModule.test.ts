@@ -90,6 +90,15 @@ test("the selected never-sent chat stays listed while other never-sent chats hid
   expect(catalogTitles().sort()).toEqual(["synthetic draft", "synthetic sent"]);
 });
 
+test("a never-sent id that has a first message stays listed", async () => {
+  // achilles missed the first-message record, or the first send came from the zeta tui
+  unsentRead(() => Response.json({ session_ids: ["draft", "typed"] }));
+  mount({ sent: 0, draft: 0, typed: 0 }, "/", { typed: { name: null, first_message_preview: "synthetic typed" } });
+  await screen.findByText("synthetic sent");
+  await settle();
+  expect(catalogTitles().sort()).toEqual(["synthetic sent", "synthetic typed"]);
+});
+
 test("a failed never-sent read hides nothing", async () => {
   unsentRead(() => new Response("down", { status: 500 }));
   mount({ sent: 0, draft: 0 });
@@ -101,5 +110,5 @@ test("a failed never-sent read hides nothing", async () => {
 test("a session with no name and no first message is labelled, not shown by its bare id", async () => {
   mount({ "0123456789abcdef": 0 }, "/", { "0123456789abcdef": { name: null } });
   await screen.findByRole("region", { name: "session catalog" });
-  expect(catalogTitles()).toEqual(["no user message · 01234567"]);
+  expect(catalogTitles()).toEqual(["untitled · 01234567"]);
 });
