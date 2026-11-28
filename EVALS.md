@@ -197,6 +197,15 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     result in the snapshot's `user_writes` (never the credential). if the write
     fails or does not bump the revision, the run is `harness_error`. it uses no
     model turn; `chat` only labels the actor.
+  - `page_action`: click one button inside the compiled page, like a user, with
+    no model turn. it takes `click: { role: "button", name }` (the exact
+    accessible name). every `page_action` comes after every other step (the
+    lint rejects one before a model step); they run in order once every chat
+    is closed. each is a required check `page_action:<id>`: the button must
+    show in the page frame and the click must make a record write through the
+    page's bridge that succeeds. a missing button or a click that writes
+    nothing is `agent_fail`; a browser crash is `harness_error`. rows go to
+    the snapshot's `page_actions`.
   - `approval` (optional, `"approve"`, `"deny"`, or `{ tool, decisions }`,
     default `"approve"`): how the harness answers every approval request during
     a model step. `"deny"` sends zeta's real `deny`. `{ tool, decisions }`
