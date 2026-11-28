@@ -129,6 +129,8 @@ test("the catalog's step and tool calls stand unless the live row changed after 
   expect(withLiveRow(running, live)).toBe(running);
   expect(withLiveRow(running, { ...live, latestActivity: "turn 3: thinking", toolCount: 6 }, 4)).toEqual({ ...running, currentStep: "turn 3: thinking", toolCount: 6, elapsedSeconds: 9 });
   expect(withLiveRow({ ...running, status: "completed" }, live, 4)).toEqual({ ...running, status: "completed" });
+  // a live row with fewer tool calls than the report keeps the report's count: the count never goes lower
+  expect(withLiveRow(running, { ...live, latestActivity: "turn 3: thinking" }, 4)).toEqual({ ...running, currentStep: "turn 3: thinking", elapsedSeconds: 9 });
   expect(withLiveRow(running, { ...live, status: "waiting_approval", latestActivity: "approve bash: rm notes.txt" })).toEqual({ ...running, waiting: "needs approval", currentStep: "approve bash: rm notes.txt" });
   expect(withLiveRow(running, { status: "waiting_input" })).toEqual({ ...running, waiting: "needs input", currentStep: "needs input" });
   expect(withLiveRow(running, { status: "done", summary: "counted 3 lines" })).toEqual({ ...running, reply: "counted 3 lines" });
