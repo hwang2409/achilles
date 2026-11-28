@@ -15,6 +15,7 @@ import { applyApprovalMode, ChatBusyError, CONTROLLED_RETRIES, creationApprovalM
 import { holdAttached, parkedRows, reclaimHeld, refreshParked, stopParked, watchClosed } from "./zeta/parked";
 import { patchChat, writeShownState, type RowState } from "./zeta/rowState";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
+import type { ComposerImage } from "./composer/images";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; code?: { version: number; digest: string } | null; unsupported_format?: string | null };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
@@ -416,11 +417,13 @@ export async function deliverChatMessage(
   dropReason: (deliveryId: string) => Promise<string | undefined>,
   // zeta keeps the message: a send accepted, a steer delivered
   onAccepted: () => void = () => {},
+  // sent with the text as one `send_images` (never a steer): a resend carries the same images
+  images?: ComposerImage[],
 ): Promise<"send" | "steer"> {
   // the delivery id is the message's intent: a resend with a fresh id takes over its row instead of adding one
   const intent = deliveryId;
   try {
-    return await deliverOnce(client, sessionId, text, deliveryId, steer, track, intent, onAccepted);
+    return await deliverOnce(client, sessionId, text, deliveryId, steer, track, intent, onAccepted, images);
   } catch (error) {
     if (error instanceof DroppedSteerDeliveryError && UNREAD_DROPS.has(await dropReason(deliveryId) ?? "")) return await sendUnreadSteer(client, sessionId, text, track, intent);
     const outcome = classify(error);
@@ -428,7 +431,7 @@ export async function deliverChatMessage(
     if (outcome !== "resend") throw outcome === "maybe" ? new Error(MAYBE_SENT) : refusal(error);
   }
   try {
-    return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track, intent, onAccepted);
+    return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track, intent, onAccepted, images);
   } catch (error) {
     // the one resend: zeta's answer is shown and nothing goes out again by itself
     throw classify(error) === "rethrow" || error instanceof DroppedDuplicateError ? refusal(error) : new Error(MAYBE_SENT);
@@ -499,15 +502,17 @@ async function deliverOnce(
   track: (id: string) => void,
   intent: string,
   onAccepted: () => void,
+  images?: ComposerImage[],
 ): Promise<"send" | "steer"> {
-  const first: "send" | "steer" = steer ? "steer" : "send";
+  const first: "send" | "steer" = steer && !images ? "steer" : "send";
   let used = first;
   // tracked before the request: zeta echoes an accepted message before it answers
   track(deliveryId);
   try {
-    accepted(await client.request(first, { session_id: sessionId, text, delivery_id: deliveryId }, { intent }));
+    accepted(await client.request(images ? "send_images" : first, { session_id: sessionId, text, ...(images ? { images } : {}), delivery_id: deliveryId }, { intent }));
   } catch (error) {
-    if (error instanceof DroppedDuplicateError) throw error;
+    // images start a turn or are refused: there is no steer to fall back to
+    if (error instanceof DroppedDuplicateError || images) throw error;
     // zeta serve-protocol: "A `send` that arrives right after `turn_end` either starts the turn that carries the steer,
     // or gets `-32004` because that turn has already started; the client should then retry the text as a `steer`."
     // A refused request records no delivery ID, so the one retry reuses it; a second refusal is shown, not retried.
@@ -1067,7 +1072,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     return () => { turn.dispose(); if (turnEnd.current === turn) turnEnd.current = null; };
   }, [applyActive, canWrite, client, workSessionId, ready?.lease, ready?.rebind, ready?.pendingApprovalMode]); // a new attach (lease) gets a new owner and token
 
-  const sendReady = useCallback(async (client: ZetaClient, target: ReadyState, token: number, text: string, deliveryId: string, steer: boolean, track: (id: string) => void) => {
+  const sendReady = useCallback(async (client: ZetaClient, target: ReadyState, token: number, text: string, deliveryId: string, steer: boolean, track: (id: string) => void, images?: ComposerImage[]) => {
     requireCurrent(owner.current, token);
     // not gated on the owner token: a chat switch mid-send must still record the send. each user send (a message or a
     // steer) moves the chat to the top of Recent once zeta keeps it (a send accepted, a steer delivered); the first one
@@ -1076,7 +1081,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const record = () => {
       if (recorded) return;
       recorded = true;
-      const firstTitle = target.sent ? null : cutTitle(text);
+      // an image-only first message is titled by its file names
+      const firstTitle = target.sent ? null : cutTitle(text.trim() ? text : images?.map((image) => image.name).join(", ") ?? text);
       void patchChat(target.sessionId, firstTitle === null ? { message: true } : { message: true, first_message: firstTitle })
         .then((response) => {
           if (!response.ok || firstTitle === null) return;
@@ -1089,7 +1095,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         .catch((error) => console.error("could not record the message", error));
     };
     try {
-      await deliverChatMessage(client, target.sessionId, text, deliveryId, steer, track, (id) => steerDropReason(target.lease.store, id), record);
+      await deliverChatMessage(client, target.sessionId, text, deliveryId, steer, track, (id) => steerDropReason(target.lease.store, id), record, images);
     } catch (error) {
       if (pendingSelection.current?.sessionId === target.sessionId) pendingSelection.current = null;
       // the bubble says why too: zeta may have named the drop `disconnect` although this connection still answers
@@ -1111,7 +1117,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (state.phase === "empty") await modeToggle.current.beforeSend();
     const delivery_id = intent.deliveryId ?? crypto.randomUUID();
     if (state.phase === "empty") pendingSelection.current = { sessionId: current.sessionId, sawRunning: false };
-    await sendReady(client, current, token, text, delivery_id, steer, track);
+    await sendReady(client, current, token, text, delivery_id, steer, track, intent.images);
   }, [canWrite, client, createFirstChat, sendReady, state]);
 
   const setPendingCreateMode = useCallback((current: EmptyState, enabled: boolean) => {

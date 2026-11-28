@@ -10,6 +10,7 @@ import { restoreFocus } from "../keyboard";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { composerStatus, enterAction, inFlight, submitAction } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
+import { ImageChips, imageInputProps } from "./ImageChips";
 import {
   useComposerDelivery,
   type ComposerAdapterProps,
@@ -34,11 +35,12 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const focusLost = useRef(false);
   const stopFocused = useRef(false);
-  const { model, edit, submit, stop, retry, restore, cancel } = useComposerDelivery(props);
+  const { model, edit, addImages, removeImage, submit, stop, retry, restore, cancel } = useComposerDelivery(props);
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
   const action = submitAction(model);
-  const queues = model.sending || model.queue.length > 0;
+  // images cannot steer: with a turn running they wait for it, like a queued message
+  const queues = model.sending || model.queue.length > 0 || (steer && model.images.length > 0);
   const { text: message, tone } = composerStatus(model);
   const caret = useRef<number | null>(null);
   const paths = usePathCompletion(props.completePaths, (value, at) => { caret.current = at; edit(value); });
@@ -107,9 +109,11 @@ export function PlainComposer(props: ComposerAdapterProps) {
       aria-label={label}
       aria-busy={model.sending || model.stopping || undefined}
       onSubmit={onFormSubmit}
+      {...(props.images && !readOnly ? imageInputProps(addImages) : {})}
     >
       {!readOnly && paths.list(() => input.current)}
       {!readOnly && <QueuedMessages model={model} onRetry={(id) => { retry(id); focusInput(); }} onRestore={(id) => { restore(id); focusInput(); }} onCancel={(id) => { cancel(id); focusInput(); }} />}
+      {!readOnly && <ImageChips images={model.images} onRemove={(index) => { removeImage(index); focusInput(); }} />}
       <div data-part="composer-field" data-value={model.draft}>
         <textarea
           ref={input}
