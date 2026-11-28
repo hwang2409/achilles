@@ -4,6 +4,7 @@ import { afterEach, expect, jest, spyOn, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { AgentRunDetail, RetryLine, retryText, RunHistory } from "./AgentRunDetail";
 import { countText } from "./AgentsModule";
+import { anchorElapsed } from "./childControls";
 import { statusChoices, type Retry } from "./reads";
 const { act, cleanup, render } = await import("@testing-library/react");
 
@@ -76,11 +77,16 @@ test("the state filter offers suspended only when zeta negotiated child recovery
 const waiting = { runId: "a:1", sessionId: "a", parentRunId: null, agentType: "run", status: "suspended" as const, description: "work", currentStep: "suspended",
   turnsUsed: 0, toolCount: 0, elapsedSeconds: 0, startedAt: now, retry: retrying(40) };
 
-test("a run that never ran a turn shows no elapsed time; one that ran shows it; a live run counts from its start", () => {
-  // a live run's elapsed counts on the page clock from its start; a finished run keeps zeta's number
-  const time = spyOn(Date, "now").mockImplementation(() => now);
-  const fields = (row: typeof waiting) => {
-    const ui = render(<AgentRunDetail chosen={row} title="chat" id="a:1" client={null} reportedAt={now} refreshing={false} refresh={() => {}} />);
+test("a run that never ran a turn shows no elapsed time; one that ran shows it; a live run counts on from zeta's number", () => {
+  // a live run's elapsed counts on the page's monotonic clock from zeta's number as of its read; a finished run keeps zeta's number
+  let mono = 50_000;
+  const time = spyOn(Date, "now").mockImplementation(() => now + mono);
+  const monotonic = spyOn(performance, "now").mockImplementation(() => mono);
+  let run = 0;
+  const fields = (row: typeof waiting, readAgo = 0) => {
+    const read = { ...row, runId: `a:elapsed-${run++}` };
+    anchorElapsed(read, mono - readAgo);
+    const ui = render(<AgentRunDetail chosen={read} title="chat" id={read.runId} client={null} reportedAt={now} refreshing={false} refresh={() => {}} />);
     const labels = [...ui.container.querySelectorAll(".agents-run-head dt")].map((node) => node.textContent);
     const value = [...ui.container.querySelectorAll(".agents-run-head div")].find((node) => node.querySelector("dt")?.textContent === "elapsed")?.querySelector("dd")?.textContent;
     ui.unmount();
@@ -89,16 +95,16 @@ test("a run that never ran a turn shows no elapsed time; one that ran shows it; 
   try {
     expect(fields(waiting).labels).not.toContain("elapsed");
     // real zeta reports a fraction of a second
-    expect(fields({ ...waiting, startedAt: now - 400 }).labels).not.toContain("elapsed");
-    expect(fields({ ...waiting, startedAt: now - 3200 }).value).toBe("3s");
-    expect(fields({ ...waiting, turnsUsed: 1, startedAt: now - 5000 }).value).toBe("5s");
-    // the report's number is from its read, not now
-    expect(fields({ ...waiting, startedAt: now - 19_000, elapsedSeconds: 15 }).value).toBe("19s");
+    expect(fields({ ...waiting, elapsedSeconds: 0.4 }).labels).not.toContain("elapsed");
+    expect(fields({ ...waiting, elapsedSeconds: 3.2 }).value).toBe("3s");
+    expect(fields({ ...waiting, turnsUsed: 1, elapsedSeconds: 5 }).value).toBe("5s");
+    // read 4 s ago, at 15 s: the count goes on from there, whatever started_at says
+    expect(fields({ ...waiting, startedAt: now - 600_000, elapsedSeconds: 15 }, 4000).value).toBe("19s");
     // a finished one-turn child under 1 s did work: "<1s", not "0s"
-    expect(fields({ ...waiting, status: "completed", retry: undefined, finishedAt: now + 400, turnsUsed: 1, elapsedSeconds: 0.4 } as unknown as typeof waiting).value).toBe("<1s");
+    expect(fields({ ...waiting, status: "completed", retry: undefined, finishedAt: now + 400, turnsUsed: 1, elapsedSeconds: 0.4 } as unknown as typeof waiting, 4000).value).toBe("<1s");
     // stored agent state has no elapsed: none is made up from its start
     expect(fields({ ...waiting, startedAt: now - 5000, elapsedSeconds: undefined } as unknown as typeof waiting).labels).not.toContain("elapsed");
-  } finally { time.mockRestore(); }
+  } finally { time.mockRestore(); monotonic.mockRestore(); }
 });
 
 // a zeta whose stored child transcript reads as the given pages in turn, the last one repeating (synthetic)
