@@ -127,6 +127,16 @@ test("a suspended catalog row keeps its status and zeta's retry times; a bad ret
   expect(Object.keys(old.reader.snapshot().report!.rows[0]!)).not.toContain("retry");
 });
 
+test("the attached child list keeps zeta's retry times that fulcrum's row parser drops", async () => {
+  const { reader } = setup(["child_runs", "child_recovery"], [{ session: { session_id: "a" } }, { runs: [suspended(), suspended("a:2", { retry_state: "stopped", next_retry_at: undefined })] }], ["child_run_list"]);
+  await reader.refresh({ root: "a" });
+  const rows = reader.snapshot().report!.rows;
+  expect(rows.map((row) => row.status)).toEqual(["suspended", "suspended"]);
+  expect(rows[0]!.retry).toEqual({ state: "retrying", startedAt: Date.parse("2026-11-08T00:00:00Z"), deadlineAt: Date.parse("2026-11-08T01:00:00Z"), nextAt: Date.parse("2026-11-08T00:00:05.004Z") });
+  expect(rows[1]!.retry?.state).toBe("stopped");
+  reader.stop();
+});
+
 test("rows sharing a retry time reread once after it passes, never while a read is in flight, and not again for the same time", async () => {
   jest.useFakeTimers();
   try {

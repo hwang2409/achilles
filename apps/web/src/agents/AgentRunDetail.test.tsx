@@ -73,14 +73,15 @@ test("a run that never ran a turn shows no elapsed time; one that ran shows it",
 });
 
 test("child history shows loading only while the first read runs; an empty transcript says no activity yet", async () => {
-  const read = Promise.withResolvers<unknown>();
+  let answer!: (value: unknown) => void;
+  const pending = new Promise<unknown>((resolve) => { answer = resolve; });
   const client = { features: ["child_runs", "child_run_history"], request: (method: string) =>
-    method === "status" ? Promise.resolve({ session: { session_id: "a" } }) : read.promise } as unknown as ZetaClient;
+    method === "status" ? Promise.resolve({ session: { session_id: "a" } }) : pending } as unknown as ZetaClient;
   const ui = render(<RunHistory client={client} row={waiting} />);
   try {
     await act(async () => {});
     expect(ui.container.textContent).toContain("reading child history");
-    await act(async () => { read.resolve({ messages: [], next_before: null, history_validator: { end: 0, entry_id: null } }); });
+    await act(async () => { answer({ messages: [], next_before: null, history_validator: { end: 0, entry_id: null } }); });
     for (let tick = 0; tick < 5; tick++) await act(async () => { await Promise.resolve(); });
     expect(ui.container.textContent).not.toContain("reading child history");
     expect(ui.container.textContent).toContain("no activity yet");

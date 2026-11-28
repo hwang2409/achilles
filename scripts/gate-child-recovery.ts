@@ -61,7 +61,7 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
     await review.getByRole("checkbox", { name: "i reviewed the scope" }).check();
     await review.getByRole("button", { name: "spawn agent" }).click();
     await main.getByText(/spawned run:/).waitFor();
-    // the dialog does not reread on suspension; the paused notice says it, and refresh shows the row
+    // the dialog rereads when the paused notice lands; refresh covers a notice that came before the dialog read
     const row = agents.locator(".chat-agents-runs .agents-row", { hasText: task });
     await waitFor(async () => {
       if (await row.locator('.agents-state[data-status="suspended"]').count() === 1 && /retries in \d/.test(await row.innerText())) return true;
@@ -71,6 +71,9 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
     }, "suspended child row with its retry time");
     await row.click();
     await agents.locator(".agents-run-head", { hasText: "gives up at" }).waitFor();
+    // a child paused before its first turn has no honest elapsed time, and its history read ends
+    if (/elapsed at last refresh/.test(await agents.locator(".agents-run-head").innerText())) throw new Error("a child that never ran a turn shows an elapsed time");
+    await agents.locator('.agents-activity [data-state="loading"]').waitFor({ state: "detached" });
     if (await agents.locator(".agents-composer").count()) throw new Error("a suspended child offers the message box");
     if (await agents.locator('[data-write-surface="agents.cancel"]').count() !== 1) throw new Error("a suspended child has no cancel");
     await capture(main, "child-suspended-1440");
@@ -94,6 +97,7 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
       if (!(await place.getByRole("combobox", { name: "state" }).locator("option").allTextContents()).includes("suspended")) throw new Error("the state filter has no suspended choice");
       await listed.click();
       await place.locator(".agents-run-head", { hasText: "gives up at" }).waitFor();
+      await place.locator('.agents-activity [data-state="loading"]').waitFor({ state: "detached" });
       await capture(place, "agents-suspended-1440");
       await place.setViewportSize({ width: 390, height: 844 });
       await Bun.sleep(350);
@@ -104,7 +108,7 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
     await main.locator(resumed).waitFor({ timeout: 25_000 });
     const again = await openAgents();
     const done = again.locator(".chat-agents-runs .agents-row", { hasText: task });
-    // the dialog rereads on its own 3 s after the planned retry time
+    // the dialog read the list when it opened; it also rereads on the resumed notice
     await waitFor(async () => await done.locator(".agents-state").getAttribute("data-status") !== "suspended", "recovered child leaves suspended");
     await capture(main, "child-recovered-1440");
     await again.getByRole("button", { name: "close", exact: true }).click();

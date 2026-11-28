@@ -93,8 +93,9 @@ function stored(v: unknown): AgentRun | undefined {
     startedAt: v.started_ns === null ? undefined : Math.floor(v.started_ns / 1e6), finishedAt: v.ended_ns === null ? undefined : Math.floor(v.ended_ns / 1e6) };
 }
 
-function attachedRow(v: ChildRunRow): AgentRun | undefined {
-  return rich({ run_id: v.runId, session_id: v.sessionId, parent_run_id: v.parentRunId, agent_type: v.agentType,
+// fulcrum's row parser drops zeta's retry fields, so they come from the raw row with the same run id
+function attachedRow(v: ChildRunRow, raw: Record<string, unknown> = {}): AgentRun | undefined {
+  return rich({ ...raw, run_id: v.runId, session_id: v.sessionId, parent_run_id: v.parentRunId, agent_type: v.agentType,
     description: v.description, current_step: v.currentStep, status: v.status.value, accepts_follow_ups: v.acceptsFollowUps,
     turns_used: v.turnsUsed, tool_count: v.toolCount, elapsed_seconds: v.elapsedSeconds, started_at: v.startedAt, finished_at: v.finishedAt });
 }
@@ -152,10 +153,13 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     signal.throwIfAborted();
     if (source === "attached") {
       if (!attached || root && root !== attached) return { rows: [], omitted: 0 };
-      const result = await listChildRuns(client, attached, { limit: 100, offset: typeof cursor === "number" ? cursor : 0, signal, timeoutMs: 12000 });
+      let reply: unknown;
+      const reading = { features: client.features, request: (...call: Parameters<ZetaClient["request"]>) => client.request(...call).then((value) => reply = value) };
+      const result = await listChildRuns(reading, attached, { limit: 100, offset: typeof cursor === "number" ? cursor : 0, signal, timeoutMs: 12000 });
       if (result.kind !== "page") throw bad();
+      const raw = new Map(object(reply) && Array.isArray(reply.runs) ? reply.runs.flatMap((row) => object(row) && text(row.run_id) ? [[row.run_id, row] as const] : []) : []);
       const rows = result.runs.flatMap((value) => {
-        const row = attachedRow(value);
+        const row = attachedRow(value, raw.get(value.runId));
         return row?.sessionId === attached ? [row] : [];
       });
       return { rows: status ? rows.filter((row) => row.status === status) : rows, next: result.nextOffset, omitted: result.invalidRows + result.runs.length - rows.length };
