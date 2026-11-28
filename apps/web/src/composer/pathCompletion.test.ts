@@ -15,10 +15,10 @@ const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, PATH
 const entry = (text: string, startPosition: number, kind: "directory" | "file" = "directory"): PathCompletionEntry => ({ text, display: `@${text}`, kind, startPosition });
 const entries = (...rows: PathCompletionEntry[]): PathCompletionResult => ({ kind: "entries", entries: rows, truncated: false });
 
-function mount(completePaths?: CompletePaths) {
+function mount(completePaths?: CompletePaths, draft?: string) {
   const submitted: string[] = [];
   const store = createRunStore();
-  const composer = (chatId: string, complete?: CompletePaths) => React.createElement(RunProvider, { store }, React.createElement(PlainComposer, {
+  const composer = (chatId: string, complete?: CompletePaths, defaultValue = draft) => React.createElement(RunProvider, { store }, React.createElement(PlainComposer, {
     state: "idle" as const,
     onSubmit: async (text: string) => { submitted.push(text); },
     onDraftChange: () => {},
@@ -26,15 +26,19 @@ function mount(completePaths?: CompletePaths) {
     chatId,
     label: "message",
     completePaths: complete,
+    defaultValue,
   }));
-  const result = render(composer(`path-test-${chatSeq++}`, completePaths));
+  const chat = `path-test-${chatSeq++}`;
+  const result = render(composer(chat, completePaths));
   const field = result.container.querySelector("textarea") as HTMLTextAreaElement;
+  /** what the app does when another window edits this chat's draft */
+  const remoteDraft = (value: string) => act(() => { result.rerender(composer(chat, completePaths, value)); });
   /** what the app does on a chat switch: a new chat id and a new completer bound to it */
   const switchChat = (complete?: CompletePaths) => act(() => { result.rerender(composer(`path-test-${chatSeq++}`, complete)); });
   const type = (value: string) => act(() => { fireEvent.change(field, { target: { value } }); });
   const key = (name: string, init: KeyboardEventInit = {}) => act(() => { fireEvent.keyDown(field, { key: name, ...init }); });
   const options = () => [...result.container.querySelectorAll('[role="option"]')].map((option) => `${option.getAttribute("aria-selected") === "true" ? ">" : ""}${option.textContent}`);
-  return { field, type, key, options, submitted, switchChat, unmount: result.unmount, listbox: () => result.getByRole("listbox", { name: "path completions" }) };
+  return { field, type, key, options, submitted, switchChat, remoteDraft, unmount: result.unmount, listbox: () => result.getByRole("listbox", { name: "path completions" }) };
 }
 
 test("the token rule matches zeta's: an @ at a word start, quoted or bare, up to the cursor", () => {
@@ -99,7 +103,7 @@ test("escape closes the list and keeps it closed until the text changes", async 
   expect(composer.options()).toEqual([">@src/"]);
   await composer.key("Escape");
   expect(composer.options()).toEqual([]);
-  await act(() => { fireEvent.select(composer.field); });
+  await act(() => { fireEvent.keyUp(composer.field, { key: "ArrowLeft" }); });
   await settle();
   expect(asked).toEqual(["@s"]);
   await composer.type("@sr");
@@ -160,7 +164,7 @@ test("a quoted path inserts after the quote and keeps the text after the caret",
   await act(() => {
     fireEvent.change(composer.field, { target: { value: 'read @"my fi now' } });
     composer.field.setSelectionRange(12, 12);
-    fireEvent.select(composer.field);
+    fireEvent.keyUp(composer.field, { key: "ArrowLeft" });
   });
   await settle();
   expect(asked.at(-1)).toBe('read @"my fi');
@@ -196,4 +200,33 @@ test("an unmount inside the pause asks nothing", async () => {
   composer.unmount();
   await settle();
   expect(asked).toEqual([]);
+});
+
+test("a restored draft that ends in an @ token asks nothing and shows no list, so enter sends it", async () => {
+  const asked: string[] = [];
+  const composer = mount(async (text) => { asked.push(text); return entries(entry("src/", -1)); }, "look @s");
+  // what the app does after a chat switch or a reload: focus the field, which a browser reports as a selection change
+  await act(() => { composer.field.focus(); document.dispatchEvent(new Event("selectionchange")); });
+  await settle();
+  expect(asked).toEqual([]);
+  expect(composer.options()).toEqual([]);
+  await composer.key("Enter");
+  expect(composer.submitted).toEqual(["look @s"]);
+});
+
+test("a remote draft edit asks nothing and closes a list shown for the old text", async () => {
+  const asked: string[] = [];
+  const composer = mount(async (text) => { asked.push(text); return entries(entry("src/", -1)); });
+  await composer.type("@s");
+  await settle();
+  expect(composer.options()).toEqual([">@src/"]);
+  await composer.remoteDraft("hi @s");
+  await settle();
+  expect(asked).toEqual(["@s"]);
+  expect(composer.options()).toEqual([]);
+  // the user's own caret move in the new text may open a list again
+  await composer.key("ArrowLeft");
+  await act(() => { fireEvent.keyUp(composer.field, { key: "ArrowLeft" }); });
+  await settle();
+  expect(asked).toEqual(["@s", "hi @s"]);
 });

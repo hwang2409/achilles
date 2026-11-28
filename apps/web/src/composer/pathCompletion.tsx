@@ -107,8 +107,11 @@ export function usePathCompletion(complete: CompletePaths | undefined, insert: (
       "aria-controls": list ? listId : undefined,
       "aria-activedescendant": list ? optionId(list.active) : undefined,
     } : {},
-    /** call after every edit and caret move */
+    /** call after every user edit and caret move: only these open a list */
     sync: (field: HTMLTextAreaElement) => update(caretText(field)),
+    /** call after the draft changes from code (a send, a clear, a chat switch, a remote edit): a waiting request or
+     * a shown list for other text is stale. this never opens a list, so a restored draft that ends in `@x` shows none */
+    closeIfStale: (field: HTMLTextAreaElement) => { if (caretText(field) !== last.current) close(); },
     onKeyDown,
     close,
     list: (field: () => HTMLTextAreaElement | null) => list && (
