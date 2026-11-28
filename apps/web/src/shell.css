@@ -92,6 +92,9 @@
 .run-state, .page-chat-status { color: var(--fulcrum-muted); font-size: inherit; white-space: nowrap; }
 /* the run state comes first in the right-aligned actions, so when it shows the controls to its right do not move */
 .run-state { order: -1; }
+/* the running background-task count: a live mark like a running agent, so it reads as work, not a plain action */
+.chat-actions .chat-tasks-chip { color: var(--fulcrum-accent); font-variant-numeric: tabular-nums; }
+.chat-tasks-chip::before { content: ""; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: .55ch; display: inline-block; background: currentColor; }
 
 /* the page crumb's word spaces plus this margin match the 8px gap around the title's "/" */
 .page-crumb > span { margin-inline: 4px; }

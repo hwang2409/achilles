@@ -30,6 +30,7 @@ export function teeRunEnds(transport: Transport, client: () => object | null): T
     onMessage: (callback) => transport.onMessage((text) => {
       if (takeParkedEvent(client(), text)) return;
       callback(text);
+      if (text.includes('"background_task_updated"')) publishTaskUpdate(client(), text);
       if (!text.includes('"agent_end"')) return;
       let frame: { method?: unknown; params?: { event?: unknown; session_id?: unknown } };
       try { frame = JSON.parse(text); } catch { return; }
@@ -37,6 +38,22 @@ export function teeRunEnds(transport: Transport, client: () => object | null): T
       if (owner && frame.method === "event" && frame.params?.event === "agent_end" && typeof frame.params.session_id === "string") publishRunEnd(owner, frame.params.session_id);
     }),
   };
+}
+
+const taskListeners = new WeakMap<object, Set<RunEndListener>>();
+function publishTaskUpdate(owner: object | null, text: string) {
+  let frame: { method?: unknown; params?: { event?: unknown; session_id?: unknown } };
+  try { frame = JSON.parse(text); } catch { return; }
+  const sessionId = frame.params?.session_id;
+  if (!owner || frame.method !== "event" || frame.params?.event !== "background_task_updated" || typeof sessionId !== "string") return;
+  for (const listener of [...taskListeners.get(owner) ?? []]) listener(sessionId);
+}
+/** Calls `listener` with the session id of every `background_task_updated` frame (feature `run_work`) until the returned function runs. */
+export function onTaskUpdate(client: object, listener: RunEndListener): () => void {
+  let listeners = taskListeners.get(client);
+  if (!listeners) taskListeners.set(client, listeners = new Set());
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
 }
 
 /** Calls `listener` with the session id of every `agent_end` frame, in arrival order, until the returned function runs. */

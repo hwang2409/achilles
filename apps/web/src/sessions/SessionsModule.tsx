@@ -3,7 +3,7 @@ import { createRunStore } from "@fulcrum/core";
 import { RunProvider, Timeline } from "@fulcrum/react";
 import { fromZetaHistory, type ZetaClient } from "@fulcrum/zeta";
 import { EnumListbox } from "../page/EnumListbox";
-import { timeLabel, type Chat } from "../surface/AgentNavAdapter";
+import { chatHref, timeLabel, type Chat } from "../surface/AgentNavAdapter";
 import { ModuleState, ShellDockSlot } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
 import { createSessionsReader, readError, ReadLimit, type AttentionItem, type Collection, type SessionRow, type SessionsReader, type Transcript } from "./reads";
@@ -130,7 +130,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
       <div className="sessions-split" data-detail={!!id || invalid}>
         <SessionCatalog result={{ data, error, refreshing, refresh }} online={!!client} id={id} owned={owned} unsent={unsent} search={search} rowRefs={rowRefs} follow={follow} />
         <DetailPane id={id} row={row} view={view} invalid={invalid} complete={data.complete} reader={reader}
-          owned={!!row && owned.has(row.id)} detail={detail} follow={follow} continueSession={continueSession} />
+          chat={row && chats.find((chat) => chat.session_id === row.id)} detail={detail} follow={follow} continueSession={continueSession} />
       </div>
     </>}
   </section>;
@@ -183,9 +183,9 @@ function SessionCatalog({ result, online, id, owned, unsent, search, rowRefs, fo
   </section>;
 }
 
-function DetailPane({ id, row, view, invalid, complete, reader, owned, detail, follow, continueSession }: {
+function DetailPane({ id, row, view, invalid, complete, reader, chat, detail, follow, continueSession }: {
   id?: string; row?: SessionRow; view: View; invalid: boolean; complete: boolean; reader?: SessionsReader;
-  owned: boolean; detail: RefObject<HTMLElement | null>; follow: Follow; continueSession: ContinueSession;
+  chat?: Chat; detail: RefObject<HTMLElement | null>; follow: Follow; continueSession: ContinueSession;
 }) {
   const back = view === "detail" ? href() : href(id);
   return <section className="sessions-detail" ref={detail} tabIndex={-1} aria-label={view === "detail" ? "session detail" : `session ${view}`}>
@@ -193,14 +193,15 @@ function DetailPane({ id, row, view, invalid, complete, reader, owned, detail, f
       {view === "detail" ? "← sessions" : "← session detail"}
     </a>}
     {invalid ? <ModuleState kind="failed" title="invalid session link" /> : row ? <SessionDetail key={row.id} row={row} reader={reader} view={view}
-      owned={owned} follow={follow} continueSession={continueSession} /> : id ? <ModuleState kind="empty" title="session not in this catalog" detail={complete ? "it may have been removed." : "the catalog is incomplete."} />
+      chat={chat} follow={follow} continueSession={continueSession} /> : id ? <ModuleState kind="empty" title="session not in this catalog" detail={complete ? "it may have been removed." : "the catalog is incomplete."} />
       : <ModuleState kind="empty" title="select a session" />}
   </section>;
 }
 
-function SessionDetail({ row, reader, view, owned, follow, continueSession }: {
-  row: SessionRow; reader?: SessionsReader; view: View; owned: boolean; follow: Follow; continueSession: ContinueSession;
+function SessionDetail({ row, reader, view, chat, follow, continueSession }: {
+  row: SessionRow; reader?: SessionsReader; view: View; chat?: Chat; follow: Follow; continueSession: ContinueSession;
 }) {
+  const owned = !!chat;
   const [copied, setCopied] = useState("");
   const detailView = view === "detail";
   const access = useMemo(() => reader && detailView ? (signal: AbortSignal) => reader.transcriptMode(row, signal) : undefined, [reader, row.id, row.project, detailView]);
@@ -229,7 +230,9 @@ function SessionDetail({ row, reader, view, owned, follow, continueSession }: {
       {reader && mode.data && !mode.error ? <a className="sessions-transcript-action sessions-transcript-secondary" href={transcriptHref} onClick={(event) => follow(event, transcriptHref)}>read transcript</a>
         : <><button type="button" className="sessions-transcript-action" disabled>read transcript</button>
           <p className="sessions-help" role="status">{!reader ? "connect to zeta to read the transcript" : mode.error ? readError(mode.error) : "checking transcript access…"}</p></>}
-      <div className="sessions-collections"><CollectionView label="child agents" result={agents} /><CollectionView label="background tasks" result={tasks} /></div>
+      <div className="sessions-collections"><CollectionView label="child agents" result={agents} /><CollectionView label="background tasks" result={tasks}
+        // zeta lists and cancels a task only for the tab that holds its chat (run_work), never from this page
+        footer={chat && tasks.data?.items.some((item) => item.status === "running") && <a href={chatHref(chat)}>open the chat to cancel</a>} /></div>
     </>}
   </>;
 }
@@ -269,7 +272,7 @@ function useCollection(reader: SessionsReader | undefined, row: SessionRow, kind
   return useRead(load, row.status === "running" || row.status === "approval" ? 5000 : 30000);
 }
 
-function CollectionView({ label, result }: { label: string; result: ReturnType<typeof useCollection> }) {
+function CollectionView({ label, result, footer }: { label: string; result: ReturnType<typeof useCollection>; footer?: ReactNode }) {
   const { data, refreshing, error, refresh } = result;
   return <details className="sessions-collection">
     <summary>{label}{data && ` · ${data.items.length}${data.complete ? "" : " loaded"}`}</summary>
@@ -277,6 +280,7 @@ function CollectionView({ label, result }: { label: string; result: ReturnType<t
     {!!error && <p role="status">{data && `showing data from ${stamp(data.reportedAt)} · refresh failed · `}{readError(error)} {!(error instanceof ReadLimit) && <button type="button" onClick={refresh}>retry now</button>}</p>}
     {data?.omitted ? <p>{data.omitted} malformed {data.omitted === 1 ? "row" : "rows"} omitted</p> : null}
     {data?.items.length ? <ul>{data.items.map((item) => <li key={item.id}><code title={item.id}>{short(item.id)}</code> {item.label} · {item.status}</li>)}</ul> : data?.complete && <p>none reported</p>}
+    {footer && <p>{footer}</p>}
   </details>;
 }
 
