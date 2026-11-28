@@ -38,3 +38,6 @@
 .account-window meter:-moz-meter-sub-optimum::-moz-meter-bar { background: var(--g1-warn); }
 
 .account-switch-receipt:not(:has(time)) { display: none; }
+
+/* The page title takes focus on arrival as a landmark, not a control; it is never in the Tab order. */
+.module-frame:has(.accounts-place) h1[tabindex="-1"]:focus { outline: none; }
