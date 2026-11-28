@@ -8,7 +8,18 @@ const { cleanup, render, screen, within } = await import("@testing-library/react
 const { SessionsModule } = await import("./SessionsModule");
 const { sessionOwned } = await import("../chat/continuation");
 
-afterEach(() => { cleanup(); history.replaceState(null, "", "/"); });
+const realFetch = globalThis.fetch;
+afterEach(() => { cleanup(); history.replaceState(null, "", "/"); globalThis.fetch = realFetch; });
+
+/** answers achilles' never-sent read; `settle` lets that answer render */
+function unsentRead(reply: () => Response) {
+  globalThis.fetch = (async (url: string) => {
+    if (url !== "/api/chats/unsent") throw new Error(`unexpected fetch ${url}`);
+    return reply();
+  }) as unknown as typeof fetch;
+}
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+const catalogTitles = () => [...screen.getByRole("region", { name: "session catalog" }).querySelectorAll(".sessions-rows strong")].map((node) => node.textContent);
 
 const state = (id: string, open: number) => ({ session_id: id, status: "idle", child_count: 0, background_count: 0, attention_open: open });
 function mount(open: Record<string, number>, path = "/", extra: Record<string, object> = {}, continueSession = async (_id: string) => null) {
@@ -61,4 +72,34 @@ test("a session held by another process keeps the owned notice", async () => {
   mount({ other: 0 }, "/sessions/other", { other: { in_use: true, resident: false } });
   const button = await screen.findByRole("button", { name: "continue in chat" });
   expect([button.hasAttribute("disabled"), !!(await screen.findByText(sessionOwned))]).toEqual([true, true]);
+});
+
+test("a never-sent achilles chat is hidden from the catalog", async () => {
+  unsentRead(() => Response.json({ session_ids: ["draft"] }));
+  mount({ sent: 0, draft: 0 });
+  await screen.findByText("synthetic sent");
+  await settle();
+  expect(catalogTitles()).toEqual(["synthetic sent"]);
+});
+
+test("the selected never-sent chat stays listed while other never-sent chats hide", async () => {
+  unsentRead(() => Response.json({ session_ids: ["draft", "other"] }));
+  mount({ sent: 0, draft: 0, other: 0 }, "/sessions/draft");
+  await screen.findByText("synthetic sent");
+  await settle();
+  expect(catalogTitles().sort()).toEqual(["synthetic draft", "synthetic sent"]);
+});
+
+test("a failed never-sent read hides nothing", async () => {
+  unsentRead(() => new Response("down", { status: 500 }));
+  mount({ sent: 0, draft: 0 });
+  await screen.findByText("synthetic sent");
+  await settle();
+  expect(catalogTitles().sort()).toEqual(["synthetic draft", "synthetic sent"]);
+});
+
+test("a session with no name and no first message is labelled, not shown by its bare id", async () => {
+  mount({ "0123456789abcdef": 0 }, "/", { "0123456789abcdef": { name: null } });
+  await screen.findByRole("region", { name: "session catalog" });
+  expect(catalogTitles()).toEqual(["no user message · 01234567"]);
 });
