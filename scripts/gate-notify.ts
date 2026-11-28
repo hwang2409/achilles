@@ -65,10 +65,12 @@ export async function gateNotifications(browser: Browser, origin: string, waitFo
     await a.goto(`${origin}/pages`);
     await waitFor(listed(a, ids[0]!, null), "tab a lists the notify fixtures");
 
-    // off by default: a hidden tab shows nothing
+    // off by default: a hidden tab shows nothing, and a place without a chat does not even follow the broadcast (no
+    // extra list reads while notifications are off)
     await setVisibility(a, "hidden");
     await write(ids[0]!, { last_state: "approval" });
-    await waitFor(listed(a, ids[0]!, "needs you"), "tab a sees the first approval");
+    await a.waitForTimeout(1_000);
+    if (await listed(a, ids[0]!, "needs you")()) throw new Error("with notifications off, the /pages list followed another tab's write");
     if ((await notes(a)).length) throw new Error(`notifications are on by default: ${await notes(a)}`);
     await write(ids[0]!, { last_state: "running" });
     await setVisibility(a, "visible");
