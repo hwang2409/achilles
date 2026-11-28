@@ -30,3 +30,11 @@ test("no stylesheet transitions every property", () => {
     [...text.matchAll(/transition(?:-property)?\s*:\s*([^;}]+)/g)].filter((m) => /(^|[\s,])all\b/.test(m[1])).map((m) => `${path}: ${m[0].trim()}`));
   expect(offenders).toEqual([]);
 });
+
+test("full-width row buttons are excluded from the press shrink", () => {
+  const style = sheets.find(({ path }) => path === "style.css")!.text;
+  const press = style.match(/:where\(:not\(([^)]*)\)\):active\s*\{\s*scale:\s*var\(--g1-press-scale\)/);
+  const excluded = press?.[1].split(",").map((part) => part.trim()) ?? [];
+  const rows = [".agents-row", ".td-agent-row", ".td-turn-row", ".td-span-row", ".projects-entry", ".load-older"];
+  expect(rows.filter((row) => !excluded.includes(row))).toEqual([]);
+});

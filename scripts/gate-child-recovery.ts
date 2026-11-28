@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Browser, Page } from "../apps/web/node_modules/playwright";
 import type { Discovery } from "./gate-agent-controls";
+import { assertAgentsBackInPanel } from "./gate-geometry";
 
 export const childRecoveryArtifacts = ["child-suspended-1440.png", "child-suspended-390.png", "child-suspended-notice-1440.png", "agents-suspended-1440.png", "agents-suspended-390.png", "child-recovered-1440.png"];
 const task = "summarize a synthetic report";
@@ -99,6 +100,7 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
       await listed.click();
       await place.locator(".agents-run-head", { hasText: "gives up at" }).waitFor();
       await place.locator('.agents-activity [data-state="loading"]').waitFor({ state: "detached" });
+      await assertAgentsBackInPanel(place);
       await capture(place, "agents-suspended-1440");
       await place.setViewportSize({ width: 390, height: 844 });
       await Bun.sleep(350);

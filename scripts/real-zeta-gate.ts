@@ -31,6 +31,7 @@ import { surfaceRoutes } from "../apps/web/src/surface/routes";
 import { focusable } from "../apps/web/src/focusable";
 import { expectBrowserErrors } from "./browser-errors";
 import { freeGatePort } from "./gate-port";
+import { assertPageCrumbOneLine } from "./gate-geometry";
 
 const root = new URL("..", import.meta.url).pathname;
 
@@ -2217,6 +2218,7 @@ with _database() as db:
   });
   if (!(await shellChat.count()) || !shellGeometry.chatClass.includes("page-chat-docked") || shellGeometry.transcriptHeight <= 0 || !shellGeometry.composerVisible || shellGeometry.barCount !== 1 || shellGeometry.dialogCount !== 1 || !(await shellComposer.isVisible()) || await shellComposer.isDisabled())
     throw new Error(`390px page chat lost its mobile sheet geometry: ${JSON.stringify(shellGeometry)}`);
+  await assertPageCrumbOneLine(page);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-390x760.png"), fullPage: true });
   await page.getByRole("button", { name: "close page chat" }).click();
   await gateWait.playwright(page.locator(".page-chat-backdrop"), "waitFor", { state: "detached" });
