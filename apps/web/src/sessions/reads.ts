@@ -7,6 +7,7 @@ const stateRead = "state_read_v1";
 const backward = "session_history_backward";
 const oldState = "session state needs a newer zeta";
 const oldHistory = "needs a newer zeta to read this transcript without opening the session";
+const oldAttention = "the attention list needs a newer zeta";
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const nonempty = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const text = (v: unknown) => nonempty(v) ? v : undefined;
@@ -44,6 +45,18 @@ function collectionRow(v: unknown, kind: Collection, sessionId: string) {
   if (!nonempty(id)) return;
   return { id, label: text(kind === "agents" ? v.profile : v.kind), status: v.status };
 }
+
+// zeta's split (#1597): "action" lists open decisions and deferred items, "fyi" open answers and decided notes
+// nanosecond times pass the safe-integer range; millisecond precision is enough for a label
+const time = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+const attentionLists = { action: ["decision", "deferred"], fyi: ["answer", "decided"] } as const;
+type AttentionList = keyof typeof attentionLists;
+function attentionRow(v: unknown, list: AttentionList) {
+  if (!isObject(v) || !nonempty(v.attention_id) || !nonempty(v.session_id) || v.status !== "open" || v.requires_action !== (list === "action") ||
+      !(attentionLists[list] as readonly unknown[]).includes(v.kind) || !nonempty(v.title) || !time(v.created_ns)) return;
+  return { id: v.attention_id, session: v.session_id, kind: v.kind as string, title: v.title, created: new Date(v.created_ns / 1e6).toISOString() };
+}
+export type AttentionItem = NonNullable<ReturnType<typeof attentionRow>>;
 
 export function readError(error: unknown) {
   switch (rpcCode(error)) {
@@ -203,6 +216,24 @@ export function createSessionsReader(client: ZetaClient, advertised = (method: s
       return { items, reportedAt, staleState, warnings: [durable.warning, overlay.warning].filter(nonempty),
         omitted: durable.omitted + (overlay.result?.omitted ?? 0), complete: durable.complete };
     },
+    /**
+     * The session's open attention, read from zeta's own two lists. `decisions` holds exactly what the session's
+     * `attention_open` counts: open decision and deferred items owned by this top-level session and its project.
+     */
+    attention: grant(stateRead, "state_attention") ? async (row: SessionRow, signal: AbortSignal) => {
+      const read = (list: AttentionList) => walk(async (cursor: string | null) => cursorPage(await request("state_attention",
+        { list, ...(row.project ? { project_id: row.project } : {}), cursor, limit: 200 }, signal)), (v) => attentionRow(v, list));
+      try {
+        const [decisions, notes] = await Promise.all([read("action"), read("fyi")]);
+        // the lists are the project's whole queue: keep this session's items
+        const own = (items: Map<string, AttentionItem>) => [...items.values()].filter((item) => item.session === row.id);
+        return { decisions: own(decisions.items), notes: own(notes.items), omitted: decisions.omitted + notes.omitted, reportedAt: Date.now() };
+      } catch (error) {
+        // a zeta before the split refuses `list` as an invalid param
+        if (rpcCode(error) === -32601 || rpcCode(error) === -32602) throw new ReadLimit(oldAttention);
+        throw error;
+      }
+    } : undefined,
     async collection(id: string, kind: Collection, signal: AbortSignal) {
       if (!grant(stateRead, "state_session")) throw new ReadLimit(oldState);
       let snapshot: SessionState | undefined;

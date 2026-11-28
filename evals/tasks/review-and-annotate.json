@@ -1,0 +1,95 @@
+{
+  "id": "review-and-annotate",
+  "suite": "core",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
+      "alias": "review",
+      "source": "created",
+      "bind_chat": true,
+      "create_mode": true,
+      "route": "/run-review"
+    }
+  ],
+  "agent_turns": 14,
+  "steps": [
+    {
+      "id": "create-review",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "create /run-review titled Run Review. the page lists every record of its annotations collection and shows each run_id and verdict."
+    },
+    {
+      "id": "annotate",
+      "kind": "annotate",
+      "page": "review",
+      "chat": "review-chat",
+      "prompt": "create add_annotation and list_annotations tools on this page, then use add_annotation to record run_id run-002 with verdict regressed."
+    }
+  ],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "review",
+      "route": "/run-review"
+    },
+    {
+      "id": "add-tool",
+      "type": "tool",
+      "page": "review",
+      "name": "add_annotation"
+    },
+    {
+      "id": "list-tool",
+      "type": "tool",
+      "page": "review",
+      "name": "list_annotations"
+    },
+    {
+      "id": "annotation",
+      "type": "record",
+      "page": "review",
+      "value": {
+        "run_id": "run-002",
+        "verdict": "regressed"
+      }
+    },
+    {
+      "id": "add-result",
+      "type": "successful_result",
+      "page": "review",
+      "tool": "achilles__add_annotation",
+      "value": {
+        "run_id": "run-002",
+        "verdict": "regressed"
+      }
+    },
+    {
+      "id": "shows-run",
+      "type": "browser_text",
+      "page": "review",
+      "text": "run-002"
+    },
+    {
+      "id": "shows-verdict",
+      "type": "browser_text",
+      "page": "review",
+      "text": "regressed"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "review"
+    }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools"
+  ]
+}

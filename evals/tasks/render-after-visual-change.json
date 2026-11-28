@@ -1,0 +1,42 @@
+{
+  "id": "render-after-visual-change",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "status",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false,
+      "route": "/status"
+    }
+  ],
+  "agent_turns": 8,
+  "steps": [
+    {
+      "id": "badge",
+      "kind": "prompt",
+      "page": "status",
+      "chat": "status-chat",
+      "prompt": "make this page show a large red badge with the text Synthetic Offline."
+    }
+  ],
+  "checks": [
+    {
+      "id": "rendered",
+      "type": "rendered_after_change",
+      "page": "status",
+      "text": "Synthetic Offline"
+    },
+    {
+      "id": "changed",
+      "type": "code_changed",
+      "page": "status"
+    },
+    {
+      "id": "renders",
+      "type": "browser_text",
+      "page": "status",
+      "text": "Synthetic Offline"
+    }
+  ]
+}
