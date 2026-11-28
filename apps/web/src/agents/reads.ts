@@ -1,7 +1,7 @@
 import { listChildRuns, type ChildRunRow, type SessionStore, type ZetaClient } from "@fulcrum/zeta";
 import { supportsFeature, supportsRequest } from "../zeta/connection";
 import { rpcCode } from "../zeta/historyRead";
-import { isTerminal, withLiveRow } from "./childControls";
+import { anchorElapsed, isTerminal, withLiveRow } from "./childControls";
 
 export const AGENT_REFRESH_MS = 30_000;
 const RECHECK_AFTER_MS = 3_000;
@@ -81,10 +81,12 @@ function rich(v: unknown): AgentRun | undefined {
       typeof v.current_step !== "string" || typeof v.accepts_follow_ups !== "boolean" || !count(v.turns_used) ||
       !count(v.tool_count) || !finite(v.elapsed_seconds) || !date(v.started_at) || (v.finished_at !== null && !date(v.finished_at))) return;
   const retry = retryOf(v);
-  return { ...id, agentType: v.agent_type || undefined, status: catalogStatuses.find((s) => s === v.status) ?? "unknown",
+  const row: AgentRun = { ...id, agentType: v.agent_type || undefined, status: catalogStatuses.find((s) => s === v.status) ?? "unknown",
     description: v.description, acceptsFollowUps: v.accepts_follow_ups, currentStep: v.current_step, turnsUsed: v.turns_used, toolCount: v.tool_count,
     elapsedSeconds: v.elapsed_seconds, startedAt: Date.parse(v.started_at), finishedAt: v.finished_at === null ? undefined : Date.parse(v.finished_at), ...(retry && { retry }),
     ...(typeof v.accepts_send === "boolean" && { acceptsSend: v.accepts_send }) };
+  anchorElapsed(row);
+  return row;
 }
 
 function stored(v: unknown): AgentRun | undefined {

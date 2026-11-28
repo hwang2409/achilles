@@ -5,7 +5,7 @@ import { ModuleState } from "../surface/ModuleState";
 import { chatHref, findChat } from "../surface/AgentNavAdapter";
 import { surfaceHref } from "../surface/routes";
 import { AgentCancel } from "./AgentControlViews";
-import { isTerminal, runDisplayId, stateWord, type ChildControls } from "./childControls";
+import { duration, elapsed, isTerminal, nowSample, runDisplayId, stateWord, subscribeNow, ticking, type ChildControls } from "./childControls";
 import { ChildComposer } from "./ChildComposer";
 import { childHistorySupported, createChildRunsController, newerHistory } from "./childRuns";
 import type { ChildSendOwner } from "./childSend";
@@ -13,43 +13,17 @@ import type { AgentRun, Retry } from "./reads";
 
 export const short = (id: string) => id.length > 12 ? `${id.slice(0, 7)}…${id.slice(-5)}` : id;
 export const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
-// the transcript row's format: 19s, 1m 40s, 1h 2m
-export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
-// zeta's elapsed is wall time since start, so a live run's counts from its start on the page clock: every view of the
-// run shows the same value at the same moment, whatever read it came from. a finished run keeps zeta's measured value.
-// under 1 s with no turn it says nothing, and with a turn "0s" reads as no work
-const ticking = (row: AgentRun) => row.elapsedSeconds !== undefined && row.startedAt !== undefined && !isTerminal(row.status);
-export const elapsed = (row: AgentRun, now: number) => {
-  const seconds = ticking(row) ? Math.max(0, (now - row.startedAt!) / 1000) : row.elapsedSeconds;
-  return seconds === undefined || seconds < 1 && !row.turnsUsed ? undefined : seconds < 1 ? "<1s" : duration(seconds);
-};
-// one page-wide 1 s clock for "retries in …" and a live run's elapsed: it runs only while such a row is shown, and
-// never reads the network. it ticks on the whole second, so two tabs show the same second at the same moment
-const ticks = new Set<() => void>();
-let align: ReturnType<typeof setTimeout> | undefined;
-let tick: ReturnType<typeof setInterval> | undefined;
-const fire = () => ticks.forEach((listener) => listener());
-function subscribeNow(fn: () => void) {
-  ticks.add(fn);
-  if (!align) align = setTimeout(() => { tick = setInterval(fire, 1000); fire(); }, 1000 - Date.now() % 1000);
-  return () => {
-    ticks.delete(fn);
-    if (!ticks.size) { clearTimeout(align); clearInterval(tick); align = tick = undefined; }
-  };
-}
-const wholeSecond = () => Math.floor(Date.now() / 1000) * 1000;
 const still = () => () => {};
-export const useNow = (live: boolean) => useSyncExternalStore(live ? subscribeNow : still, wholeSecond);
+export const useNow = (live: boolean) => useSyncExternalStore(live ? subscribeNow : still, nowSample);
 export function Elapsed({ row }: { row: AgentRun }) {
-  const text = elapsed(row, useNow(ticking(row)));
+  const text = elapsed(row, useNow(ticking(row)).mono);
   return text ? <span className="agents-elapsed">{text}</span> : null;
 }
 // zeta's planned probe time against this browser's clock; past it, the row waits for the next read
 export const retryText = (retry: Retry, now: number) => retry.state === "stopped" || retry.nextAt === undefined ? "stopped retrying"
   : retry.nextAt <= now ? "retrying now…" : `retries in ${duration(Math.ceil((retry.nextAt - now) / 1000))}`;
 export function RetryLine({ retry }: { retry: Retry }) {
-  const now = useNow(retry.nextAt !== undefined);
-  const words = retryText(retry, now);
+  const words = retryText(retry, useNow(retry.nextAt !== undefined).wall);
   return <>provider unavailable · {retry.nextAt === undefined ? words
     : <time dateTime={new Date(retry.nextAt).toISOString()} title={new Date(retry.nextAt).toLocaleString()}>{words}</time>}</>;
 }
@@ -93,7 +67,7 @@ function RunDetail({ row, parent, rootTitle }: { row: AgentRun; parent?: AgentRu
     ["parent", row.parentRunId ? <span title={row.parentRunId}>{parent?.agentType ? `${parent.agentType} · ` : ""}{short(row.parentRunId)}</span> : undefined],
     ["started", row.startedAt !== undefined && <time dateTime={new Date(row.startedAt).toISOString()}>{stamp(row.startedAt)}</time>],
     ["finished", row.finishedAt !== undefined && <time dateTime={new Date(row.finishedAt).toISOString()}>{stamp(row.finishedAt)}</time>],
-    ["elapsed", elapsed(row, now)],
+    ["elapsed", elapsed(row, now.mono)],
     // zeta reports 0 completed turns for a run canceled or failed mid-turn; that reads as "did nothing", so say nothing
     ["turns", (row.status === "canceled" || row.status === "failed") && !row.turnsUsed ? undefined : row.turnsUsed], ["tool calls", row.toolCount],
     ["current step", isTerminal(row.status) ? undefined : row.retry ? <RetryLine retry={row.retry} /> : row.currentStep],

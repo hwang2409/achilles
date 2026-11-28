@@ -71,7 +71,7 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
     }, "suspended child row with its retry time");
     await row.click();
     await agents.locator(".agents-run-head", { hasText: "gives up at" }).waitFor();
-    // zeta's elapsed is wall time since start; a child with no turn yet never shows "0s", and its history read ends
+    // a child with no turn yet never shows "0s", and its history read ends
     if (/elapsed\s+0s/.test(await agents.locator(".agents-run-head").innerText())) throw new Error("a child that never ran a turn shows 0s elapsed");
     await agents.locator('.agents-activity [data-state="loading"]').waitFor({ state: "detached" });
     // zeta f5efa62d: child_run_list says a provider-suspended child this server owns accepts a send, which wakes it
