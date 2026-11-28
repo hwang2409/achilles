@@ -108,3 +108,18 @@ test("storage diff names keys only before, only after, and changed values; key o
   expect(storageDiff(JSON.stringify({ gone: "x", same: "s", moved: "old" }), JSON.stringify({ moved: "new", same: "s", added: "y".repeat(5) }), 3))
     .toBe("only before: gone=x\nonly after: added=yyy...\nchanged: moved: old -> new");
 });
+
+test("no gate script compares JSON.stringify dumps of localStorage as strings; chromium lists keys in hash order, so use storageDiff", async () => {
+  const dump = /JSON\.stringify\(\s*(\{\s*\.\.\.\s*localStorage\s*\}|localStorage)\s*\)/;
+  const found: string[] = [];
+  for (const name of new Bun.Glob("*.ts").scanSync(import.meta.dir)) {
+    if (name === "gate-diagnostics.ts" || name.endsWith(".test.ts")) continue;
+    const lines = (await Bun.file(`${import.meta.dir}/${name}`).text()).split("\n");
+    const dumpNames = lines.flatMap((line) => dump.test(line) ? [...line.matchAll(/(?:const|let|var)\s+(\w+)\s*=/g)].map((match) => match[1]) : []);
+    // shortcut: a line that string-compares and names a dump or a dump variable; data flow through other names is not traced
+    lines.forEach((line, index) => {
+      if (/[!=]==/.test(line) && (dump.test(line) || dumpNames.some((variable) => new RegExp(`\\b${variable}\\b`).test(line)))) found.push(`${name}:${index + 1}`);
+    });
+  }
+  expect(found, `compare localStorage dumps with storageDiff (scripts/gate-diagnostics.ts), not as strings: ${found.join(", ")}`).toEqual([]);
+});

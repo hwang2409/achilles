@@ -2950,7 +2950,8 @@ with _database() as db:
   await observerPage.keyboard.press("Escape");
   const observerWritableControls = observerPage.locator("[data-part='approval'] button:not(:disabled)");
   if (await observerWritableControls.count()) throw new Error("observer exposed an enabled approval action");
-  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageAtActions) throw new Error("observer action matrix changed settings storage");
+  const observerActionsDiff = storageDiff(observerStorageAtActions, await observerPage.evaluate(() => JSON.stringify({ ...localStorage })));
+  if (observerActionsDiff) throw new Error(`observer action matrix changed settings storage:\n${redact(observerActionsDiff)}`);
   if (observerFrames.slice(observerFrameCountAtActions).some(({ direction, payload }) => direction === "sent" && observerMutationMethods.has((JSON.parse(payload) as { method?: string }).method ?? ""))) throw new Error("observer action matrix sent a mutating websocket request");
   if (observerHttp.slice(observerHttpCountAtActions).some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer action matrix issued mutating HTTP");
   const observerRequests = observerFrames.flatMap(({ direction, payload }) => {
@@ -2964,7 +2965,8 @@ with _database() as db:
   if (!observerRequests.includes("hello") || !observerRequests.includes("session_history_and_subscribe")) throw new Error(`observer websocket read projection incomplete: ${observerRequests.join(", ")}`);
   if (observerRequests.some((method) => !expectedObserverReads.has(method))) throw new Error(`observer websocket unexpected read: ${observerRequests.join(", ")}`);
   if (observerHttp.some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer issued mutating HTTP request");
-  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageBefore) throw new Error("observer changed settings storage");
+  const observerStorageDiff = storageDiff(observerStorageBefore, await observerPage.evaluate(() => JSON.stringify({ ...localStorage })));
+  if (observerStorageDiff) throw new Error(`observer changed settings storage:\n${redact(observerStorageDiff)}`);
   // an observer on a chat zeta does not have open (the home chat: zeta restarted with only this page's chat): zeta refuses
   // its reads of that chat, so the tab shows no model and no auto-approve state, never zeta's new-chat default
   const inactiveObserver = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -3121,7 +3123,7 @@ with _database() as db:
   await restoredField.press("Enter");
   await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
   // the queue drops the sent row on zeta's echo: snapshot after that, or the restore puts a stale in-flight row back
-  await gateWait.playwright(observerPage, "waitForFunction", () => !Object.keys(localStorage).some((key) => key.startsWith("achilles:unsent:")));
+  await waitFor(async () => !await observerPage.evaluate((key) => localStorage.getItem(key), `achilles:unsent:${controllerChat}`), "restored controller unsent row to clear after the echo");
   const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   await observerPage.keyboard.press(appShortcut("Comma"));
   const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
@@ -3133,7 +3135,7 @@ with _database() as db:
     await restoredVim.click();
   }
   const settingsAfterRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
-  if (settingsAfterRestore === settingsBeforeRestore) throw new Error("restored controller settings did not write");
+  if (!storageDiff(settingsBeforeRestore, settingsAfterRestore)) throw new Error("restored controller settings did not write");
   await observerPage.evaluate((snapshot) => { localStorage.clear(); for (const [key, value] of Object.entries(JSON.parse(snapshot) as Record<string, string>)) localStorage.setItem(key, value); }, settingsBeforeRestore);
   // chromium lists localStorage in hash order, so a restore of the same keys can list them in another order: compare keys and values
   const restoreDiff = storageDiff(settingsBeforeRestore, await observerPage.evaluate(() => JSON.stringify({ ...localStorage })));
