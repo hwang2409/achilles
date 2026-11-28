@@ -22,7 +22,7 @@ type PageAttachment = { page: Page; serverApprovalMode: string | null; credentia
 type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
 // rebind: attached during a live turn without `resume`, so the page MCP binding must be re-sent once zeta is idle.
 // controlledElsewhere: another tab controls this chat, so this tab reads it live and cannot write to it.
-type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; continued?: true; controlledElsewhere?: true; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean; cwd: string | null; model: string | null };
+type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; continued?: true; controlledElsewhere?: true; settingsUnknown?: true; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean; cwd: string | null; model: string | null };
 // parked: zeta refused to park one more chat (parked_limit); the ids of the chats this tab keeps running
 type BusyState = PageAttachment & { phase: "busy"; busySessionId: string | null; parked?: string[] };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | EmptyState | ReadyState | BusyState;
@@ -205,9 +205,12 @@ export async function attachPage(
       // An observer reads the true per-session mode and model without resuming the session or writing settings.
       // After the join: zeta answers an observer's session_settings only for a session it joined. zeta answers it for
       // a controller only for the session that controller holds (-32003 otherwise), so a chat held elsewhere shows no model.
+      // zeta answers it only for a chat it has open: for any other chat the model and mode are unknown (`settingsUnknown`)
+      let settingsUnknown = false;
       if (observer) {
         const observed = await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { model?: string; approval_mode?: string | null } | null;
         requireCurrent(owner, token);
+        settingsUnknown = observed === null;
         session = { ...session, approvalMode: serverApprovalMode === "ask" ? "ask" : observed?.approval_mode ?? serverApprovalMode, model: observed?.model ?? null };
       }
       page.approval_mode = session.approvalMode;
@@ -220,7 +223,7 @@ export async function attachPage(
       const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
       if (!reader && !userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void patchChat(session.id, { title }).catch(() => {});
-      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, ...(continued ? { continued: true } as const : {}), credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind, cwd: session.cwd, model: session.model, ...(controlledElsewhere ? { controlledElsewhere: true } as const : {}) };
+      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, ...(continued ? { continued: true } as const : {}), credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind, cwd: session.cwd, model: session.model, ...(controlledElsewhere ? { controlledElsewhere: true } as const : {}), ...(settingsUnknown ? { settingsUnknown: true } as const : {}) };
     };
     const busy = (busySessionId: string | null, parked?: string[]): BusyState => ({ phase: "busy", page, serverApprovalMode, credential, busySessionId, ...(parked ? { parked } : {}) });
 
