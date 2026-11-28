@@ -65,10 +65,12 @@ function StateTag({ state }: { state: SessionRow["status"] }) {
   return <span className="sessions-state" data-status={state}>{state === "approval" ? "needs you" : state}</span>;
 }
 
-export function SessionsModule({ client, connecting, retry, newChat, chats, continueSession }: {
+export function SessionsModule({ client, connecting, retry, newChat, chats, continueSession, advertised }: {
   client: ZetaClient | null; connecting: boolean; retry: () => void; newChat: () => void; chats: readonly Chat[]; continueSession: ContinueSession;
+  /** which request methods zeta advertised; tests inject it, the app uses the negotiated hello */
+  advertised?: (method: string) => boolean;
 }) {
-  const reader = useMemo(() => client ? createSessionsReader(client) : undefined, [client]);
+  const reader = useMemo(() => client ? createSessionsReader(client, advertised) : undefined, [client, advertised]);
   const { data, error, refreshing, refresh } = useRead(reader?.catalog, 30000);
   const [{ id, view, invalid }, setSelection] = useState(selection);
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
