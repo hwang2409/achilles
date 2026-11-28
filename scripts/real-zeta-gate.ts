@@ -3120,28 +3120,24 @@ with _database() as db:
   await restoredField.fill(restoredMutation);
   await restoredField.press("Enter");
   await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
-  // GATE_RESTORE_REPEAT=N runs this snapshot/toggle/restore/compare block N times on the same page (a flake repro knob; off by default)
-  const restoreRounds = Number(process.env.GATE_RESTORE_REPEAT ?? 1);
-  const restoreFailures: string[] = [];
-  for (let round = 0; round < restoreRounds; round += 1) {
-    const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
-    if (round === 0) await observerPage.keyboard.press(appShortcut("Comma"));
-    const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
-    if (await restoredVim.count()) {
-      const before = await restoredVim.getAttribute("aria-checked");
-      await restoredVim.click();
-      await gateWait.playwright(observerPage, "waitForFunction", (expected) => localStorage.getItem("achilles-settings")?.includes(`\"vim\":${expected}`), before !== "true");
-      await waitFor(async () => await restoredVim.getAttribute("aria-checked") !== before, "restored vim toggle");
-      await restoredVim.click();
-    }
-    const settingsAfterRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
-    if (settingsAfterRestore === settingsBeforeRestore) throw new Error("restored controller settings did not write");
-    await observerPage.evaluate((snapshot) => { localStorage.clear(); for (const [key, value] of Object.entries(JSON.parse(snapshot) as Record<string, string>)) localStorage.setItem(key, value); }, settingsBeforeRestore);
-    const settingsRestored = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
-    if (settingsRestored !== settingsBeforeRestore) restoreFailures.push(`round ${round}: ${storageDiff(settingsBeforeRestore, settingsRestored) || "key order only"}`);
+  // the queue drops the sent row on zeta's echo: snapshot after that, or the restore puts a stale in-flight row back
+  await gateWait.playwright(observerPage, "waitForFunction", () => !Object.keys(localStorage).some((key) => key.startsWith("achilles:unsent:")));
+  const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  await observerPage.keyboard.press(appShortcut("Comma"));
+  const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
+  if (await restoredVim.count()) {
+    const before = await restoredVim.getAttribute("aria-checked");
+    await restoredVim.click();
+    await gateWait.playwright(observerPage, "waitForFunction", (expected) => localStorage.getItem("achilles-settings")?.includes(`\"vim\":${expected}`), before !== "true");
+    await waitFor(async () => await restoredVim.getAttribute("aria-checked") !== before, "restored vim toggle");
+    await restoredVim.click();
   }
-  if (restoreRounds > 1) console.log(`restore repeat: ${restoreFailures.length} of ${restoreRounds} rounds did not restore reversibly`);
-  if (restoreFailures.length) throw new Error(`restored controller settings did not restore reversibly:\n${redact(restoreFailures.join("\n"))}`);
+  const settingsAfterRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  if (settingsAfterRestore === settingsBeforeRestore) throw new Error("restored controller settings did not write");
+  await observerPage.evaluate((snapshot) => { localStorage.clear(); for (const [key, value] of Object.entries(JSON.parse(snapshot) as Record<string, string>)) localStorage.setItem(key, value); }, settingsBeforeRestore);
+  // chromium lists localStorage in hash order, so a restore of the same keys can list them in another order: compare keys and values
+  const restoreDiff = storageDiff(settingsBeforeRestore, await observerPage.evaluate(() => JSON.stringify({ ...localStorage })));
+  if (restoreDiff) throw new Error(`restored controller settings did not restore reversibly:\n${redact(restoreDiff)}`);
   if (screenshotDir) {
     await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

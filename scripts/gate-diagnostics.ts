@@ -163,7 +163,7 @@ export const redactArtifact = (line: string, secrets: readonly string[] = [], ho
   return home.length > 1 ? text.split(home).join("~") : text;
 };
 
-/** key-level diff of two `JSON.stringify({ ...localStorage })` dumps, for a failed restore check; "" if only key order differs */
+/** key-level diff of two `JSON.stringify({ ...localStorage })` dumps, for a failed restore check; "" when both hold the same keys and values, in any order */
 export function storageDiff(before: string, after: string, limit = 200): string {
   const [a, b] = [before, after].map((dump) => JSON.parse(dump) as Record<string, string>);
   const cut = (value: string) => value.length > limit ? `${value.slice(0, limit)}...` : value;
