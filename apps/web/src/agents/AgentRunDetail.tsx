@@ -15,8 +15,8 @@ export const short = (id: string) => id.length > 12 ? `${id.slice(0, 7)}…${id.
 export const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
 // the transcript row's format: 19s, 1m 40s, 1h 2m
 export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
-// a run that never ran a turn has no honest elapsed time: zeta reports 0s while it waits
-export const elapsed = ({ elapsedSeconds, turnsUsed }: AgentRun) => elapsedSeconds === undefined || !elapsedSeconds && !turnsUsed ? undefined : duration(elapsedSeconds);
+// zeta's elapsed is wall time since start; under 1 s with no turn it reads as "0s", which says nothing
+export const elapsed = ({ elapsedSeconds, turnsUsed }: AgentRun) => elapsedSeconds === undefined || elapsedSeconds < 1 && !turnsUsed ? undefined : duration(elapsedSeconds);
 // one page-wide 1 s clock for "retries in …": it runs only while a retrying row is shown, and never reads the network
 const ticks = new Set<() => void>();
 let tick: ReturnType<typeof setInterval> | undefined;

@@ -69,6 +69,9 @@ test("a run that never ran a turn shows no elapsed time; one that ran shows it",
     return { labels, value };
   };
   expect(fields(waiting).labels).not.toContain("elapsed at last refresh");
+  // real zeta reports a fraction of a second
+  expect(fields({ ...waiting, elapsedSeconds: 0.4 }).labels).not.toContain("elapsed at last refresh");
+  expect(fields({ ...waiting, elapsedSeconds: 3.2 }).value).toBe("3s");
   expect(fields({ ...waiting, turnsUsed: 1, elapsedSeconds: 5 }).value).toBe("5s");
 });
 
