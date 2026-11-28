@@ -1,33 +1,46 @@
-/* Graphite Sharp. The host owns chrome; Fulcrum still supplies syntax and ANSI colors. */
-:root, [data-achilles-theme="g1-light"], [data-achilles-theme="auto"] {
-  color-scheme: light;
-  --g1-bg: #FFFFFF;
-  --g1-bg-subtle: #F5F5F5;
-  --g1-sidebar: #F5F5F5;
-  --g1-diff-added: #587C0C;
-  --g1-diff-removed: #AD0707;
+/* Graphite Sharp. The host owns chrome; Fulcrum still supplies syntax and ANSI colors.
+   every color is written once as light-dark(light, dark); color-scheme picks the side: the system's for auto, fixed for g1-light and g1-dark.
+   :root[...] outranks fulcrum's :root:not([data-fulcrum-theme]) color-scheme, so the achilles theme alone decides */
+:root:not([data-achilles-theme]), :root[data-achilles-theme="auto"], [data-achilles-theme="auto"] { color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-achilles-theme]), :root[data-achilles-theme="auto"], [data-achilles-theme="auto"] { color-scheme: dark; } }
+:root[data-achilles-theme="g1-light"], [data-achilles-theme="g1-light"] { color-scheme: light; }
+:root[data-achilles-theme="g1-dark"], [data-achilles-theme="g1-dark"] { color-scheme: dark; }
+
+:root, [data-achilles-theme] {
+  --g1-bg: light-dark(#FFFFFF, #161616);
+  --g1-bg-subtle: light-dark(#F5F5F5, #252525);
+  --g1-sidebar: light-dark(#F5F5F5, #2A2A2A);
+  --g1-diff-added: light-dark(#587C0C, #81B88B);
+  --g1-diff-removed: light-dark(#AD0707, #C74E39);
   --g1-surface: var(--g1-bg-subtle);
-  --g1-selected: color-mix(in srgb, var(--g1-fg) 8%, transparent);
-  --g1-hover: color-mix(in srgb, var(--g1-fg) 3%, transparent);
+  /* firm states: hover is a visible tint, selected is a clear fill; a selected list row also carries the 2px inline-start bar */
+  --g1-hover: light-dark(color-mix(in srgb, var(--g1-fg) 7%, transparent), color-mix(in srgb, var(--g1-fg) 8%, transparent));
+  --g1-selected: color-mix(in srgb, var(--g1-fg) 12%, transparent);
+  --g1-selected-bar: var(--g1-selection-width) solid var(--g1-selection);
   --g1-rule: var(--g1-border);
-  --g1-border: #E0E0E0;
+  --g1-border: light-dark(#E0E0E0, rgb(255 255 255 / .1));
   --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg)); /* 3:1 on the surface as well as the canvas */
-  --g1-fg: #0A0A0A;
+  --g1-fg: light-dark(#0A0A0A, #F0F0F0);
   --g1-fg-2: var(--g1-fg);
   --g1-fg-3: var(--g1-muted);
-  --g1-muted: #696969;
-  --g1-link: #385C86;
-  --g1-panel: var(--g1-bg);
-  --g1-primary: #171717;
-  --g1-primary-text: #FAFAFA;
-  --g1-ok: #147638;
-  --g1-warn-fill: #CA8A04;
+  --g1-muted: light-dark(#696969, #ACACAC);
+  /* muted text inside a selected row: 4.5:1 or more on the 12% selected fill over every surface (plain muted drops to 3.9:1) */
+  --g1-muted-on-selected: light-dark(#5C5C5C, #BABABA);
+  --g1-link: light-dark(#385C86, #9FB9D6);
+  --g1-panel: light-dark(var(--g1-bg), var(--g1-surface));
+  --g1-primary: light-dark(#171717, #E5E5E5);
+  --g1-primary-text: light-dark(#FAFAFA, #171717);
+  --g1-ok: light-dark(#147638, #86EFAC);
+  --g1-warn-fill: light-dark(#CA8A04, #EAB308);
   --g1-warn-text-on-fill: #171717;
-  --g1-warn: color-mix(in srgb, #CA8A04 70%, #0A0A0A);
-  --g1-danger-mark: #E40014;
-  --g1-danger: #E40014;
+  --g1-warn: light-dark(color-mix(in srgb, #CA8A04 70%, #0A0A0A), #EAB308);
+  --g1-danger-mark: light-dark(#E40014, #FF6568);
+  --g1-danger: light-dark(#E40014, #FF6568);
   --g1-selection: var(--g1-fg);
 }
+
+/* the scrim behind modal dialogs: no dimming for now (decision D4 is open). declared on ::backdrop too, which does not inherit from :root in every engine */
+:root, ::backdrop { --g1-scrim: transparent; }
 
 :root, [data-achilles-theme] {
   --g1-font-ui: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -35,8 +48,18 @@
   --g1-type-kbd: 11px;
   --g1-type-chat: 15px;
   --g1-leading-chat: 1.5;
+  /* one type scale that follows the size the user picks (13-16px); xl is the 20px title at the default 15px */
+  --g1-type-md: var(--achilles-ui-size, var(--g1-type-chat));
+  --g1-type-xs: calc(var(--g1-type-md) - 3px);
+  --g1-type-sm: calc(var(--g1-type-md) - 2px);
+  --g1-type-lg: calc(var(--g1-type-md) + 3px);
+  --g1-type-xl: calc(var(--g1-type-md) + 5px);
+  /* touch screens zoom into a field under 16px: inputs never go below it there */
+  --g1-type-input: max(16px, 1em);
   --g1-type-title: 20px;
-  --g1-weight-title: 600;
+  --g1-weight-regular: 400;
+  --g1-weight-strong: 600;
+  --g1-weight-title: var(--g1-weight-strong);
   /* firm edges: one radius scale, 4px at most. the dot radius is only for round status marks and knobs */
   --g1-radius-container: 4px;
   --g1-radius-chat: 4px;
@@ -70,68 +93,19 @@
   /* the 1px border carries the edge; the floating shadow is short and tight, not a soft glow */
   --g1-shadow-floating: 0 4px 8px -4px rgb(0 0 0 / .2);
   --g1-press-scale: .96;
-}
-
-[data-achilles-theme="g1-dark"] {
-  color-scheme: dark;
-  --g1-bg: #161616;
-  --g1-bg-subtle: #252525;
-  --g1-sidebar: #2A2A2A;
-  --g1-diff-added: #81B88B;
-  --g1-diff-removed: #C74E39;
-  --g1-surface: var(--g1-bg-subtle);
-  --g1-selected: color-mix(in srgb, var(--g1-fg) 10%, transparent);
-  --g1-hover: color-mix(in srgb, var(--g1-fg) 4%, transparent);
-  --g1-rule: var(--g1-border);
-  --g1-border: rgb(255 255 255 / .1);
-  --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg));
-  --g1-fg: #F0F0F0;
-  --g1-fg-2: var(--g1-fg);
-  --g1-fg-3: var(--g1-muted);
-  --g1-muted: #ACACAC;
-  --g1-link: #9FB9D6;
-  --g1-panel: var(--g1-surface);
-  --g1-primary: #E5E5E5;
-  --g1-primary-text: #171717;
-  --g1-ok: #86EFAC;
-  --g1-warn-fill: #EAB308;
-  --g1-warn-text-on-fill: #171717;
-  --g1-warn: #EAB308;
-  --g1-danger-mark: #FF6568;
-  --g1-danger: #FF6568;
-  --g1-selection: var(--g1-fg);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-achilles-theme]), [data-achilles-theme="auto"] {
-    color-scheme: dark;
-    --g1-bg: #161616;
-    --g1-bg-subtle: #252525;
-    --g1-sidebar: #2A2A2A;
-    --g1-diff-added: #81B88B;
-    --g1-diff-removed: #C74E39;
-    --g1-surface: var(--g1-bg-subtle);
-    --g1-selected: color-mix(in srgb, var(--g1-fg) 10%, transparent);
-    --g1-hover: color-mix(in srgb, var(--g1-fg) 4%, transparent);
-    --g1-rule: var(--g1-border);
-    --g1-border: rgb(255 255 255 / .1);
-    --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg));
-    --g1-fg: #F0F0F0;
-    --g1-fg-2: var(--g1-fg);
-    --g1-fg-3: var(--g1-muted);
-    --g1-muted: #ACACAC;
-    --g1-link: #9FB9D6;
-    --g1-panel: var(--g1-surface);
-    --g1-primary: #E5E5E5;
-    --g1-primary-text: #171717;
-    --g1-ok: #86EFAC;
-    --g1-warn-fill: #EAB308;
-    --g1-warn-text-on-fill: #171717;
-    --g1-warn: #EAB308;
-    --g1-danger-mark: #FF6568;
-    --g1-danger: #FF6568;
-    --g1-selection: var(--g1-fg);
-  }
+  /* motion: strong curves, short times. enter and exit on ease-out, on-screen moves on ease-in-out, edge sheets on the drawer curve */
+  --g1-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --g1-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --g1-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --g1-dur-press: 120ms;
+  --g1-dur-popover: 160ms;
+  --g1-dur-sheet: 240ms;
+  /* stacking: one scale for layers that leave the flow. native modal dialogs use the top layer and need none */
+  --g1-z-sticky: 2;
+  --g1-z-drawer: 10;
+  --g1-z-popover: 20;
+  --g1-z-modal: 30;
+  --g1-z-toast: 40;
 }
 
 /* Match the specificity of Fulcrum’s system rule. */
