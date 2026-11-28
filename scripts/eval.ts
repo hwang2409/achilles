@@ -220,7 +220,9 @@ export function parseHistory(histories: Array<{ chat: string; page_id: string; r
     for (const [index, row] of history.rows.entries()) {
       for (const block of Array.isArray(row.content) ? row.content : []) if (block.type === "tool_use" && block.tool_call?.id) pending.set(block.tool_call.id, block.tool_call);
       if (row.role === "tool_result" && row.tool_result?.tool_call_id) {
-        const call = pending.get(row.tool_result.tool_call_id) ?? {}; const text = String(row.tool_result.content ?? ""); let data: unknown = text; try { data = JSON.parse(text); } catch {}
+        const call = pending.get(row.tool_result.tool_call_id) ?? {}; const text = String(row.tool_result.content ?? ""); let data: unknown = text;
+        // zeta stores a multi-part result as one string; each image block (render_page's screenshot) is a "[image block] ..." line
+        try { data = JSON.parse(text.split("\n").filter(line => !line.startsWith("[image block]")).join("\n")); } catch {}
         const common = { call_id: call.id, chat_id: history.chat, page_id: history.page_id, tool: call.name, success: row.tool_result.is_error !== true };
         calls.push({ ...call, ...common }); results.push({ ...common, step: history.starts?.findLast(start => start.from <= index)?.step, data });
         if (row.tool_result.is_error === true) errors.push({ ...(data && typeof data === "object" ? data : {}), ...common, message: text });
@@ -589,6 +591,12 @@ function scriptedProvider() {
     }
     else if (prompt.includes("inspect this page") && turn === 1) toolCalls = [{ function: { name: "achilles__inspect_page", arguments: {} } }];
     else if (prompt.includes("/eval-smoke") && !toolResults.some(message => message.tool_name === "achilles__create_page") && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<main>smoke</main>);', dependencies: {} } } } }];
+    // render-after-visual-change: the page chat rewrites its page once, then renders it once
+    else if (prompt.includes("Synthetic Offline")) {
+      const done = (tool: string) => toolResults.some(message => message.tool_name === tool);
+      if (!done("achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<span style={{ background: "red", color: "white", fontSize: 48, padding: 16 }}>Synthetic Offline</span>);', dependencies: {} } } }];
+      else if (!done("achilles__render_page")) toolCalls = [{ function: { name: "achilles__render_page", arguments: {} } }];
+    }
     // own-page-edit-create-off: the page chat rewrites its own page once; a chat that lacks write_page gets an unknown-tool error
     else if (prompt.includes("Synthetic Field Notes")) { if (!toolResults.some(message => message.tool_name === "achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<h1>Synthetic Field Notes</h1>);', dependencies: {} } } }]; }
     // review-and-annotate: the review chat makes its two tools and adds one record; the home chat builds a page that lists

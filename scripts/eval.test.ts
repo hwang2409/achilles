@@ -124,6 +124,15 @@ test("parseHistory tags each result with the step whose turn made it", () => {
   expect(results.map(row => [row.call_id, row.step])).toEqual([["t1", "build"], ["t2", "add-action"]]);
 });
 
+// zeta's session_history row for render_page: content flattens the image block to one "[image block] ..." line before the
+// JSON text, and content_blocks holds only a stub without the image bytes
+test("parseHistory reads render_page's JSON text past its image block", () => {
+  const json = JSON.stringify({ ready: true, text: "Synthetic Offline" });
+  const rows = [{ role: "assistant", content: [{ type: "tool_use", tool_call: { id: "r1", name: "achilles__render_page" } }] }, { role: "tool_result", tool_result: { tool_call_id: "r1", content: `[image block] media_type=image/jpeg dimensions=1280x800 bytes=5120\n${json}`, is_error: false, content_blocks: [{ type: "image", mimeType: "image/jpeg", size: 5120, data_omitted: true }] } }];
+  const { results } = parseHistory([{ chat: "c", page_id: "p", rows }]);
+  expect(results.map(row => row.data)).toEqual([{ ready: true, text: "Synthetic Offline" }]);
+});
+
 test("a decision list answers the n-th request of its tool and approves the rest", () => {
   let n = 0; const next = () => n++; const rule = { tool: "achilles__update_ticket", decisions: ["approve", "deny"] as Array<"approve" | "deny"> };
   expect(["achilles__list_tickets", "achilles__update_ticket", "achilles__update_ticket", "achilles__update_ticket"].map(tool => approvalDecision(rule, tool, next))).toEqual(["approve", "approve", "deny", "approve"]);

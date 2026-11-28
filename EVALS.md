@@ -235,7 +235,9 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   - page code: `code_changed` (the page's final active code revision is newer
     than its initial one, built, and has no runtime error; with
     `after_failed: true` it must be newer than the seeded failed candidate, and
-    a seed without one is a `harness_error`).
+    a seed without one is a `harness_error`), `rendered_after_change` (the
+    page's last successful `write_page`, `edit_page`, or `create_page` is
+    followed by a successful `render_page` whose text contains `text`).
   - records and results: `record` (some record contains `value`),
     `records_exact` (exactly these records; a top-level row field set to
     `{ "absent": true }` must be missing from the matched record; deeper in a
