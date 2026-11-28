@@ -5,7 +5,7 @@
 .account-identity p { display: flex; gap: 4px 12px; flex-wrap: wrap; margin: 6px 0 0; }
 .account-identity p, .account-usage p, .account-window[data-stale="true"] > div { color: var(--fulcrum-muted); }
 [data-tone="warn"] .account-availability { color: var(--g1-warn); }
-.account-usage { display: grid; gap: 8px; }
+.account-usage { display: grid; gap: 8px; align-content: start; }
 .account-usage p { margin: 0; }
 [data-tone="danger"] .account-availability, .account-usage .account-refresh-failed { color: var(--fulcrum-danger); }
 .account-window { display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
