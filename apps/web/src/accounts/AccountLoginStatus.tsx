@@ -17,17 +17,17 @@ export function AccountLoginStatus({ attempt, login, available, canSignIn, signI
   return <section className="account-login" data-state={attempt.state} aria-label="browser sign-in">
   <div role="status">
     <h3>{loginIdentity(attempt.target)}</h3>
-    <p>{attempt.state === "starting" ? "starting browser sign-in…"
+    <p>{attempt.state === "starting" ? "Starting browser sign-in…"
       : attempt.state === "pending" ? "waiting for your browser"
-      : attempt.state === "cancelling" ? "checking whether sign-in can be cancelled…"
-      : attempt.state === "settling" ? "checking the account catalog…"
+      : attempt.state === "cancelling" ? "Checking whether sign-in can be cancelled…"
+      : attempt.state === "settling" ? "Checking the account catalog…"
       : attempt.state === "succeeded" ? "signed in"
-      : attempt.state === "cancelled" ? "sign-in cancelled"
-      : attempt.state === "unknown" ? "sign-in result unknown"
+      : attempt.state === "cancelled" ? "Sign-in cancelled"
+      : attempt.state === "unknown" ? "Sign-in result unknown"
       : attempt.state === "idle" ? "zeta no longer has a sign-in to check"
-      : attempt.state === "blocked" ? "could not open the sign-in tab"
-      : attempt.state === "contention" ? "a sign-in for this account is already pending"
-      : "sign-in failed"}
+      : attempt.state === "blocked" ? "Could not open the sign-in tab"
+      : attempt.state === "contention" ? "A sign-in for this account is already pending"
+      : "Sign-in failed"}
       {receipt?.state === "succeeded" && <> at <time dateTime={receipt.at.toISOString()}>{resetTime.format(receipt.at)}</time></>}
     </p>
     {attempt.state === "pending" && <p>sign-in started. finish in the tab that opened. this page updates automatically. reloading this page ends an uncommitted sign-in.</p>}
@@ -40,11 +40,11 @@ export function AccountLoginStatus({ attempt, login, available, canSignIn, signI
   </div>
   {(attempt.state === "pending" || attempt.state === "cancelling") && <Confirmation level={1}
     surface={WRITE_SURFACE.accountLoginCancel} label={reviewText("browser sign-in")} value={reviewText("pending")}
-    action={reviewText("cancel sign-in")} keep={reviewText("keep signing in")}
+    action={reviewText("Cancel sign-in")} keep={reviewText("Keep signing in")}
     effect={reviewText("cancel this pending browser sign-in? a credential commit already in progress may still finish.")}
     execute={async () => { await login.cancel(); return cancelledReview; }} checkResult={async () => cancelledReview} onCommitted={() => {}} />}
   {canSignIn && receipt && ["failed", "blocked", "idle", "contention"].includes(receipt.state)
     && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
-      onClick={event => signIn(receipt.target, event.currentTarget)}>try again</button>}
+      onClick={event => signIn(receipt.target, event.currentTarget)}>Try again</button>}
 </section>;
 }
