@@ -29,7 +29,7 @@ test("/accounts hints come from the shared account status", () => {
   render(createElement(CommandOutput, { commands, opener: null }));
   const hint = (id: string) => screen.getByText(id).parentElement!.querySelector("small")!.textContent;
   expect(hint("codex:default")).toBe("Default · Limit reached");
-  expect(hint("codex:orchard")).toBe("Sign-in failed");
+  expect(hint("codex:orchard")).toBe("Sign-in expired");
   expect(hint("anthropic:spare")).toBe("Needs sign-in");
   expect(hint("anthropic:default")).toBe("Current");
 });

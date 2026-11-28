@@ -54,7 +54,7 @@ test("accountStatus: one label per shape, and Available only when every bar is c
     ["full current window", usage(100, now + hour, now - 60_000), {}, "Limit reached"],
     ["full window read long ago", usage(100, now + hour, now - 24 * hour), {}, "Limit reached"],
     ["stale read", usage(40, now + 24 * hour, now - USAGE_FRESH_MS - 1), {}, "Signed in"],
-    ["auth error", usage(0, now + 24 * hour, now - 19 * 24 * hour, SIGN_IN_FAILED), {}, "Sign-in failed"],
+    ["auth error", usage(0, now + 24 * hour, now - 19 * 24 * hour, SIGN_IN_FAILED), {}, "Sign-in expired"],
     ["other refresh error", usage(10, now + 24 * hour, now - 60_000, "rate limited; retry later"), {}, "Available"],
     ["no login", usage(0, now + 24 * hour, now - 60_000), { available: false }, "Needs sign-in"],
     ["no usage", null, {}, "Signed in"],
@@ -64,8 +64,20 @@ test("accountStatus: one label per shape, and Available only when every bar is c
     const status = accountStatus(account("codex:x", { usage: value, ...flags }), now);
     expect([name, status.label]).toEqual([name, label]);
     if (status.label === "Available") expect([name, status.windows.some(({ usedPercent, stale }) => usedPercent >= 100 || stale)]).toEqual([name, false]);
-    expect([name, status.signIn]).toEqual([name, label === "Needs sign-in" || label === "Sign-in failed"]);
+    expect([name, status.signIn]).toEqual([name, label === "Needs sign-in" || label === "Sign-in expired"]);
   }
+});
+
+test("accountStatus: a sign-in newer than the usage reading drops zeta's stale auth error from the label", () => {
+  const read = now - 19 * 24 * hour;
+  const expired = account("codex:x", { usage: usage(0, now + 24 * hour, read, SIGN_IN_FAILED) });
+  const label = (signedInAt?: number) => { const { label, signIn } = accountStatus(expired, now, signedInAt); return [label, signIn]; };
+  expect(label(now - 60_000)).toEqual(["Signed in", false]);
+  expect(label(read)).toEqual(["Sign-in expired", true]);
+  expect(label(read - 1)).toEqual(["Sign-in expired", true]);
+  expect(label()).toEqual(["Sign-in expired", true]);
+  // a sign-in does not hide a missing login
+  expect(accountStatus(account("codex:x", { available: false, usage: usage(0, now + 24 * hour, read, SIGN_IN_FAILED) }), now, now).label).toBe("Needs sign-in");
 });
 
 test("accountStatus: next is the first time the status changes by the clock alone", () => {

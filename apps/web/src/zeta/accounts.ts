@@ -116,7 +116,7 @@ export const SIGN_IN_FAILED = "authentication failed; log in again";
 
 export type WindowStatus = UsageWindow & { passed: boolean; limited: boolean; stale: boolean };
 export type AccountStatus = {
-  label: "Needs sign-in" | "Sign-in failed" | "Limit reached" | "Available" | "Signed in";
+  label: "Needs sign-in" | "Sign-in expired" | "Limit reached" | "Available" | "Signed in";
   tone: "ok" | "warn" | "danger";
   signIn: boolean;
   windows: WindowStatus[];
@@ -124,8 +124,11 @@ export type AccountStatus = {
   next: number;
 };
 
-/** The one source for an account row: its label, every bar, and every window line. */
-export function accountStatus({ available, usage }: Account, now: number): AccountStatus {
+/**
+ * The one source for an account row: its label, every bar, and every window line.
+ * `signedInAt` is a succeeded sign-in for this account; zeta keeps the usage auth error until the next usage refresh.
+ */
+export function accountStatus({ available, usage }: Account, now: number, signedInAt = -Infinity): AccountStatus {
   const old = !usage || usage.freshness !== "now" || now - usage.capturedAt > USAGE_FRESH_MS;
   const windows = (usage?.windows ?? []).map((window): WindowStatus => {
     const passed = window.resetsAt <= now;
@@ -138,7 +141,7 @@ export function accountStatus({ available, usage }: Account, now: number): Accou
   const next = Math.min(...times.filter(time => time > now));
   const status = (label: AccountStatus["label"], tone: AccountStatus["tone"], signIn = false) => ({ label, tone, signIn, windows, next });
   if (!available) return status("Needs sign-in", "danger", true);
-  if (usage?.error === SIGN_IN_FAILED) return status("Sign-in failed", "danger", true);
+  if (usage?.error === SIGN_IN_FAILED && signedInAt <= (usage.capturedAt ?? -Infinity)) return status("Sign-in expired", "danger", true);
   if (windows.some(({ limited }) => limited)) return status("Limit reached", "warn");
   return windows.length && windows.every(({ stale }) => !stale) ? status("Available", "ok") : status("Signed in", "ok");
 }

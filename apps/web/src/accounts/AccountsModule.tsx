@@ -40,8 +40,11 @@ function staleBanner(stale: number, total: number) {
   return total === 1 ? "Usage data may be out of date." : `Usage data for all ${total} accounts may be out of date.`;
 }
 
-function AccountRows({ accounts, now, stale, signIn }: { accounts: Account[]; now: number; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void }) {
-  const rows = accounts.map(account => ({ ...account, status: accountStatus(account, now) }));
+type SignedIn = { account: string; at: number } | null;
+const statusOf = (account: Account, now: number, signedIn: SignedIn) => accountStatus(account, now, signedIn?.account === account.account ? signedIn.at : undefined);
+
+function AccountRows({ accounts, now, stale, signedIn, signIn }: { accounts: Account[]; now: number; stale: boolean; signedIn: SignedIn; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void }) {
+  const rows = accounts.map(account => ({ ...account, status: statusOf(account, now, signedIn) }));
   const banner = staleBanner(rows.filter(({ status }) => status.windows.some(window => window.stale)).length, rows.length);
   return <>{banner && <p className="account-stale">{banner}</p>}<ul className="account-rows" aria-label={stale ? "Last loaded accounts" : "Model accounts"} data-stale={stale}>
     {rows.map(({ account, label, current, default: isDefault, usage, status }) => <li key={account} data-tone={status.tone}>
@@ -74,12 +77,15 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const attempt = useSyncExternalStore(login.subscribe, login.snapshot);
   const receipt = attempt && "at" in attempt ? attempt : null;
   const active = !!attempt && !receipt;
+  const signedIn = receipt?.state === "succeeded" ? { account: loginIdentity(receipt.target), at: receipt.at.getTime() } : null;
   const [review, setReview] = useState<{ target: LoginTarget; opener: HTMLButtonElement } | null>(null);
   const signIn = (target: LoginTarget, opener: HTMLButtonElement) => setReview({ target, opener });
   const [readAfter, setReadAfter] = useState<ReturnType<typeof login.catalog>>(null);
   const [last, setLast] = useState<{ client: ZetaClient | null; accounts: Account[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // A background (wake) read that failed keeps the rows; the next read clears it.
+  const [wakeFailed, setWakeFailed] = useState(false);
   const place = useRef<HTMLDivElement>(null);
   // The title belongs to ModuleFrame; focusing it on arrival keeps keyboard focus off <body>.
   const focusTitle = () => {
@@ -99,7 +105,7 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const fresh = !!client && (refreshed ? refreshed.client === client : last?.client === client);
   const canSignIn = fresh && !!supported && !loading && !failure && !active;
   // Re-render when a reset passes or a reading turns stale, so no row reads as current after its time.
-  const next = Math.min(...rows.map(row => accountStatus(row, now).next));
+  const next = Math.min(...rows.map(row => statusOf(row, now, signedIn).next));
   useEffect(() => {
     if (!Number.isFinite(next)) return;
     const timer = setTimeout(() => setNow(Date.now()), Math.min(next - Date.now(), 2 ** 31 - 1));
@@ -117,16 +123,18 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
       setLoading(true);
       setFailure(null);
     }
+    const fail = (reason: string) => quiet ? setWakeFailed(true) : setFailure(reason);
     try {
       const result = await connection.withControl(readAccounts);
-      if ("refused" in result) setFailure(result.refused);
+      if ("refused" in result) fail(result.refused);
       else {
         setFailure(null);
+        setWakeFailed(false);
         setReadAfter(latestCatalog);
         setLast({ client: connection.client, accounts: result.value.accounts });
       }
     } catch (error) {
-      setFailure(error instanceof AccountReadError ? error.message : "could not read accounts from zeta.");
+      fail(error instanceof AccountReadError ? error.message : "could not read accounts from zeta.");
     } finally {
       inFlight.current = false;
       setLoading(false);
@@ -163,7 +171,8 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
         : failure ? <ModuleState kind="failed" title="Could not load accounts" detail={failure} action={showAction} />
         : !fresh ? <ModuleState kind="loading" title="Loading accounts…" />
         : !rows.length && <ModuleState kind="empty" title="no model accounts yet" detail="sign in to a model provider to start." />}
-      {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} now={now} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} />}
+      {wakeFailed && fresh && !failure && !loading && !!rows.length && <p className="account-stale" role="status">Could not refresh accounts. Showing the last read.</p>}
+      {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} now={now} stale={!fresh || active || loading || !!failure} signedIn={signedIn} signIn={canSignIn ? signIn : undefined} />}
       {attempt && <AccountLoginStatus attempt={attempt} login={login} canSignIn={canSignIn} signIn={signIn}
         available={fresh && rows.some(row => row.account === loginIdentity(attempt.target) && row.available)} />}
       {canSignIn && !rows.length && <div className="account-actions">

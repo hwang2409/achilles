@@ -25,14 +25,24 @@ const account = (name: string, used: number, reset: string, { read = old, error 
   ] } },
 });
 
+// `control.hold` keeps the next account_list in flight; `control.fail` makes it throw.
 function mount(accounts: unknown[]) {
   const requests: unknown[] = [];
-  const client = { features: [ACCOUNT_LIST_IDLE_FEATURE], authority: "controller",
-    request: async (method: string, params: unknown) => { requests.push({ method, params }); return { revision: "a".repeat(64), data: { accounts } }; } } as unknown as ZetaClient;
+  const control = { hold: null as Promise<void> | null, fail: false };
+  const client = { features: [ACCOUNT_LIST_IDLE_FEATURE], authority: "controller", onClose: () => () => {},
+    request: async (method: string, params: unknown) => {
+      requests.push({ method, params });
+      if (method === "login_start") return { state: "succeeded" };
+      await control.hold;
+      if (control.fail) throw new Error("synthetic read failure");
+      return { revision: "a".repeat(64), data: { accounts } };
+    } } as unknown as ZetaClient;
   const connection = { client, retryNow() {}, withControl: async <T,>(read: (reader: ZetaClient) => Promise<T>) => ({ value: await read(client) }) };
-  const login = createAccountLogin({ client: null, state: { phase: "connecting" }, takeControl: async () => null } as unknown as Pick<Connection, "client" | "state" | "takeControl">);
-  return { requests, ...render(createElement(AccountsModule, { client, connecting: false, connection, login })) };
+  const popup = { opener: {}, closed: false, close() {}, location: { replace() {} } };
+  const login = createAccountLogin({ client, state: { phase: "connected", authority: "controller" }, takeControl: async () => null } as unknown as Pick<Connection, "client" | "state" | "takeControl">, () => popup);
+  return { requests, control, login, ...render(createElement(AccountsModule, { client, connecting: false, connection, login })) };
 }
+const held = () => { let release = () => {}; const hold = new Promise<void>(resolve => { release = resolve; }); return { hold, release }; };
 
 const row = async (name: string, provider = "anthropic") => within((await screen.findByRole("heading", { name: `${provider}:${name}` })).closest("li")!);
 const windowLine = (scope: ReturnType<typeof within>) => scope.getByText(/· last read/).textContent;
@@ -78,7 +88,7 @@ const shapes = [
   { name: "full", used: 100, reset: "2026-11-30T10:35:00Z", options: { read: recent }, label: "Limit reached" },
   { name: "fullold", used: 100, reset: "2026-11-30T10:35:00Z", options: {}, label: "Limit reached" },
   { name: "staleread", used: 40, reset: "2026-12-09T10:59:00Z", options: {}, label: "Signed in" },
-  { name: "autherror", used: 0, reset: "2026-12-09T10:59:00Z", options: { error: "authentication failed; log in again", provider: "codex" }, label: "Sign-in failed" },
+  { name: "autherror", used: 0, reset: "2026-12-09T10:59:00Z", options: { error: "authentication failed; log in again", provider: "codex" }, label: "Sign-in expired" },
   { name: "nologin", used: 0, reset: "2026-12-09T10:59:00Z", options: { available: false, read: recent }, label: "Needs sign-in" },
   { name: "normal", used: 47, reset: "2026-11-29T09:59:00Z", options: { read: recent }, label: "Available" },
 ] as const;
@@ -100,7 +110,7 @@ test("a usage refresh that failed on sign-in says so, with the reason and a sign
   mount([account("orchard", 0, "2026-12-09T10:59:00Z", { error: "authentication failed; log in again", provider: "codex", read: "2026-11-09T15:59:00Z" })]);
   const orchard = await row("orchard", "codex");
   expect(orchard.queryByText(/^available$/i)).toBeNull();
-  expect(orchard.getByText("Sign-in failed").className).toBe("account-availability");
+  expect(orchard.getByText("Sign-in expired").className).toBe("account-availability");
   expect(orchard.getByText(/^Usage refresh failed/).textContent).toBe("Usage refresh failed: authentication failed; log in again");
   expect(windowLine(orchard)).toBe(`Resets ${at.format(Date.parse("2026-12-09T10:59:00Z"))} · last read 18 days ago`);
   expect(orchard.getByRole("meter").closest(".account-window")!.getAttribute("data-stale")).toBe("true");
@@ -121,7 +131,7 @@ test("the stale banner counts the accounts it means", async () => {
 });
 
 test("coming back to the tab re-reads the clock at once and the accounts at most every 30 s", async () => {
-  const { requests } = mount([account("soon", 100, new Date(now + 10 * 60_000).toISOString(), { read: recent })]);
+  const { requests, control } = mount([account("soon", 100, new Date(now + 10 * 60_000).toISOString(), { read: recent })]);
   const soon = await row("soon");
   expect(requests).toHaveLength(1);
   // a sleep: the clock jumped past the reset, the 10 min timer has not fired yet
@@ -134,9 +144,49 @@ test("coming back to the tab re-reads the clock at once and the accounts at most
   await new Promise(resolve => setTimeout(resolve, 50));
   expect(requests).toHaveLength(2);
   setSystemTime(now + 11 * 60_000 + 30_000);
-  fireEvent(document, new Event("visibilitychange"));
+  const read = held();
+  control.hold = read.hold;
+  try {
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(requests).toHaveLength(3), { timeout: 500 });
+    // the wake read is in flight: the rows stay, with no loading state
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(screen.queryByText("Loading accounts…")).toBeNull();
+    expect(screen.getByRole("list", { name: "Model accounts" })).toBeTruthy();
+  } finally { read.release(); }
+});
+
+test("a failed wake read keeps the rows and says it could not refresh", async () => {
+  const { requests, control } = mount([account("normal", 5, "2026-11-29T09:59:00Z", { read: recent })]);
+  await row("normal");
+  control.fail = true;
+  setSystemTime(now + 30_000);
+  fireEvent.focus(window);
+  await waitFor(() => expect(requests).toHaveLength(2), { timeout: 500 });
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Could not refresh accounts. Showing the last read."), { timeout: 500 });
+  expect(screen.queryByText("Could not load accounts")).toBeNull();
+  expect(screen.getByRole("list", { name: "Model accounts" })).toBeTruthy();
+  expect((await row("normal")).getByText("Available")).toBeTruthy();
+  // the next good read clears the note
+  control.fail = false;
+  setSystemTime(now + 60_000);
+  fireEvent.focus(window);
   await waitFor(() => expect(requests).toHaveLength(3), { timeout: 500 });
-  expect(screen.queryByText("Loading accounts…")).toBeNull();
+  await waitFor(() => expect(screen.queryByText(/Could not refresh accounts/)).toBeNull(), { timeout: 500 });
+});
+
+test("after a good sign-in from this page, the row drops zeta's older auth error from its label", async () => {
+  const { login } = mount([account("orchard", 0, "2026-12-09T10:59:00Z", { error: "authentication failed; log in again", provider: "codex", read: "2026-11-09T15:59:00Z" })]);
+  const orchard = await row("orchard", "codex");
+  expect(orchard.getByText("Sign-in expired")).toBeTruthy();
+  await login.start({ provider: "codex", account: "codex:orchard" });
+  // zeta's re-read catalog still carries the error: only a usage refresh rewrites it
+  await waitFor(() => expect(screen.getByText(/^signed in/)).toBeTruthy(), { timeout: 500 });
+  const list = within(screen.getByRole("list", { name: "Model accounts" }));
+  const after = within(list.getByRole("heading", { name: "codex:orchard" }).closest("li")!);
+  expect(after.getByText("Signed in", { selector: ".account-availability" })).toBeTruthy();
+  expect(after.queryByText("Sign-in expired")).toBeNull();
+  expect(after.queryByRole("button", { name: "sign in again to codex:orchard" })).toBeNull();
 });
 
 test("arriving on the page moves focus to its title", async () => {
