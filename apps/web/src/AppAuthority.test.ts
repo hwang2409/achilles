@@ -10,13 +10,13 @@ import { READ_ONLY_REASON, WRITE_SURFACES, type WriteSurfaceId } from "./writeSu
 import { controlledRetry } from "./zeta/session";
 import { forgetRowWrites } from "./zeta/rowState";
 
-const { fireEvent, render, waitFor } = await import("@testing-library/react");
+const { fireEvent, render, waitFor, within } = await import("@testing-library/react");
 // each test is a fresh tab: no chats held from an earlier test for the reload reclaim to take back
 beforeEach(() => { sessionStorage.clear(); });
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "mcp_auth_status", "agent_run_catalog", "list_sessions", "state_sessions", "state_session", "session_tree"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "mcp_auth_status", "agent_run_catalog", "list_sessions", "state_sessions", "state_session", "session_tree", "run_work_list"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route).
@@ -1559,6 +1559,85 @@ test("a slash command refused during a turn gives its exact text back, but never
     expect(field().value).toBe("newer text");
     expect(writes.filter((write) => write === "slash_run")).toHaveLength(2);
     expect(writes).not.toContain("send");
+  });
+});
+
+// zeta f5efa62d background_task_row: elapsed_seconds is zeta's count as of the read; cancelable while the task runs
+const task = (id: string, fields: object) => ({ id, command: `sleep ${id}`, status: "running", elapsed_seconds: 65, cancelable: true, ...fields });
+const taskEvent = { jsonrpc: "2.0", method: "event", params: { event: "background_task_updated", session_id: "session", task: task("600", {}) } };
+const tasksChip = (app: RenderResult) => app.queryByRole("button", { name: /running in the background$/ });
+
+test("the chat header counts running background tasks and its list cancels one: the row then reads canceled", async () => {
+  const lists: Record<string, unknown>[] = [];
+  const cancels: Record<string, unknown>[] = [];
+  let tasks: object[] = [];
+  const rpc: Options["rpc"] = {
+    run_work_list: (params) => { lists.push(params); return { result: { tasks, todo: [] } }; },
+    background_task_cancel: (params) => {
+      cancels.push(params);
+      tasks = [task("600", { status: "killed", elapsed_seconds: 70, cancelable: false, exit_code: -15 }), tasks[1]!];
+      return { result: { task: tasks[0] } };
+    },
+  };
+  await withApp("controller", { attached: true, rpc }, async (app, writes, _requests, emit) => {
+    await waitFor(() => expect(lists).toEqual([{ session_id: "session" }]));
+    expect(tasksChip(app)?.textContent ?? null).toBeNull();
+    // a task started: zeta's background_task_updated rereads the list
+    tasks = [task("600", {}), task("1", { status: "exited", elapsed_seconds: 1, cancelable: false, exit_code: 0 })];
+    await act(async () => { emit(taskEvent); });
+    const chip = await waitFor(() => { const found = tasksChip(app); expect(found).not.toBeNull(); return found!; });
+    expect([chip.textContent, chip.getAttribute("aria-label")]).toEqual(["1 task", "1 task running in the background"]);
+    // the event feeds the list only: the transcript shows no row for it
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(select(app, '[data-part="timeline"]').textContent).not.toContain("background_task_updated");
+    await click(chip);
+    const dialog = await app.findByRole("dialog", { name: "background tasks in this chat" });
+    const rows = () => [...dialog.querySelectorAll("li")].map((row) => [row.querySelector("code")?.textContent, row.querySelector(".chat-tasks-meta")?.textContent, row.querySelector("button")?.textContent ?? null]);
+    expect(rows()).toEqual([["sleep 600", "running · 1m 5s", "cancel"], ["sleep 1", "done · 1s", null]]);
+    await click(within(dialog).getByRole("button", { name: "cancel sleep 600" }));
+    expect(cancels).toEqual([{ session_id: "session", task_id: "600" }]);
+    await waitFor(() => expect(rows()).toEqual([["sleep 600", "canceled · 1m 10s", null], ["sleep 1", "done · 1s", null]]));
+    // nothing runs now: the chip goes, the open list stays
+    expect(tasksChip(app)?.textContent ?? null).toBeNull();
+    expect(writes.filter((write) => write === "background_task_cancel")).toHaveLength(1);
+    // the cancel button and the chip are gone: focus stays in the list, then returns to the header, never the body
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("background tasks in this chat"));
+    await click(within(dialog).getByRole("button", { name: "close" }));
+    expect(document.activeElement?.textContent).toBe("Agents");
+  });
+});
+
+test("a failed background task read is read again when the turn ends, so the chip comes back", async () => {
+  let reads = 0;
+  const rpc: Options["rpc"] = { run_work_list: () => ++reads === 1 ? { error: { code: -32004, message: "fixture busy" } } : { result: { tasks: [task("600", {})], todo: [] } } };
+  await withApp("controller", { attached: true, rpc }, async (app, _writes, _requests, emit) => {
+    await waitFor(() => expect(reads).toBe(1));
+    await act(async () => {});
+    expect(tasksChip(app)?.textContent ?? null).toBeNull();
+    await act(async () => { emit({ jsonrpc: "2.0", method: "event", params: { event: "agent_end", session_id: "session" } }); });
+    await waitFor(() => expect(tasksChip(app)?.textContent ?? null).toBe("1 task"));
+    expect(reads).toBe(2);
+  });
+});
+
+const fullTasks: Options["rpc"] = { run_work_list: () => ({ result: { tasks: [task("600", {})], todo: [] } }) };
+
+test("an observer tab never lists background tasks: no chip, no cancel, no run_work request", async () => {
+  await withApp("observer", { attached: true, rpc: fullTasks }, async (app, _writes, requests, emit) => {
+    await act(async () => { emit(taskEvent); });
+    await act(async () => {});
+    expect([tasksChip(app)?.textContent ?? null, app.queryByRole("button", { name: /^cancel sleep/ })?.textContent ?? null, requests.filter((method) => method === "run_work_list")]).toEqual([null, null, []]);
+  });
+});
+
+test("a zeta without run_work shows no background task chip and is never asked for the list", async () => {
+  const rpc: Options["rpc"] = { ...fullTasks,
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: (params.features as string[]).filter((name) => name !== "run_work") } } }) };
+  await withApp("controller", { attached: true, rpc }, async (app, _writes, requests, emit) => {
+    await app.findByRole("button", { name: "Agents" });
+    await act(async () => { emit(taskEvent); });
+    await act(async () => {});
+    expect([tasksChip(app)?.textContent ?? null, requests.filter((method) => method === "run_work_list")]).toEqual([null, []]);
   });
 });
 

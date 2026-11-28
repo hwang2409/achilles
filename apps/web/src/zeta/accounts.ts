@@ -3,6 +3,10 @@ import type { ZetaClient } from "@fulcrum/zeta";
 export const ACCOUNT_LIST_IDLE_FEATURE = "account_list_idle_v1";
 
 type UsageWindow = { kind: "five_hour" | "seven_day" | "primary"; usedPercent: number; minutes: number; resetsAt: number };
+type Usage = { error: string | null } & (
+  | { freshness: "usage unknown"; capturedAt: null; windows: [] }
+  | { freshness: "now" | "stale"; capturedAt: number; windows: UsageWindow[] }
+);
 export type Account = {
   account: string;
   label: string;
@@ -10,7 +14,7 @@ export type Account = {
   available: boolean;
   current: boolean;
   default: boolean;
-  usage: { freshness: "now" | "stale" | "usage unknown"; refreshFailed: boolean; capturedAt: number | null; windows: UsageWindow[] } | null;
+  usage: Usage | null;
 };
 
 export type AccountCatalog = { revision: string | null; accounts: Account[] };
@@ -34,15 +38,14 @@ const isoTime = (value: unknown) => {
   return time;
 };
 
-function usage(value: unknown): NonNullable<Account["usage"]> {
+function usage(value: unknown): Usage {
   const { freshness, error, snapshot } = record(value);
   if (freshness !== "now" && freshness !== "stale" && freshness !== "usage unknown") throw unreadable();
   if (error !== null && (typeof error !== "string" || !safeUsageErrors.has(error))) throw unreadable();
-  const refreshFailed = error !== null;
-  if (snapshot === null && freshness === "usage unknown") return { freshness, refreshFailed, capturedAt: null, windows: [] };
+  if (snapshot === null && freshness === "usage unknown") return { freshness, error, capturedAt: null, windows: [] };
   const { version, captured_at, source, windows } = record(snapshot);
   if (freshness === "usage unknown" || version !== 1 || (source !== "usage_endpoint" && source !== "provider_error") || !Array.isArray(windows) || !windows.length) throw unreadable();
-  return { freshness, refreshFailed, capturedAt: isoTime(captured_at), windows: windows.map((value): UsageWindow => {
+  return { freshness, error, capturedAt: isoTime(captured_at), windows: windows.map((value): UsageWindow => {
     const { kind, used_percent, window_minutes, resets_at } = record(value);
     if (kind !== "five_hour" && kind !== "seven_day" && kind !== "primary") throw unreadable();
     if (typeof used_percent !== "number" || !Number.isFinite(used_percent) || used_percent < 0 || used_percent > 100) throw unreadable();
@@ -105,4 +108,40 @@ export function accountRecovery(accounts: Account[]): { failed: Account; target:
   if (!failed) return null;
   const candidates = accounts.filter((item) => item !== failed && item.available && providerOf(item.account) === providerOf(failed.account));
   return { failed, target: candidates.find((item) => item.default) ?? candidates[0] ?? null };
+}
+
+// zeta's FRESH_FOR (accounts/usage.py): a reading older than this is "stale".
+export const USAGE_FRESH_MS = 15 * 60_000;
+export const SIGN_IN_FAILED = "authentication failed; log in again";
+
+export type WindowStatus = UsageWindow & { passed: boolean; limited: boolean; stale: boolean };
+export type AccountStatus = {
+  label: "Needs sign-in" | "Sign-in expired" | "Limit reached" | "Available" | "Signed in";
+  tone: "ok" | "warn" | "danger";
+  signIn: boolean;
+  windows: WindowStatus[];
+  /** The next time this status changes by the clock alone; Infinity when none. */
+  next: number;
+};
+
+/**
+ * The one source for an account row: its label, every bar, and every window line.
+ * `signedInAt` is a succeeded sign-in for this account; zeta keeps the usage auth error until the next usage refresh.
+ */
+export function accountStatus({ available, usage }: Account, now: number, signedInAt = -Infinity): AccountStatus {
+  const old = !usage || usage.freshness !== "now" || now - usage.capturedAt > USAGE_FRESH_MS;
+  const windows = (usage?.windows ?? []).map((window): WindowStatus => {
+    const passed = window.resetsAt <= now;
+    // Usage only grows inside a window, so a full reading holds until its reset, as zeta's known_exhausted.
+    const limited = window.usedPercent >= 100 && !passed;
+    return { ...window, passed, limited, stale: passed || (old && !limited) };
+  });
+  const times = windows.map(({ resetsAt }) => resetsAt);
+  if (usage?.capturedAt != null && !old) times.push(usage.capturedAt + USAGE_FRESH_MS + 1);
+  const next = Math.min(...times.filter(time => time > now));
+  const status = (label: AccountStatus["label"], tone: AccountStatus["tone"], signIn = false) => ({ label, tone, signIn, windows, next });
+  if (!available) return status("Needs sign-in", "danger", true);
+  if (usage?.error === SIGN_IN_FAILED && signedInAt <= (usage.capturedAt ?? -Infinity)) return status("Sign-in expired", "danger", true);
+  if (windows.some(({ limited }) => limited)) return status("Limit reached", "warn");
+  return windows.length && windows.every(({ stale }) => !stale) ? status("Available", "ok") : status("Signed in", "ok");
 }
