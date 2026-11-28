@@ -22,28 +22,45 @@ const percent = new Intl.NumberFormat(undefined, { style: "percent", maximumFrac
 const windowLabel = (minutes: number) => minutes % 1440 === 0 ? `${minutes / 1440}d` : minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
 
 function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void }) {
+  // A window whose reset has passed shows old usage; re-render at the next reset so none reads as current.
+  const [now, setNow] = useState(Date.now);
+  const next = Math.min(...accounts.flatMap(({ usage }) => usage?.windows.map(({ resetsAt }) => resetsAt) ?? []).filter(time => time > now));
+  useEffect(() => {
+    if (!Number.isFinite(next)) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(next - Date.now(), 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [next, now]);
   return <>{accounts.some(({ usage }) => usage?.freshness === "stale") && <p className="account-stale">Some usage data may be out of date.</p>}<ul className="account-rows" aria-label={stale ? "last loaded accounts" : "model accounts"} data-stale={stale}>
-    {accounts.map(({ account, label, available, current, default: isDefault, usage }) => <li key={account} data-default={isDefault} data-available={available}>
+    {accounts.map(({ account, label, available, current, default: isDefault, usage }) => {
+      const limited = !!usage?.windows.some(({ usedPercent, resetsAt }) => usedPercent >= 100 && resetsAt > now);
+      return <li key={account} data-default={isDefault} data-available={available} data-limited={limited}>
       <div className="account-identity">
         <h3>{account}</h3>
         <p>{label !== account.slice(account.indexOf(":") + 1) && <span>{label}</span>}
-          <span className="account-availability">{available ? "available" : "needs sign-in"}</span>
+          <span className="account-availability">{!available ? "needs sign-in" : limited ? "limit reached" : "available"}</span>
           {isDefault && <span className="account-default">default</span>}
           {current && <span>in use</span>}
         </p>
       </div>
       <div className="account-usage">
         {!usage && <p>Usage unavailable</p>}
-        {usage?.windows.map(({ kind, minutes, usedPercent, resetsAt }, index) => <div className="account-window" key={`${kind}-${index}`}>
-          <div><span>{windowLabel(minutes)} window</span><span>{percent.format(usedPercent / 100)} used</span></div>
-          <meter high={95} optimum={0} aria-label={`${account} ${windowLabel(minutes)} usage`} min={0} max={100} value={usedPercent} />
-          <time dateTime={new Date(resetsAt).toISOString()}>resets {resetTime.format(resetsAt)}</time>
-        </div>)}
+        {usage?.windows.map(({ kind, minutes, usedPercent, resetsAt }, index) => {
+          const passed = resetsAt <= now;
+          return <div className="account-window" key={`${kind}-${index}`} data-reset-passed={passed}>
+            <div><span>{windowLabel(minutes)} window</span><span>{percent.format(usedPercent / 100)} used</span></div>
+            <meter high={passed ? undefined : 95} optimum={0} aria-label={`${account} ${windowLabel(minutes)} usage`} min={0} max={100} value={usedPercent} />
+            {passed
+              // capturedAt is null only for a usage with no windows.
+              ? <p>reset passed · last read <time dateTime={new Date(usage.capturedAt!).toISOString()}>{resetTime.format(usage.capturedAt!)}</time></p>
+              : <p>{usedPercent >= 100 && "limit reached · "}resets <time dateTime={new Date(resetsAt).toISOString()}>{resetTime.format(resetsAt)}</time></p>}
+          </div>;
+        })}
         {usage?.refreshFailed && <p className="account-availability" data-failed="true">last usage refresh failed</p>}
       </div>
       {!available && signIn && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
         aria-label={`sign in again to ${account}`} onClick={event => signIn({ provider: account.startsWith("anthropic:") ? "claude" : "codex", account }, event.currentTarget)}>sign in again</button>}
-    </li>)}
+    </li>;
+    })}
   </ul></>;
 }
 
@@ -57,7 +74,7 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const [last, setLast] = useState<{ client: ZetaClient | null; accounts: Account[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const heading = useRef<HTMLHeadingElement>(null);
+  const heading = useRef<HTMLDivElement>(null);
   const supported = client && supportsFeature(client, ACCOUNT_LIST_IDLE_FEATURE);
   // an observer tab (zeta was full) waits for the banner's take control, then reads as controller
   const observer = (client as { authority?: string } | null)?.authority === "observer";
@@ -96,8 +113,7 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   });
   const showAction = { label: "Try again", run: () => void show(true) };
   return <ModuleFrame title="Accounts">
-    <div className="accounts-place">
-      <h2 ref={heading} tabIndex={-1}>model accounts</h2>
+    <div className="accounts-place" ref={heading} tabIndex={-1} role="region" aria-label="model accounts">
       {active ? null : loading ? <ModuleState kind="loading" title="loading accounts…" />
         : !client ? (connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
           : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />)

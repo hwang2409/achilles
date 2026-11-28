@@ -53,7 +53,8 @@ function projectRow(value: unknown) {
   const { name, scope, enabled, trusted, status, auth, tool_count: toolCount } = row;
   if (!isMcpName(name)) return null;
   if (!oneOf(CONCRETE, scope) || typeof enabled !== "boolean" || typeof trusted !== "boolean" || !oneOf(STATUSES, status) || !oneOf(AUTH, auth)) return null;
-  if (typeof toolCount !== "number" || !Number.isSafeInteger(toolCount) || toolCount < 0) return null;
+  // zeta will send null (unknown) for a server nobody probed; the view does not read this count yet (McpViews knownToolCount).
+  if (toolCount !== null && (typeof toolCount !== "number" || !Number.isSafeInteger(toolCount) || toolCount < 0)) return null;
   const config = projectConfig(row.config, status === "malformed");
   if (!config) return null;
   return { name, scope, enabled, trusted, status, auth, toolCount, config };

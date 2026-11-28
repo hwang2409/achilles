@@ -15,10 +15,15 @@ export function parseComposerInput(draft: string): ParsedComposerInput {
 }
 
 /** The commands the composer handles locally, by name. */
-export const COMPOSER_COMMANDS = ["accounts"] as const;
+export const COMPOSER_COMMANDS = ["accounts", "vim"] as const;
 export type ComposerCommand = (typeof COMPOSER_COMMANDS)[number];
 export const isComposerCommand = (name: string): name is ComposerCommand =>
   (COMPOSER_COMMANDS as readonly string[]).includes(name);
+
+// zeta lists it, but on the web it would only create a file on the zeta host and print that host path
+const HIDDEN = ["project-instructions"];
+/** The session's slash commands that make sense in the browser, in the server's order. */
+export const webSlashCommands = <T extends { name: string }>(commands: readonly T[]): T[] => commands.filter((command) => !HIDDEN.includes(command.name));
 
 /**
  * The commands a "/prefix" draft (one word, no space yet) offers, in the server's order but with the exact name first,

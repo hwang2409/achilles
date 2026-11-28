@@ -32,6 +32,8 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
   const [scope, setScope] = useState<McpScope>(() => detailOf(pathname)?.scope ?? "effective");
   const [retry, setRetry] = useState(0);
   const [reading, setReading] = useState(false);
+  // the last test result per connection lives here, so the Tools section and the test receipt read the same result.
+  const [tested, setTested] = useState<{ key: string; last: TestReceipt } | null>(null);
   const focus = useRef(false);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const activeScope = useRef<HTMLButtonElement>(null);
@@ -95,6 +97,9 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
       && snapshot.effective.rows.some((effective) => effective.scope === "project" && effective.name === item.name) ? "shadowed by project" : null;
     return snapshot && "rows" in snapshot.user && snapshot.user.rows.some((user) => user.name === item.name) ? "shadows user" : null;
   };
+  useEffect(() => { if (!supported) setTested((prior) => prior?.last.status === "unknown" ? prior : null); }, [supported]);
+  const testKey = (item: McpRow) => JSON.stringify([item.scope, item.name]);
+  const last = row && tested?.key === testKey(row) ? tested.last : null;
   const retryRead = () => setRetry((count) => count + 1);
   const failure = (failure: Failure, project: boolean) => <FailedRead key={`${scope}:${failure.reason}`} failure={failure}
     project={project} retry={retryRead} reading={reading} offline={offline} />;
@@ -125,8 +130,9 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
             <ConnectionList snapshot={snapshot} scope={scope} selectScope={(view) => { setScope(view); if (detailOpen) navigate(LIST); }}
               addConnection={supported && !adding ? openAdd : undefined} activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
             {(row || detailOpen) && <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
-              detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure}>
-              {reviewRow?.config.transport && reviewRevision && <McpTest key={JSON.stringify([reviewRow.scope, reviewRow.name])} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading} />}
+              detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure} tested={last?.status === "unknown" ? null : last}>
+              {reviewRow?.config.transport && reviewRevision && <McpTest key={testKey(reviewRow)} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading}
+                last={last} setLast={(result) => setTested({ key: testKey(reviewRow), last: result })} />}
               {reviewRow?.config.oauth && reviewRevision && <McpAuth key={JSON.stringify(["auth", reviewRow.scope, reviewRow.name])} owner={owner} row={reviewRow} revision={reviewRevision} online={supported} heading={detailHeading} />}
               <McpActions key={`${path}:${scope}`} owner={owner} heading={detailHeading} row={row ?? null} revision={revision} online={supported} />
             </ConnectionDetail>}
@@ -141,19 +147,18 @@ const testTrust = reviewText("trust this project stdio connection before testing
 const testUnknown = reviewText("result unknown. close this review to start a new test. the request was not retried.");
 type TestReceipt = McpTestResult | { status: "unknown" };
 
-function McpTest({ owner, row, revision, online, heading }: {
+function McpTest({ owner, row, revision, online, heading, last, setLast }: {
   owner: McpOwner; row: McpRow; revision: string; online: boolean; heading: RefObject<HTMLHeadingElement | null>;
+  last: TestReceipt | null; setLast: (result: TestReceipt) => void;
 }) {
   const opener = useRef<HTMLButtonElement>(null);
   const flight = useRef<string | null>(null);
   const [review, setReview] = useState<{ id: number; target: McpRow & { revision: string } } | null>(null);
-  const [last, setLast] = useState<TestReceipt | null>(null);
   const target = { ...row, revision };
   const needsTrust = needsMcpTestTrust(target);
   const reviewed = review?.target;
 
   useLayoutEffect(() => () => { if (flight.current) owner.close(flight.current); }, [owner]);
-  useEffect(() => { if (!online) setLast((prior) => prior?.status === "unknown" ? prior : null); }, [online]);
 
   async function execute(): Promise<Result<{ status: "committed"; receipt: ReviewText }>> {
     if (!reviewed) return { status: "failed", reason: "not-applied", message: testUnknown, final: true };

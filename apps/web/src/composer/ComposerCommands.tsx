@@ -5,6 +5,8 @@ import { WRITE_SURFACE } from "../writeSurfaces";
 import { listAccounts, safeAccountId, supportsFeature, supportsRequest, type Account } from "../zeta";
 import { useAccountSwitch } from "../accounts/AccountSwitchReview";
 import { currentAccount, type ChatDestination } from "../accounts/accountSwitch";
+import { getSettings, updateSettings } from "../settings";
+import { webSlashCommands } from "./commands";
 import "./composer-commands.css";
 
 type Output = { accounts: Account[] } | { text: string; error?: boolean; command?: boolean };
@@ -34,7 +36,7 @@ export function useComposerCommands(client: ZetaClient | null, chat: ChatDestina
     if (!wantsList || !client || !sessionId) return;
     let live = true;
     // a failed read shows no menu, so the draft still runs through slash_run on enter
-    listSlashCommands(client, sessionId).then((list) => list.commands, () => "failed" as const).then((commands) => { if (live) setSlashList(commands); });
+    listSlashCommands(client, sessionId).then((list) => webSlashCommands(list.commands), () => "failed" as const).then((commands) => { if (live) setSlashList(commands); });
     return () => { live = false; };
   }, [wantsList, client, sessionId]);
 
@@ -94,6 +96,17 @@ export function useComposerCommands(client: ZetaClient | null, chat: ChatDestina
     /** `draft`: the exact composer text the command came from */
     run(command: { name: string; arg: string }, opener: HTMLElement | null, draft: string) {
       revision.current++;
+      // achilles' own vim mode, as in the palette; zeta's /vim would change the zeta terminal's mode instead
+      if (command.name === "vim") {
+        const arg = command.arg.toLowerCase();
+        const vim = arg === "on" ? true : arg === "off" ? false : arg === "" || arg === "toggle" ? !getSettings().vim : null;
+        if (vim === null) {
+          setOutput({ text: "use /vim, /vim on, or /vim off.", error: true });
+          return false;
+        }
+        updateSettings({ vim });
+        return true;
+      }
       if (!canWrite) return false;
       if (command.name !== "accounts" && canSlash) {
         void slash(`/${command.name}${command.arg ? ` ${command.arg}` : ""}`, draft);
