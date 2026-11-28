@@ -83,27 +83,29 @@ test("a setup child that exits but leaves its output open fails with a named err
 
 test("a SIGKILLed eval leaves no child of its stack alive", async () => {
   if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
-  const marker = await mkdtemp(join("/tmp", "achilles-eval-sigkill-")); const pidFile = join(marker, "sync.pid");
-  // the zeta sync step holds still, as a slow setup child would, until the eval is SIGKILLed (a tool timeout)
-  await writeFile(join(marker, "uv"), `#!/bin/sh\n[ "$1" = sync ] && { echo $$ > ${JSON.stringify(pidFile)}; exec sleep 600; }\nexec ${JSON.stringify(Bun.which("uv")!)} "$@"\n`); await chmod(join(marker, "uv"), 0o755);
-  const env = { ...process.env, PATH: `${marker}:${process.env.PATH}`, TMPDIR: marker, ZETA_HOME: join(marker, "zeta-home"), ACHILLES_HOME: join(marker, "achilles-home"), EVAL_BACKEND: "scripted", EVAL_SKIP_BROWSER_INSTALL: "1", MODEL: "ollama/qwen3:4b", REPORT_DIR: join(marker, "report"), BASE: "none" };
-  const child = spawn("bun", ["scripts/eval.ts", "--suite", "harness-smoke"], { cwd: new URL("..", import.meta.url).pathname, env, stdio: "ignore" });
+  const marker = await mkdtemp(join("/tmp", "achilles-eval-sigkill-"));
+  const env = { ...process.env, TMPDIR: marker, ZETA_HOME: join(marker, "zeta-home"), ACHILLES_HOME: join(marker, "achilles-home"), EVAL_BACKEND: "scripted", EVAL_SKIP_BROWSER_INSTALL: "1", EVAL_STACK_ONLY: "1", MODEL: "ollama/qwen3:4b", REPORT_DIR: join(marker, "report"), BASE: "none" };
+  const child = spawn("bun", ["scripts/eval.ts", "--suite", "harness-smoke"], { cwd: new URL("..", import.meta.url).pathname, env, stdio: ["ignore", "pipe", "pipe"] });
+  const output: Buffer[] = []; child.stdout!.on("data", chunk => output.push(Buffer.from(chunk))); child.stderr!.on("data", chunk => output.push(Buffer.from(chunk)));
+  let pgids = new Set<number>();
   try {
-    for (let i = 0; i < 1500 && !await Bun.file(pidFile).exists(); i++) await Bun.sleep(100); // a cold cache clones zeta first
-    expect(await Bun.file(pidFile).exists(), "the setup child did not start").toBe(true);
-    // by pid and pgid: macOS ps hides the environment (the marker) of /bin binaries such as sleep
-    const held = Number(await Bun.file(pidFile).text()); const alive = () => processRows().filter(row => row.pid === held || row.pgid === held || row.command.includes(marker));
+    // the stack is up (achilles serve and zeta serve), then the eval is SIGKILLed, as a tool timeout does
+    for (let i = 0; i < 1800 && !Buffer.concat(output).includes('"retained_state"') && child.exitCode === null; i++) await Bun.sleep(100); // a cold cache clones zeta first
+    expect(Buffer.concat(output).toString(), "the eval stack did not start").toContain('"retained_state"');
+    pgids = new Set(descendants(child.pid!, processRows()).map(row => row.pgid));
+    expect(pgids.size, "the stack has no child process groups").toBeGreaterThan(1);
     process.kill(child.pid!, "SIGKILL");
+    // by pgid: macOS ps hides the environment (the marker) of some binaries
+    const alive = () => processRows().filter(row => pgids.has(row.pgid));
     let survivors = alive();
     for (let i = 0; i < 50 && survivors.length; i++) { await Bun.sleep(100); survivors = alive(); }
     expect(survivors.map(row => `${row.pid} ${row.ppid} ${row.command.slice(0, 80)}`), "children of the SIGKILLed eval must exit within 5s").toEqual([]);
   } finally {
     try { process.kill(child.pid!, "SIGKILL"); } catch {}
-    const held = Number(await Bun.file(pidFile).text().catch(() => "0"));
-    for (const row of processRows().filter(row => (held && row.pgid === held) || row.command.includes(marker))) { try { process.kill(row.pid, "SIGKILL"); } catch {} }
+    for (const pgid of pgids) { try { process.kill(-pgid, "SIGKILL"); } catch {} }
     await rm(marker, { recursive: true, force: true });
   }
-}, 180_000);
+}, 240_000);
 
 test("a setup command that is not installed fails with its own cause", async () => {
   if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.

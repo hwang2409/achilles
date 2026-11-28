@@ -2,8 +2,7 @@ import { createConnection, createServer } from "node:net";
 import { closeSync, openSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
-import type { Socket } from "node:net";
+import { spawn, type ChildProcess } from "node:child_process";
 import { connectEvalProtocol } from "./eval-protocol";
 
 export const TOOL_POLICY = "achilles__*,mcp_discover";
@@ -15,10 +14,10 @@ const HTTP_TIMEOUT_MS = 10_000;
 const DRAIN_MS = 5_000;
 // a peer eval on the same checkout holds the web lock through one sync or web repair (two 10 s fetches and five 120 s steps, ~620 s)
 const LOCK_TIMEOUT_MS = 900_000;
-// each child runs in its own process group, so a SIGKILLed eval cannot clean up; a watcher in that group reads fd 3,
-// a pipe only this process holds, and kills the group when the pipe closes (eval died, or the owner let go)
-// (builtins only, so a PATH without cat cannot fire it early)
-const LIFELINE = '(read line <&3; kill -KILL 0) >/dev/null 2>&1 & exec "$@" 3<&-';
+// each child runs in its own process group, so a SIGKILLed eval cannot clean up: a watchdog in that group kills the
+// group once the eval pid is gone, and leaves quietly once its own command ($$ after exec) has exited
+// shortcut: polls each second instead of a pipe (bun 1.3.13 closes a later child's extra stdio pipe); upgrade with bun
+const WATCHDOG = 'eval_pid=$1; shift; (while kill -0 "$eval_pid" && kill -0 $$; do /bin/sleep 1; done; kill -0 $$ && kill -KILL 0) >/dev/null 2>&1 & exec "$@"';
 async function within<T>(work: Promise<T>, timeoutMs: number): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { return await Promise.race([work, new Promise<undefined>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(undefined), timeoutMs); })]); } finally { clearTimeout(timer); }
@@ -39,6 +38,7 @@ async function freePort(excluding = new Set<number>()) {
     if (!RESERVED_PORTS.has(port) && !excluding.has(port)) return port;
   }
 }
+const reap = (pgid: number) => { try { process.kill(-pgid, "SIGKILL"); } catch {} };
 const pidAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 function processGroups() {
   const output = Bun.spawnSync(["ps", "-axo", "pid=,pgid="], { stdout: "pipe", stderr: "pipe" });
@@ -50,7 +50,6 @@ function processGroups() {
   }
   return groups;
 }
-const lifeline = (process: ChildProcess) => process.stdio[3] as Socket;
 class ProcessOwner {
   private groups = new Map<number, ChildProcess>();
   private closing?: Promise<{ pids: number[]; pgids: number[]; process_groups: Array<{ pgid: number; pids: number[] }>; pids_dead: boolean; pgids_dead: boolean }>;
@@ -59,16 +58,16 @@ class ProcessOwner {
     const cancel = () => { void this.close(); }; this.detachAbort = () => signal?.removeEventListener("abort", cancel);
     signal?.addEventListener("abort", cancel, { once: true }); if (signal?.aborted) cancel();
   }
-  spawn(command: string, args: string[], options: Parameters<typeof spawn>[2] & { stdio: StdioOptions[] }, releaseOnExit = true) {
+  // a done child's group still holds its watchdog (and any leftover descendant): it goes when the child exits, or for
+  // run() after its output drains, so a descendant that holds the pipe is reported, not silently killed
+  spawn(command: string, args: string[], options: Parameters<typeof spawn>[2], reapOnExit = true) {
     if (this.closing) throw new Error("eval process owner is closing");
-    const process = spawn("/bin/sh", ["-c", LIFELINE, "sh", command, ...args], { ...options, stdio: [...options.stdio, "pipe"], detached: true }); const pgid = process.pid;
-    if (releaseOnExit) process.once("exit", () => lifeline(process).destroy());
-    if (pgid) { this.groups.set(pgid, process); process.once("exit", () => { if (this.groups.get(pgid) === process) this.groups.delete(pgid); }); }
+    const process = spawn("/bin/sh", ["-c", WATCHDOG, "sh", String(globalThis.process.pid), command, ...args], { ...options, detached: true }); const pgid = process.pid;
+    if (pgid) { this.groups.set(pgid, process); process.once("exit", () => { if (this.groups.get(pgid) === process) this.groups.delete(pgid); if (reapOnExit) reap(pgid); }); }
     return process;
   }
   // every wait is bounded and names the child and its last output: a silent wait once held CI for 23 minutes
   async run(command: string, args: string[], cwd?: string, timeoutMs = 15_000) {
-    // the lifeline stays open until the output drains, so a descendant that holds the pipe is reported, not silently killed
     const process = this.spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] }, false); const label = [command, ...args.slice(0, 2)].join(" ");
     const out: Buffer[] = []; const err: Buffer[] = []; let spawnError = "";
     const read = (stream: NodeJS.ReadableStream, chunks: Buffer[]) => new Promise<void>((resolveRead, reject) => { stream.on("data", chunk => chunks.push(Buffer.from(chunk))); stream.once("end", () => resolveRead()); stream.once("error", reject); });
@@ -81,9 +80,9 @@ class ProcessOwner {
       if (exitCode === undefined) { await this.stopGroup(process.pid!, process); throw fail(`timed out after ${timeoutMs / 1000}s`); }
       if (spawnError) throw fail(`failed to start: ${spawnError}`);
       // the child exited, so its output closes at once unless a process it started still holds the pipe
-      if (await within(drained.then(() => true), DRAIN_MS) === undefined) { try { globalThis.process.kill(-process.pid!, "SIGKILL"); } catch {} throw fail(`exited but its output stayed open for ${DRAIN_MS / 1000}s`); }
+      if (await within(drained.then(() => true), DRAIN_MS) === undefined) throw fail(`exited but its output stayed open for ${DRAIN_MS / 1000}s`);
       return { exitCode, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() };
-    } finally { lifeline(process).destroy(); }
+    } finally { if (process.pid) reap(process.pid); }
   }
   private async stopGroup(pgid: number, owned: ChildProcess) {
     const stillOwned = () => this.groups.get(pgid) === owned && owned.exitCode === null;
