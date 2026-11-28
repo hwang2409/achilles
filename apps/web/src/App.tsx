@@ -32,7 +32,8 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, returnFocusToComposer, userTyping, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
+import { backoff, supportsFeature, supportsRequest, type Connection, type ConnectionState } from "./zeta";
+import { IMAGE_FEATURE, IMAGE_REQUEST } from "./composer/images";
 import { TOO_MANY_CHATS } from "./zeta/session";
 import { parkedRows, subscribeParked } from "./zeta/parked";
 import { keepRowWrites, subscribeRowWrites, verifyChatStates } from "./zeta/rowState";
@@ -149,6 +150,8 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     },
     commandOutput: commands.output && <CommandOutput commands={commands} opener={commandOpener.current} />,
     controls,
+    // an older zeta takes no images: no paste, no drop, no chips
+    images: Boolean(client && supportsFeature(client, IMAGE_FEATURE) && supportsRequest(client, IMAGE_REQUEST)),
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>

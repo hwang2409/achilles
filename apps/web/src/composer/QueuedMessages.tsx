@@ -45,12 +45,15 @@ export function QueuedMessages({ model, onRetry, onRestore, onCancel }: { model:
       {rows.map((item) => {
         const sending = item === current;
         const held = Boolean(item.failed && item.held);
-        const preview = item.text.length > 40 ? `${item.text.slice(0, 40)}…` : item.text;
+        const images = item.images?.length ? `${item.images.length} ${item.images.length === 1 ? "image" : "images"}` : "";
+        const text = item.text || images;
+        const preview = text.length > 40 ? `${text.slice(0, 40)}…` : text;
         const label = held ? MAYBE_SENT_LABEL : item.failed ? (item.tries ?? 1) > 1 ? `not sent · ${item.tries} tries` : "not sent" : sending ? model.send?.steer ? "next step" : "sending" : "queued";
         return (
           <li key={item.id} data-part="composer-queued" data-failed={item.failed ? "" : undefined} data-sending={sending || undefined}>
             <span data-part="composer-queued-label">{label}</span>
-            <span data-part="composer-queued-text" title={item.text}>{item.text}</span>
+            <span data-part="composer-queued-text" title={text}>{text}</span>
+            {item.text && images ? <span data-part="composer-queued-images">{images}</span> : null}
             <span data-part="composer-queued-actions">
               {item.failed ? <button type="button" data-part="composer-queued-retry" data-write-surface={WRITE_SURFACE.deliveryRetry} aria-label={`retry: ${preview}`} onClick={() => onRetry(item.id)}>retry</button> : null}
               {item.failed && !held ? <button type="button" data-part="composer-queued-edit" aria-label={`edit: ${preview}`} onClick={() => onRestore(item.id)}>edit</button> : null}

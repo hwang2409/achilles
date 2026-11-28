@@ -1,4 +1,5 @@
 import type { ComposerState } from "@fulcrum/react";
+import { imageLimitError, type ComposerImage } from "./images";
 
 export type ComposerError = { kind: "submit" | "stop"; text: string };
 /**
@@ -8,7 +9,7 @@ export type ComposerError = { kind: "submit" | "stop"; text: string };
  * id). While it is set the row has no edit (Enter would send the text again with a new id), a retry reuses the id, and a
  * page load keeps it. A later failure that is not zeta's answer (no socket, page tools refreshing, a timeout) keeps it.
  */
-export type QueuedMessage = { id: number; text: string; failed?: string; tries?: number; held?: string };
+export type QueuedMessage = { id: number; text: string; images?: ComposerImage[]; failed?: string; tries?: number; held?: string };
 /** `deliveryId` is tracked once the request goes out; `reused`: the `held` id this send went out with; `echoed` once
  * zeta's transcript shows that prompt */
 type Send = { attempt: number; id: number; steer: boolean; deliveryId?: string; reused?: string; echoed?: boolean };
@@ -30,6 +31,8 @@ export type ComposerModel = {
   state: ComposerState;
   /** always the next new message; a submitted message never comes back here unless the user asks (edit) */
   draft: string;
+  /** the images that go with the next new message */
+  images: ComposerImage[];
   sending: boolean;
   stopping: boolean;
   /** first in, first out; the head is in flight when `send.id` names it */
@@ -44,12 +47,16 @@ export type ComposerModel = {
 
 export type ComposerEffect =
   /** `deliveryId`: a retried `held` row goes out with its old id, so zeta drops a copy it already took */
-  | { type: "submit"; attempt: number; text: string; steer: boolean; deliveryId?: string }
+  | { type: "submit"; attempt: number; text: string; steer: boolean; images?: ComposerImage[]; deliveryId?: string }
   | { type: "stop" };
 
 export type ComposerEvent =
   | { type: "state"; state: ComposerState }
   | { type: "edit"; draft: string }
+  | { type: "add-images"; images: ComposerImage[] }
+  | { type: "remove-image"; index: number }
+  /** a paste or drop the box cannot take: why, and nothing is added */
+  | { type: "image-error"; message: string }
   | { type: "submit"; turnRunning: boolean }
   | { type: "next"; turnRunning: boolean }
   | { type: "track"; attempt: number; deliveryId: string }
@@ -70,7 +77,7 @@ export type ComposerTransition = { model: ComposerModel; effect?: ComposerEffect
 
 /** `rows`: unsent messages an earlier page load kept; `held` names the send a kept row may have made */
 export function createComposerModel(draft: string, state: ComposerState, rows: Omit<QueuedMessage, "id">[] = []): ComposerModel {
-  return { state, draft, sending: false, stopping: false, queue: rows.map((row, index) => ({ ...row, id: index + 1 })), nextAttempt: 1, nextQueueId: rows.length + 1 };
+  return { state, draft, images: [], sending: false, stopping: false, queue: rows.map((row, index) => ({ ...row, id: index + 1 })), nextAttempt: 1, nextQueueId: rows.length + 1 };
 }
 
 const canSend = (state: ComposerState) => state !== "running" && state !== "read-only";
@@ -79,7 +86,7 @@ const busy = (model: ComposerModel) => model.sending || model.queue.length > 0;
 /** What Enter does now: send the box, queue it behind other messages, or nothing. On an empty box it lets held rows go. */
 export function submitAction(model: ComposerModel): "send" | "queue" | null {
   if (!canSend(model.state)) return null;
-  if (!model.draft.trim()) return model.held && model.queue.length ? "queue" : null;
+  if (!model.draft.trim() && !model.images.length) return model.held && model.queue.length ? "queue" : null;
   return busy(model) ? "queue" : "send";
 }
 
@@ -95,6 +102,7 @@ export function composerStatus(model: ComposerModel): { text: string; tone?: "da
   if (model.stopping) return { text: "stopping", tone: "busy" };
   if (model.held && model.queue.length) return { text: "the rest wait for your next enter", tone: "busy" };
   if (inFlight(model)) return { text: model.send?.steer ? "next step" : "sending", tone: "busy" };
+  if (model.queue[0]?.images && !model.queue[0].failed && model.state === "steerable") return { text: "images go when the turn ends", tone: "busy" };
   if (model.queue[0]?.failed && model.queue[0].held) return { text: MAYBE_SENT, tone: "danger" };
   if (model.queue[0]?.failed) return { text: "a message was not sent. retry, edit, or cancel it", tone: "danger" };
   return { text: "" };
@@ -112,13 +120,15 @@ const start = (model: ComposerModel, item: QueuedMessage, steer: boolean): Compo
   const attempt = model.nextAttempt;
   return {
     model: { ...model, sending: true, send: { attempt, id: item.id, steer, ...(item.held ? { reused: item.held } : {}) }, nextAttempt: attempt + 1 },
-    effect: { type: "submit", attempt, text: item.text, steer, ...(item.held ? { deliveryId: item.held } : {}) },
+    effect: { type: "submit", attempt, text: item.text, steer, ...(item.images ? { images: item.images } : {}), ...(item.held ? { deliveryId: item.held } : {}) },
   };
 };
 
 const next = (model: ComposerModel, turnRunning: boolean): ComposerTransition => {
   const head = model.queue[0];
   if (!head || head.failed || model.held || model.sending || !canSend(model.state)) return { model };
+  // zeta takes images only as a new turn (`send_images` cannot steer): the row waits for the running turn to end
+  if (head.images && turnRunning) return { model };
   return start(model, head, turnRunning);
 };
 
@@ -128,13 +138,22 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       return { model: { ...model, state: event.state, error: event.state !== "running" && event.state !== "steerable" && model.error?.kind === "stop" ? undefined : model.error } };
     case "edit":
       return { model: { ...model, draft: event.draft, error: model.error?.kind === "submit" ? undefined : model.error } };
+    case "add-images":
+      return { model: { ...model, images: [...model.images, ...event.images], error: model.error?.kind === "submit" ? undefined : model.error } };
+    case "remove-image":
+      return { model: { ...model, images: model.images.filter((_, index) => index !== event.index), error: model.error?.kind === "submit" ? undefined : model.error } };
+    case "image-error":
+      return { model: { ...model, error: { kind: "submit", text: event.message } } };
     case "submit": {
       if (!submitAction(model)) return { model };
-      if (!model.draft.trim()) return next({ ...model, held: false }, event.turnRunning);
+      if (!model.draft.trim() && !model.images.length) return next({ ...model, held: false }, event.turnRunning);
+      // an edited row can bring back images the box already holds: never send a set zeta would refuse
+      const imageError = imageLimitError(model.images);
+      if (imageError) return { model: { ...model, error: { kind: "submit", text: imageError } } };
       if (model.queue.length >= QUEUE_LIMIT) return { model: { ...model, error: { kind: "submit", text: `at most ${QUEUE_LIMIT} messages can wait. cancel one or wait for a reply.` } } };
-      const item = { id: model.nextQueueId, text: model.draft };
+      const item = { id: model.nextQueueId, text: model.draft, ...(model.images.length ? { images: model.images } : {}) };
       // the edited text of a failed head keeps its place in front of the rows it held back
-      const queued = { ...model, draft: "", error: undefined, held: false, queue: model.held ? [item, ...model.queue] : [...model.queue, item], nextQueueId: model.nextQueueId + 1 };
+      const queued = { ...model, draft: "", images: [], error: undefined, held: false, queue: model.held ? [item, ...model.queue] : [...model.queue, item], nextQueueId: model.nextQueueId + 1 };
       return next(queued, event.turnRunning);
     }
     case "next":
@@ -174,7 +193,7 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       const item = model.queue.find((queued) => queued.id === event.id && queued.failed && !queued.held);
       if (!item) return { model };
       const queue = model.queue.filter((queued) => queued !== item);
-      return { model: { ...model, draft: [item.text, model.draft].filter(Boolean).join("\n"), queue, held: queue.length > 0 } };
+      return { model: { ...model, draft: [item.text, model.draft].filter(Boolean).join("\n"), images: [...(item.images ?? []), ...model.images], queue, held: queue.length > 0 } };
     }
     case "cancel":
       if (inFlight(model)?.id === event.id) return { model };

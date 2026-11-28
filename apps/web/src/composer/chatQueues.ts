@@ -1,4 +1,5 @@
 import { inFlight, MAYBE_SENT, type QueuedMessage } from "./composer-machine";
+import type { ComposerImage } from "./images";
 import { createComposerDelivery, type ComposerDelivery, type DeliveryOptions } from "./useComposerDelivery";
 /** a row that had not left for zeta when the page unloaded */
 export const NOT_SENT = "not sent before the page reloaded";
@@ -13,11 +14,14 @@ const parse = (value: string): StoredRow[] | undefined => {
   try {
     const parsed = JSON.parse(value) as { rows?: unknown };
     if (!Array.isArray(parsed.rows)) return undefined;
-    return parsed.rows.flatMap((row: { text?: unknown; failed?: unknown; tries?: unknown; held?: unknown; deliveryId?: unknown } | null): StoredRow[] => {
+    return parsed.rows.flatMap((row: { text?: unknown; images?: unknown; failed?: unknown; tries?: unknown; held?: unknown; deliveryId?: unknown } | null): StoredRow[] => {
       if (typeof row?.text !== "string" || typeof row.failed !== "string") return [];
+      // a row's images go with it: a retry without them would send other content under the same delivery id
+      const images = row.images === undefined ? undefined : Array.isArray(row.images) && row.images.length && row.images.every((image) => typeof image?.name === "string" && typeof image.mime_type === "string" && typeof image.data === "string") ? row.images as ComposerImage[] : null;
+      if (images === null) return [];
       // rows written before `held` kept the id as `deliveryId` (maybe sent, or not sent with an id): zeta may hold them
       const held = typeof row.held === "string" ? row.held : typeof row.deliveryId === "string" ? row.deliveryId : undefined;
-      return [{ text: row.text, failed: row.failed, ...(typeof row.tries === "number" ? { tries: row.tries } : {}), ...(held ? { held } : {}) }];
+      return [{ text: row.text, ...(images ? { images: images.map(({ name, mime_type, data }) => ({ name, mime_type, data })) } : {}), failed: row.failed, ...(typeof row.tries === "number" ? { tries: row.tries } : {}), ...(held ? { held } : {}) }];
     });
   } catch { return undefined; }
 };
@@ -63,7 +67,7 @@ const stored = (owner: ComposerDelivery): StoredRow[] => {
   return model.queue.flatMap((item): StoredRow[] => {
     if (item === sending && model.send?.echoed) return []; // zeta's transcript shows it: taken
     const failed = (item === sending ? undefined : item.failed) ?? (item.held ? MAYBE_SENT : NOT_SENT);
-    return [{ text: item.text, failed, ...(item !== sending && item.tries ? { tries: item.tries } : {}), ...(item.held ? { held: item.held } : {}) }];
+    return [{ text: item.text, ...(item.images ? { images: item.images } : {}), failed, ...(item !== sending && item.tries ? { tries: item.tries } : {}), ...(item.held ? { held: item.held } : {}) }];
   });
 };
 
