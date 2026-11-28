@@ -3,8 +3,7 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { Confirmation, reviewText as t } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { supportsFeature } from "../zeta/connection";
-import { controlFeature, displayControl as display, isTerminal, newerControls, stateWord, readControlParent, runDisplayId, type ChildControls, type ControlParent } from "./childControls";
-import { elapsed } from "./AgentRunDetail";
+import { controlFeature, displayControl as display, elapsed, isTerminal, newerControls, nowSample, stateWord, readControlParent, runDisplayId, type ChildControls, type ControlParent } from "./childControls";
 import type { AgentRun } from "./reads";
 
 // readOnly: why this tab cannot write (an observer tab); the controls stay visible but disabled.
@@ -94,7 +93,7 @@ export function AgentCancel({ client, owner, refresh, row, title, parent, readOn
           button has focus, and focus must stay in the dialog */}
       <button ref={opener} type="button" aria-disabled={!!unavailable || finished || undefined} data-write-surface={WRITE_SURFACE.agentsCancel}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-        onClick={() => { if (!unavailable && !finished) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed: elapsed(row, Date.now()) }); }}>cancel run</button>
+        onClick={() => { if (!unavailable && !finished) setReview({ id: (review?.id ?? 0) + 1, row, title, parent, elapsed: elapsed(row, nowSample().mono) }); }}>cancel run</button>
       {unavailable && <small>{unavailable}</small>}
     </div>}
     <div ref={setActivity} className="agents-cancel-activity" />

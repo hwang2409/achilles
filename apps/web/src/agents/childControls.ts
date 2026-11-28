@@ -16,6 +16,64 @@ const terminal = ["completed", "failed", "canceled"] as const;
 // the chat transcript's sub-agent row says "done"; use the same word in agent views
 export const stateWord = (status: string) => status === "completed" ? "done" : status;
 export const isTerminal = (state: unknown): state is typeof terminal[number] => terminal.some((value) => value === state);
+
+// the transcript row's format: 19s, 1m 40s, 1h 2m
+export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
+
+// one page-wide 1 s clock for "retries in …" and a live run's elapsed: it runs only while such a row is shown, and
+// never reads the network. it ticks on the whole second, so two tabs show the same second at the same moment.
+// `mono` is this page's monotonic clock, sampled once per second so every view in that second counts from one value
+type Now = { wall: number; mono: number };
+const ticks = new Set<() => void>();
+let align: ReturnType<typeof setTimeout> | undefined;
+let tick: ReturnType<typeof setInterval> | undefined;
+let sample: Now = { wall: NaN, mono: 0 };
+const fire = () => ticks.forEach((listener) => listener());
+export function subscribeNow(fn: () => void) {
+  ticks.add(fn);
+  if (!align) align = setTimeout(() => { tick = setInterval(fire, 1000); fire(); }, 1000 - Date.now() % 1000);
+  return () => {
+    ticks.delete(fn);
+    if (!ticks.size) { clearTimeout(align); clearInterval(tick); align = tick = undefined; }
+  };
+}
+export function nowSample() {
+  const wall = Math.floor(Date.now() / 1000) * 1000;
+  if (wall !== sample.wall) sample = { wall, mono: performance.now() };
+  return sample;
+}
+
+// zeta's elapsed_seconds is zeta's own count of the run's time (zeta f5efa62d child_runs.py): in the zeta process that
+// runs the child, its monotonic time plus what earlier episodes banked, so a restart's downtime is left out; for a row
+// no live process has resumed, wall time since started_at on zeta's host. so it is not now - started_at on this
+// browser's clock. a live run counts on from zeta's number as of the read that carried it, on this page's monotonic
+// clock, with one anchor per run for every reader on the page, so the dialog and the place show the same second
+const anchors = new Map<string, { elapsed: number; at: number }>();
+// seconds a read may trail the shown count and still be latency: it absorbs request time and out-of-order replies
+const latencyBand = 2;
+export const ticking = (row: AgentRun) => row.elapsedSeconds !== undefined && !isTerminal(row.status);
+/** Records zeta's elapsed for a run as of this read; call it when a report row arrives. */
+export function anchorElapsed(row: AgentRun, at = performance.now()) {
+  const key = rowKey(row.sessionId, row.runId);
+  if (!ticking(row)) return void anchors.delete(key);
+  const last = anchors.get(key);
+  const seconds = row.elapsedSeconds!;
+  // a read a little behind the shown count only shows request latency or an older reply that came in late, so the
+  // count stays and never steps back. zeta ahead of the count, or far behind it (a restart banked the run's time and
+  // left out the downtime, also with the page open across the restart), is zeta's own number: show it
+  const projected = last && last.elapsed + (at - last.at) / 1000;
+  if (projected !== undefined && seconds <= projected && projected - seconds < latencyBand) return;
+  anchors.set(key, { elapsed: seconds, at });
+  // views in this second re-render with the new anchor, so none keeps the old count until the next tick
+  sample = { ...sample };
+  fire();
+}
+// under 1 s with no turn it says nothing, and with a turn "0s" reads as no work. a finished run shows zeta's value
+export const elapsed = (row: AgentRun, mono: number) => {
+  const anchor = ticking(row) ? anchors.get(rowKey(row.sessionId, row.runId)) : undefined;
+  const seconds = anchor ? anchor.elapsed + Math.max(0, mono - anchor.at) / 1000 : row.elapsedSeconds;
+  return seconds === undefined || seconds < 1 && !row.turnsUsed ? undefined : seconds < 1 ? "<1s" : duration(seconds);
+};
 // zeta's run catalog reports a run's step, turns, and tool calls, but no reply and no waiting state: those come
 // from the chat transcript's live sub-agent row for the run (fulcrum's sub_agent item, fed by child_run_events)
 const waiting: Record<string, AgentRun["waiting"]> = { waiting_approval: "needs approval", waiting_input: "needs input" };
