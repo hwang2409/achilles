@@ -15,6 +15,10 @@ const valid = [
   ["project", { ...project, status: "skipped-missing-env", trusted: true }, "skipped-missing-env"],
   ["effective", { ...user, status: "malformed", enabled: false, trusted: false, config: {} }, "malformed"],
 ] as const;
+test("accepts an unknown (null) tool count", () => {
+  expect(projectMcpList(list({ ...user, tool_count: null }), "user")?.[0]?.toolCount).toBeNull();
+});
+
 test.each(valid)("%s projects its concrete row (%j)", (scope, row, status) => {
   expect(projectMcpList(list(row), scope)).toEqual([{
     name: row.name, scope: row.scope, status, enabled: row.enabled, trusted: row.trusted, auth: "none", toolCount: 0,
