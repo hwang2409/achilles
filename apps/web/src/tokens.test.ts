@@ -45,7 +45,8 @@ const token = (name: string) => declared.filter((d) => d.name === name).map((d) 
 test("every token is written once: dark values live beside the light ones, not in a second copy", () => {
   const repeated = [...new Set(declared.map((d) => d.name).filter((name, i, all) => all.indexOf(name) !== i))];
   expect(repeated).toEqual([]);
-  expect(tokens).not.toContain("prefers-color-scheme");
+  // the system-scheme block only picks the side for auto; it holds no color
+  expect([...tokens.matchAll(/@media \(prefers-color-scheme: dark\) \{([^@]*?\})\s*\}/g)].map((m) => m[1].replace(/^[^{]*\{|\}$/g, "").trim())).toEqual(["color-scheme: dark;"]);
   expect(token("--g1-bg")).toEqual(["light-dark(#FFFFFF, #161616)"]);
 });
 

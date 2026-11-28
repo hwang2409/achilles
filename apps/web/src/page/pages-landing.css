@@ -35,10 +35,11 @@
 .pages-row { display: flex; align-items: stretch; border-bottom: 1px solid var(--g1-rule); }
 .pages-row > .pages-card { flex: 1 1 auto; min-width: 0; border-bottom: 0; }
 /* a fixed actions column, so the route and date columns line up on every row (home has no archive) */
-.pages-row-actions { flex: 0 0 152px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding-inline-end: var(--g1-space-4); }
+.pages-row-actions { flex: 0 0 152px; display: flex; align-items: center; justify-content: flex-end; gap: var(--g1-space-1); padding-inline-end: var(--g1-space-4); }
 .pages-row-actions button { color: var(--fulcrum-muted); }
-.pages-row-actions button:hover, .pages-row-actions button:focus-visible { color: var(--g1-fg); }
-.pages-row > .page-edit-error { margin: 0; padding: 0 16px 8px; }
+.pages-row-actions button:focus-visible { color: var(--g1-fg); }
+@media (hover: hover) and (pointer: fine) { .pages-row-actions button:hover { color: var(--g1-fg); } }
+.pages-row > .page-edit-error { margin: 0; padding: 0 var(--g1-space-4) var(--g1-space-2); }
 .pages-row { flex-wrap: wrap; }
 .pages-row > .page-edit-error { flex-basis: 100%; }
 .pages-archived { margin-top: var(--g1-space-4); }

@@ -1,7 +1,8 @@
 /* Graphite Sharp. The host owns chrome; Fulcrum still supplies syntax and ANSI colors.
    every color is written once as light-dark(light, dark); color-scheme picks the side: the system's for auto, fixed for g1-light and g1-dark.
    :root[...] outranks fulcrum's :root:not([data-fulcrum-theme]) color-scheme, so the achilles theme alone decides */
-:root:not([data-achilles-theme]), :root[data-achilles-theme="auto"], [data-achilles-theme="auto"] { color-scheme: light dark; }
+:root:not([data-achilles-theme]), :root[data-achilles-theme="auto"], [data-achilles-theme="auto"] { color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-achilles-theme]), :root[data-achilles-theme="auto"], [data-achilles-theme="auto"] { color-scheme: dark; } }
 :root[data-achilles-theme="g1-light"], [data-achilles-theme="g1-light"] { color-scheme: light; }
 :root[data-achilles-theme="g1-dark"], [data-achilles-theme="g1-dark"] { color-scheme: dark; }
 

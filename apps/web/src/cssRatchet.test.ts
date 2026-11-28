@@ -129,6 +129,7 @@ const baseline: Record<Category, Record<string, number>> = {
     "mcp/mcp.css": 26,
     "page-chat-header.css": 4,
     "page/EnumListbox.css": 7,
+    "page/page-archive.css": 2,
     "page/pages-landing.css": 5,
     "projects/projects.css": 23,
     "sessions/sessions.css": 28,
