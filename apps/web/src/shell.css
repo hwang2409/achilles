@@ -81,7 +81,7 @@
 /* baseline, not center: the title is a 40px-tall line and the crumb a text line, and centering them set the title 1px low */
 .chat-heading { display: flex; flex: 1 1 auto; align-items: baseline; gap: 8px; min-width: 0; font-size: 14px; }
 /* the crumb keeps its width (the title gives way first) until it passes 40% of the bar; its "/" is its own span, so it never clips */
-.chat-heading span { order: 0; flex: 0 0 auto; max-width: 40%; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); text-overflow: ellipsis; white-space: nowrap; }
+.chat-heading > span { order: 0; flex: 0 0 auto; max-width: 40%; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own
    allocated box (narrow viewport + sidebar + chat-actions leave .chat-heading under 160px) and
    visually overlap .chat-actions; ellipsis alone keeps the title readable at whatever room remains. */
@@ -194,7 +194,9 @@
   .menu-button { position: absolute; z-index: 2; top: 2px; left: 8px; display: block; width: 44px; height: 44px; font-size: 20px; }
   .skip-link:focus { top: 56px; }
   .chat-heading strong { max-width: calc(100vw - 150px); }
-  .chat-heading span { display: block; max-width: calc(100vw - 150px); margin-top: 2px; }
+  .chat-heading > span { display: block; max-width: calc(100vw - 150px); margin-top: 2px; }
+  /* the page crumb gives way before the chat title, so the page title (the middle part) takes the ellipsis */
+  .chat-heading > .page-crumb { flex-shrink: 1; }
   .chat-header { height: 48px; flex-basis: 48px; padding-inline: 60px 8px; }
   .chat-header > [role="alert"] { top: 48px; }
   .chat-heading strong[role="button"] { line-height: 44px; }
