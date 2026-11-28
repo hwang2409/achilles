@@ -471,8 +471,9 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   } : undefined;
   // the chat's own model; a new chat shows zeta's default, the one it will start with
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
-  // a chat held elsewhere has no known model (zeta answers session_settings only to its holder): show none, not the default
-  const needsDefaultModel = connected && client !== null && (empty !== null || (ready !== null && !ready.model && !ready.controlledElsewhere));
+  // a chat held elsewhere, or watched by an observer while zeta does not have it open, has no known model: show none, not the default
+  const unknownSettings = Boolean(ready?.controlledElsewhere || ready?.settingsUnknown);
+  const needsDefaultModel = connected && client !== null && (empty !== null || (ready !== null && !ready.model && !unknownSettings));
   useEffect(() => {
     if (!needsDefaultModel) return;
     let live = true;
@@ -480,10 +481,10 @@ export function AgentSurface({ connection, childControls, childSend, client, con
     return () => { live = false; };
   }, [client, needsDefaultModel]);
   const serverForcesAsk = (ready ?? empty)?.serverApprovalMode === "ask";
-  const composerModes = activePage && <ComposerModes model={ready?.controlledElsewhere ? null : ready?.model ?? defaultModel}
+  const composerModes = activePage && <ComposerModes model={unknownSettings ? null : ready?.model ?? defaultModel}
     create={createMode && { on: createMode.enabled, toggle: createMode.available ? createMode.toggle : undefined, busy: createMode.pending ? "saving…" : undefined,
       reason: !chatCanWrite ? chatReadOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined }}
-    approval={{ on: ready ? activePage.approval_mode === "allow" : active.build.approvalMode === "allow", toggle: chatCanWrite ? active.toggleApprovalMode : undefined,
+    approval={ready?.settingsUnknown ? undefined : { on: ready ? activePage.approval_mode === "allow" : active.build.approvalMode === "allow", toggle: chatCanWrite ? active.toggleApprovalMode : undefined,
       reason: !chatCanWrite ? chatReadOnlyReason : serverForcesAsk ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
       busy: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
       error: active.approvalChange?.error }} />;

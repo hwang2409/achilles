@@ -16,7 +16,13 @@ from pathlib import Path
 from typing import Any
 
 _BUILD_IMAGE = "oven/bun@sha256:87416c977a612a204eb54ab9f3927023c2a3c971f4f345a01da08ea6262ae30e"
-_LOCAL_SPEC = re.compile(r"^(?:file|link):|^(?:/|[A-Za-z]:[\\/])")
+# A registry range or dist-tag: no "/", ":", "#" or "@", so no url, git, github, path or alias.
+# A leading "." or a tarball suffix makes npm-style resolvers read it as a local path.
+_RANGE = r"(?![.\s])(?!.*\.(?:tgz|tar|tar\.gz)$)[\w.^~<>=|*+ -]+"
+# A package name: bun joins it onto the registry url, where "\\" would act as "//" (another host).
+# Uppercase stays allowed for legacy registry names such as JSONStream.
+_NAME = re.compile(r"(?:@[a-zA-Z0-9][\w.-]*/)?[a-zA-Z0-9][\w.-]*", re.ASCII)
+_REGISTRY_SPEC = re.compile(rf"npm:{_NAME.pattern}(?:@{_RANGE})?|{_RANGE}", re.ASCII)
 _MAX_RESULT_BYTES = 16 * 1024 * 1024
 _MAX_DIAGNOSTIC_BYTES = 16 * 1024
 _STEP_TIMEOUT_SECONDS = 180
@@ -88,6 +94,13 @@ def _run_container(
                 "host.docker.internal:127.0.0.1",
                 "--user",
                 f"{os.getuid()}:{os.getgid()}",
+                # package scripts run here: bound forks and memory, and drop root powers.
+                # no --cpus: docker refuses a value above the host cpu count (exit 125)
+                "--pids-limit=256",
+                "--memory=1g",
+                "--memory-swap=1g",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges",
                 *mounts,
                 "--workdir=/workspace",
                 "--env=HOME=/tmp/home",
@@ -297,9 +310,12 @@ def build_page(
         for k, v in dependencies.items()
     ):
         raise PageBuildError("package.json:1:1: dependencies must be a string map")
-    local = next((value for value in dependencies.values() if _LOCAL_SPEC.match(value)), None)
-    if local is not None:
-        raise PageBuildError(f"package.json:1:1: local dependency paths are not allowed: {local}")
+    name = next((k for k in dependencies if not _NAME.fullmatch(k)), None)
+    if name is not None:
+        raise PageBuildError(f"package.json:1:1: invalid dependency name: {name}")
+    spec = next((v for v in dependencies.values() if not _REGISTRY_SPEC.fullmatch(v)), None)
+    if spec is not None:
+        raise PageBuildError(f"package.json:1:1: only registry dependencies are allowed: {spec}")
     docker = shutil.which("docker")
     if docker is None:
         raise PageBuildError(
@@ -369,14 +385,10 @@ def _build(
     docker: str, root: Path, source: str, package: dict[str, Any], lockfile: str | None
 ) -> dict[str, Any]:
     workspace = Path(tempfile.mkdtemp(prefix="page-build-", dir=root / "build-cache")).resolve()
-    # a saved lockfile names its own download sources, so it gets a cache no other build reads
-    if lockfile is None:
-        package_cache = root / "package-cache"
-        package_cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-    else:
-        package_cache = Path(f"{workspace}-cache")
-        package_cache.mkdir(mode=0o700)
+    # bun trusts cached packages on reuse, so a cache one page could write is never shared
+    package_cache = Path(f"{workspace}-cache")
     try:
+        package_cache.mkdir(mode=0o700)
         (workspace / "src").mkdir()
         (workspace / "src/Page.tsx").write_text(source, encoding="utf-8")
         (workspace / "package.json").write_text(
@@ -406,5 +418,4 @@ def _build(
         }
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
-        if lockfile is not None:
-            shutil.rmtree(package_cache, ignore_errors=True)
+        shutil.rmtree(package_cache, ignore_errors=True)

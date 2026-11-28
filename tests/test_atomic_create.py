@@ -104,7 +104,7 @@ def creation_client(monkeypatch, tmp_path):
     store = PageStore(root)
     store.set_create_mode("home", True)
     app = web.create_app()
-    with TestClient(app, client=("127.0.0.1", 1234)) as client:
+    with TestClient(app, client=("127.0.0.1", 1234), base_url="http://127.0.0.1") as client:
         yield root, store, client, initialize(client, store.ensure_credential("home"))
 
 

@@ -527,3 +527,32 @@ test("rendered_after_change ignores a write and render on another page", () => {
 test("rendered_after_change needs text", () => {
   expect(() => validateTask({ ...task, checks: [{ id: "rendered", type: "rendered_after_change", page: "p" }] })).toThrow("needs text");
 });
+
+const clickStep = (id: string, name: string) => ({ id, kind: "page_action", page: "p", chat: "chat-a", click: { role: "button", name } });
+const actionTask = { ...task, steps: [...task.steps, clickStep("done-alpha", "Done Alpha")] };
+
+test("page_action steps come after every other step and name one button", () => {
+  expect(validateTask(actionTask).steps[1].click).toEqual({ role: "button", name: "Done Alpha" });
+  expect(() => validateTask({ ...actionTask, steps: [clickStep("done-alpha", "Done Alpha"), ...task.steps] })).toThrow("page_action must come after every model step");
+  expect(() => validateTask({ ...actionTask, steps: [...actionTask.steps, { id: "w", kind: "user_write", page: "p", chat: "form", tool: "update_x", arguments: { record_id: "a" } }] })).toThrow("page_action must come after every model step");
+  expect(() => validateTask({ ...actionTask, steps: [...task.steps, { ...clickStep("c", "Go"), click: undefined }] })).toThrow("a page_action needs one");
+  expect(() => validateTask({ ...actionTask, steps: [...task.steps, { ...clickStep("c", "Go"), click: { role: "link", name: "Go" } }] })).toThrow('click needs role "button"');
+  expect(() => validateTask({ ...task, steps: [{ ...task.steps[0], click: { role: "button", name: "Go" } }] })).toThrow("click goes on a page_action step");
+});
+
+test("a page_action passes only when its click wrote through the page bridge", () => {
+  const graded = (row?: Record<string, unknown>) => gradeTask(actionTask as never, { pages: [{ id: "home", alias: "p" }], ...(row ? { page_actions: [row] } : {}) });
+  const row = { step: "done-alpha", page_id: "home", role: "button", name: "Done Alpha", clicked: true, status: 200 };
+  expect(graded(row).pass, "the click updated a record").toBe(true);
+  const failures = [
+    [undefined, "the page action did not run"],
+    [{ ...row, clicked: false, status: null, reason: 'no button named "Done Alpha" in the page' }, 'no button named "Done Alpha" in the page'],
+    [{ ...row, status: null }, "the click made no record write through the page bridge"],
+    [{ ...row, status: 409 }, "the page bridge write failed (409)"],
+  ] as const;
+  for (const [actual, reason] of failures) {
+    const result = graded(actual);
+    expect(result.pass, reason).toBe(false);
+    expect(result.checks.find(check => check.id === "page_action:done-alpha")?.reason).toBe(reason);
+  }
+});
