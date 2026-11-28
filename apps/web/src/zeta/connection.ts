@@ -1,5 +1,6 @@
 // adapted from gamma@6cd69671 src/connection.ts
-import { createClient, webSocketTransport, ZetaError, type ZetaClient, type ZetaDiscovery, type ZetaRole } from "@fulcrum/zeta";
+import { ContentReadError, createClient, webSocketTransport, ZetaError, type ZetaClient, type ZetaDiscovery, type ZetaRole } from "@fulcrum/zeta";
+import type { LoadMedia } from "@fulcrum/react";
 import { shellHeaders } from "../shell";
 import { ACCOUNT_LIST_IDLE_FEATURE } from "./accounts";
 import { IMAGE_FEATURE } from "../composer/images";
@@ -100,13 +101,24 @@ export type Connection = {
 };
 
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
+// with it, zeta's history keeps a sent image as a handle the page reads back in chunks, not as a bare file row
+export const CONTENT_READ_FEATURE = "content_read";
+/** The most bytes one history image may read; zeta's own send cap is 512 KiB, so only images from other clients reach it. */
+export const HISTORY_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Fulcrum's `loadMedia` for history images: reads every `content_read` chunk into one blob of zeta's media type, up to
+ * the cap. A gone image rejects with code "not_available", the field fulcrum reads to say "image no longer available". */
+export const historyImageLoader = (client: ZetaClient | null): LoadMedia | undefined => client && supportsFeature(client, CONTENT_READ_FEATURE)
+  ? (block, signal) => client.readContent(block.source.key, { signal, maxBytes: HISTORY_IMAGE_MAX_BYTES })
+    .catch((error: unknown) => { throw error instanceof ContentReadError ? Object.assign(error, { code: error.kind }) : error; })
+  : undefined;
 
 /** A read zeta refused (-32003) because this tab fell back to observer: zeta was full when the tab connected. */
 export const observerRefused = (client: unknown, error: unknown) => (client as { authority?: unknown } | null)?.authority === "observer" && (error as { code?: unknown } | null)?.code === -32003;
 // the banner says what to do; a page body says only why it shows nothing
 export const OBSERVER_READ_REASON = "this tab cannot read this while zeta is full.";
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "session_park", "turn_reconnect", "tool_approval_origin", "serve_observers", "multi_controller", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "session_history_backward", "list_sessions_paging", "projects", "projects-memory-v2", "project_writes_v1", "state_read_v1", "agent_run_catalog_v1", "child_runs", "child_run_control_v1", "child_run_history", "child_run_events", "home_settings_v1", "mcp_management_v1", ACCOUNT_LIST_IDLE_FEATURE, IMAGE_FEATURE, "path_completion", "model_input_ids", "child_recovery", "run_work"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "session_park", "turn_reconnect", "tool_approval_origin", "serve_observers", "multi_controller", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "session_history_backward", "list_sessions_paging", "projects", "projects-memory-v2", "project_writes_v1", "state_read_v1", "agent_run_catalog_v1", "child_runs", "child_run_control_v1", "child_run_history", "child_run_events", "home_settings_v1", "mcp_management_v1", ACCOUNT_LIST_IDLE_FEATURE, IMAGE_FEATURE, "path_completion", "model_input_ids", "child_recovery", CONTENT_READ_FEATURE, "run_work"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 

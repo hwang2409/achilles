@@ -306,7 +306,7 @@ function SessionTranscript({ row, reader }: { row: SessionRow; reader?: Sessions
       {data.omitted > 0 && <p className="sessions-notice" role="status">{data.omitted} malformed {data.omitted === 1 ? "row" : "rows"} omitted</p>}
       {data.restarted && <p className="sessions-notice" role="status">transcript changed · started from a new snapshot</p>}
       {!!data.next && <button className="sessions-more" type="button" disabled={!reader || refreshing} onClick={() => previous === data ? refresh() : setPrevious(data)}>{data.next.kind === "forward" ? "load more messages" : "load older messages"}</button>}
-      {data.rows.length ? <div className="transcript sessions-timeline"><RunProvider store={store}><Timeline /></RunProvider></div> : <ModuleState kind="empty" title="no messages" />}
+      {data.rows.length ? <div className="transcript sessions-timeline"><RunProvider store={store} loadMedia={reader?.loadMedia}><Timeline /></RunProvider></div> : <ModuleState kind="empty" title="no messages" />}
     </>}
   </div>;
 }

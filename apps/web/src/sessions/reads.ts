@@ -1,5 +1,5 @@
 import { fromZetaHistory, type ZetaClient } from "@fulcrum/zeta";
-import { supportsFeature, supportsRequest } from "../zeta/connection";
+import { historyImageLoader, supportsFeature, supportsRequest } from "../zeta/connection";
 import { HISTORY_READ_FEATURE, readOtherHistory, rpcCode } from "../zeta/historyRead";
 
 const paging = "list_sessions_paging";
@@ -190,6 +190,8 @@ export function createSessionsReader(client: ZetaClient, advertised = (method: s
   let lastOverlay: { items: Map<string, SessionState>; reportedAt: number } | undefined;
   return {
     transcriptMode,
+    // the history this client reads carries image handles once content_read is negotiated
+    loadMedia: historyImageLoader(client),
     async catalog(signal: AbortSignal) {
       const mine = ++generation;
       const [durable, overlay] = await Promise.all([
