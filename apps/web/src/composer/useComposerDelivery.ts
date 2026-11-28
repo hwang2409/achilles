@@ -21,6 +21,7 @@ import {
 } from "./composer-machine";
 import { chatQueues } from "./chatQueues";
 import { parseComposerInput } from "./commands";
+import { readImages, type ComposerImage } from "./images";
 import type { CompletePaths } from "./pathCompletion";
 
 const attempt = (action: () => unknown) =>
@@ -47,12 +48,14 @@ export type ComposerAdapterProps = ComposerProps & {
   controls?: ReactNode;
   /** read-only for a moment (a swap is pending): the reason shows and send shows as off */
   held?: boolean;
+  /** zeta takes images (`send_images` with a delivery id): a paste or drop of an image adds it to the message */
+  images?: boolean;
   /** `@path` completion in the chat's working directory; absent when this zeta or chat cannot complete paths */
   completePaths?: CompletePaths;
 };
 
-/** `deliveryId`: send with this id (a retry of a held row), not a new one */
-export type SendIntent = ComposerIntent & { deliveryId?: string };
+/** `deliveryId`: send with this id (a retry of a held row), not a new one; `images`: send them with the text */
+export type SendIntent = ComposerIntent & { deliveryId?: string; images?: ComposerImage[] };
 
 export type DeliveryOptions = ComposerProps & {
   onDraftChange: (text: string) => void;
@@ -68,6 +71,9 @@ export type ComposerDelivery = {
   update(options: DeliveryOptions): void;
   sync(state: ComposerProps["state"], defaultValue?: string): void;
   edit(draft: string): void;
+  /** Reads pasted or dropped files into the message's images, or shows why it cannot take them. */
+  addImages(files: File[]): Promise<void>;
+  removeImage(index: number): void;
   submit(): Promise<void>;
   retry(id: number): Promise<void>;
   /** zeta's transcript shows the prompt sent with this delivery id (in flight now, or a row an earlier page load kept). */
@@ -102,8 +108,8 @@ export function createComposerDelivery(options: DeliveryOptions, rows: Omit<Queu
   let mounts = 0;
   const turnRunning = () => current.isTurnRunning?.() ?? current.state === "steerable";
 
-  const deliver = async ({ attempt: sendAttempt, text, steer, deliveryId: reused }: Extract<ComposerEffect, { type: "submit" }>) => {
-    const intent: SendIntent = reused ? { steer, deliveryId: reused } : { steer };
+  const deliver = async ({ attempt: sendAttempt, text, steer, images, deliveryId: reused }: Extract<ComposerEffect, { type: "submit" }>) => {
+    const intent: SendIntent = { steer, ...(reused ? { deliveryId: reused } : {}), ...(images ? { images } : {}) };
     try {
       await attempt(() => current.onSubmit(text, intent, (deliveryId) => apply({ type: "track", attempt: sendAttempt, deliveryId })));
       apply({ type: "confirm", attempt: sendAttempt });
@@ -141,6 +147,14 @@ export function createComposerDelivery(options: DeliveryOptions, rows: Omit<Queu
     },
     edit(draft) {
       apply({ type: "edit", draft });
+    },
+    async addImages(files) {
+      if (!files.length) return;
+      const read = await readImages(files, model.images);
+      apply("error" in read ? { type: "image-error", message: read.error } : { type: "add-images", images: read.images });
+    },
+    removeImage(index) {
+      apply({ type: "remove-image", index });
     },
     async submit() {
       apply({ type: "state", state: current.state });
@@ -254,10 +268,12 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
   useEffect(() => () => options.onActivity?.({ sending: false, queued: 0, failed: false, held: false }), [options.onActivity]);
 
   const edit = useCallback((draft: string) => owner.edit(draft), [owner]);
+  const addImages = useCallback((files: File[]) => void owner.addImages(files), [owner]);
+  const removeImage = useCallback((index: number) => owner.removeImage(index), [owner]);
   const submit = useCallback(() => void owner.submit(), [owner]);
   const stop = useCallback(() => void owner.stop(), [owner]);
   const retry = useCallback((id: number) => void owner.retry(id), [owner]);
   const restore = useCallback((id: number) => owner.restore(id), [owner]);
   const cancel = useCallback((id?: number) => owner.cancel(id), [owner]);
-  return { model, edit, submit, stop, retry, restore, cancel, getModel: owner.getModel };
+  return { model, edit, addImages, removeImage, submit, stop, retry, restore, cancel, getModel: owner.getModel };
 }

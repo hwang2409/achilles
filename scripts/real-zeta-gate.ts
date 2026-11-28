@@ -986,6 +986,34 @@ with _database() as db:
   await gateWait.playwright(page.getByText("park b ready", { exact: true }), "waitFor", { timeout: 20_000 });
   const parkB = new URL(page.url()).searchParams.get("chat");
   if (!parkB || parkB === first) throw new Error("the new chat is not named in the url");
+  // send_images_delivery_id: a pasted image shows as a chip, goes out with the text as one send_images with a delivery
+  // id, and zeta's echo names the same id and the stored image (a synthetic 1x1 png)
+  const hello = requests().find((frame) => Array.isArray(frame.result?.capabilities?.features));
+  if (!hello?.result.capabilities.features.includes("send_images_delivery_id") || !hello.result.capabilities.requests?.includes("send_images"))
+    throw new Error("zeta did not negotiate send_images_delivery_id and send_images");
+  const framesBeforeImage = requests().length;
+  await field.evaluate((node) => {
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], "gate.png", { type: "image/png" }));
+    node.dispatchEvent(new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true }));
+  });
+  await gateWait.playwright(page.getByRole("img", { name: "gate.png" }), "waitFor", { timeout: 20_000 });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "image-chip-1440x900.png") });
+  await field.fill("image paste");
+  await field.press("Enter");
+  await gateWait.playwright(page.getByText("image received", { exact: true }), "waitFor", { timeout: 20_000 });
+  const imageFrames = requests().slice(framesBeforeImage);
+  const imageSend = imageFrames.find((frame) => frame.method === "send_images");
+  const imageId = imageSend?.params?.delivery_id;
+  if (imageSend?.params?.session_id !== parkB || imageSend.params.text !== "image paste" || typeof imageId !== "string" || imageSend.params.images?.[0]?.name !== "gate.png")
+    throw new Error(`the pasted image did not go out as one send_images with a delivery id: ${redact(JSON.stringify(imageSend?.params ?? null).slice(0, 400))}`);
+  if (imageFrames.some((frame) => frame.method === "send" || frame.method === "steer")) throw new Error("the image message also went out as a plain send");
+  if (imageFrames.find((frame) => frame.id === imageSend.id && frame.result)?.result?.accepted !== true) throw new Error("zeta did not accept the send_images request");
+  const imageEcho = imageFrames.find((frame) => frame.method === "event" && frame.params?.event === "user_message" && frame.params?.delivery_id === imageId);
+  if (imageEcho?.params?.attachments?.[0]?.name !== "gate.png") throw new Error(`zeta's echo did not carry the delivery id and the image: ${redact(JSON.stringify(imageEcho?.params ?? null))}`);
+  if (await page.getByRole("img", { name: "gate.png" }).count()) throw new Error("the image chip stayed in the composer after send");
+  console.log(`image paste: send_images ${imageId} accepted, echoed with gate.png`);
   // a reload takes the parked chat back from zeta's grace (resume with its page binding) before it opens the shown chat
   const framesBeforeParkReload = requests().length;
   await gateWait.playwright(page, "reload");
