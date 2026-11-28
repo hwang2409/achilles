@@ -1,0 +1,233 @@
+{
+  "initial": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home",
+        "route": "/",
+        "active_code_revision": 1
+      }
+    ],
+    "tools": [],
+    "assignments": [],
+    "records": []
+  },
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home",
+        "route": "/",
+        "active_code_revision": 1
+      },
+      {
+        "id": "review",
+        "alias": "review",
+        "route": "/run-review",
+        "active_code_revision": 1
+      }
+    ],
+    "tools": [
+      {
+        "id": "tl-add",
+        "page_id": "review",
+        "name": "add_annotation"
+      },
+      {
+        "id": "tl-list",
+        "page_id": "review",
+        "name": "list_annotations"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "review",
+        "id": "annotation-1",
+        "collection": "annotations",
+        "data": {
+          "run_id": "run-002",
+          "verdict": "regressed"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "create-review",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_page",
+        "success": true,
+        "arguments": {
+          "route": "/run-review"
+        }
+      },
+      {
+        "id": "create-add-tool",
+        "page_id": "review",
+        "chat_id": "review-chat",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "create-list-tool",
+        "page_id": "review",
+        "chat_id": "review-chat",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "add-annotation",
+        "page_id": "review",
+        "chat_id": "review-chat",
+        "tool": "achilles__add_annotation",
+        "success": true,
+        "arguments": {
+          "run_id": "run-002",
+          "verdict": "regressed"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "create-review",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {
+          "page_id": "review",
+          "route": "/run-review"
+        }
+      },
+      {
+        "call_id": "add-annotation",
+        "page_id": "review",
+        "chat_id": "review-chat",
+        "tool": "achilles__add_annotation",
+        "success": true,
+        "data": {
+          "record_id": "annotation-1",
+          "revision": 1,
+          "run_id": "run-002",
+          "verdict": "regressed"
+        }
+      }
+    ],
+    "errors": [],
+    "browser": [
+      {
+        "page_id": "review",
+        "text": "Run Review\nrun-002\tregressed"
+      }
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home",
+        "route": "/",
+        "active_code_revision": 1
+      },
+      {
+        "id": "review",
+        "alias": "review",
+        "route": "/run-review",
+        "active_code_revision": 1
+      }
+    ],
+    "tools": [
+      {
+        "id": "tl-add",
+        "page_id": "review",
+        "name": "add_annotation"
+      },
+      {
+        "id": "tl-list",
+        "page_id": "review",
+        "name": "list_annotations"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "review",
+        "id": "annotation-1",
+        "collection": "annotations",
+        "data": {
+          "run_id": "run-002",
+          "verdict": "regressed"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "create-review",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_page",
+        "success": true,
+        "arguments": {
+          "route": "/run-review"
+        }
+      },
+      {
+        "id": "create-add-tool",
+        "page_id": "review",
+        "chat_id": "review-chat",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "create-list-tool",
+        "page_id": "review",
+        "chat_id": "review-chat",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "add-annotation",
+        "page_id": "review",
+        "chat_id": "review-chat",
+        "tool": "achilles__add_annotation",
+        "success": true,
+        "arguments": {
+          "run_id": "run-002",
+          "verdict": "regressed"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "create-review",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {
+          "page_id": "review",
+          "route": "/run-review"
+        }
+      },
+      {
+        "call_id": "add-annotation",
+        "page_id": "review",
+        "chat_id": "review-chat",
+        "tool": "achilles__add_annotation",
+        "success": true,
+        "data": {
+          "record_id": "annotation-1",
+          "revision": 1,
+          "run_id": "run-002",
+          "verdict": "regressed"
+        }
+      }
+    ],
+    "errors": [],
+    "browser": [
+      {
+        "page_id": "review",
+        "text": "Run Review\nno annotations yet"
+      }
+    ]
+  }
+}
