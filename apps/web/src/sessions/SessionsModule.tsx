@@ -65,10 +65,12 @@ function StateTag({ state }: { state: SessionRow["status"] }) {
   return <span className="sessions-state" data-status={state}>{state === "approval" ? "needs you" : state}</span>;
 }
 
-export function SessionsModule({ client, connecting, retry, newChat, chats, continueSession }: {
+export function SessionsModule({ client, connecting, retry, newChat, chats, continueSession, advertised }: {
   client: ZetaClient | null; connecting: boolean; retry: () => void; newChat: () => void; chats: readonly Chat[]; continueSession: ContinueSession;
+  /** which request methods zeta advertised; tests inject it, the app uses the negotiated hello */
+  advertised?: (method: string) => boolean;
 }) {
-  const reader = useMemo(() => client ? createSessionsReader(client) : undefined, [client]);
+  const reader = useMemo(() => client ? createSessionsReader(client, advertised) : undefined, [client, advertised]);
   const { data, error, refreshing, refresh } = useRead(reader?.catalog, 30000);
   const [{ id, view, invalid }, setSelection] = useState(selection);
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
@@ -159,7 +161,8 @@ function SessionCatalog({ result, online, id, owned, search, rowRefs, follow }: 
       <ul className="sessions-rows">{shown.map((one) => <li key={one.id}>
         <a className="sessions-row" ref={(node) => { if (node) rowRefs.current.set(one.id, node); else rowRefs.current.delete(one.id); }}
           href={href(one.id)} aria-current={one.id === id ? "page" : undefined} onClick={(event) => follow(event, href(one.id))}>
-          <span><strong title={one.title}>{one.title}</strong><small>{[one.project, short(one.id)].filter(Boolean).join(" · ")}</small></span>
+          <span><strong title={one.title}>{one.title}</strong><small>{!!one.state?.attention && <><span className="sessions-row-attention">{one.state.attention} open<span className="sessions-visually-hidden">
+            {one.state.attention === 1 ? " decision" : " decisions"}</span></span> · </>}{[one.project, short(one.id)].filter(Boolean).join(" · ")}</small></span>
           <span>{owned.has(one.id) ? "achilles" : ""}</span><StateTag state={one.status} />
           <span>{one.updated && <time dateTime={one.updated}>{timeLabel(one.updated)}</time>}</span>
         </a>
@@ -208,7 +211,7 @@ function SessionDetail({ row, reader, view, owned, follow, continueSession }: {
         ["project", row.project === null ? "no project" : row.project], ["parent session", row.parent || undefined],
         ["model", [row.model, row.provider].filter(Boolean).join(" · ") || undefined], ["profile", snapshot?.profile], ["working directory", row.cwd],
         ["started · last", [row.created, row.updated].filter((v): v is string => !!v).map((v) => timeLabel(v)).join(" · ") || undefined],
-        ["child agents", snapshot?.children], ["background tasks", snapshot?.tasks], ["attention", snapshot && (reader?.attention
+        ["child agents", snapshot?.children], ["background tasks", snapshot?.tasks], ["attention", snapshot && (reader?.attention && snapshot.attention > 0
           ? <a className="sessions-attention-link" href={attentionHref} onClick={(event) => follow(event, attentionHref)}>{snapshot.attention} open</a> : snapshot.attention)], ["first message", row.preview],
       ]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       {reader && mode.data && !mode.error ? <a className="sessions-transcript-action sessions-transcript-secondary" href={transcriptHref} onClick={(event) => follow(event, transcriptHref)}>read transcript</a>

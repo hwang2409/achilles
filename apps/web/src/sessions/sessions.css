@@ -65,6 +65,8 @@
 .sessions-timeline.transcript { overflow: visible; }
 .sessions-more { margin-block: 8px; }
 .sessions-attention-link { color: var(--fulcrum-accent); font-variant-numeric: tabular-nums; text-decoration: underline; text-decoration-color: var(--g1-rule); text-underline-offset: 3px; }
+.sessions-row-attention { color: var(--fulcrum-warn); }
+.sessions-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sessions-attention-link:hover { text-decoration-color: currentColor; }
 .sessions-attention-group { margin-bottom: var(--g1-space-5); }
 .sessions-attention-group h3 { margin: 0; font-size: inherit; font-weight: 600; }
