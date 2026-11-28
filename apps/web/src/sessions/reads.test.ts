@@ -111,3 +111,47 @@ test("a stale history cursor discards the partial walk and retries the head only
   expect(calls.filter(([name]) => name === "session_history_read").map(([, p]) => p.cursor)).toEqual([undefined, "cursor", undefined, "cursor", undefined]);
   expect(calls.some(([name]) => name === "resume")).toBe(false);
 });
+
+// zeta's state_attention lists hold the project's whole queue; "a" owns 2 decisions and 1 deferred item, "b" one decision
+const item = (id: string, session_id: string, kind: string) => ({ attention_id: id, project_id: null, session_id, kind,
+  requires_action: kind === "decision" || kind === "deferred", status: "open", title: `synthetic ${kind} ${id}`, created_ns: 1_800_000_000_000_000_000, updated_ns: 1 });
+const queue = { action: [item("d1", "a", "decision"), item("o1", "b", "decision"), item("d2", "a", "deferred")], fyi: [item("n1", "a", "answer"), item("n2", "a", "decided")] };
+function attentionZeta(open: number, lists: Record<string, unknown[]> = queue) {
+  return serve((method, p) => method === "list_sessions" ? { sessions: [row("a"), row("b")], next_offset: null }
+    : method === "state_sessions" ? { items: [{ ...state("a", "idle"), attention_open: open }], next_cursor: null }
+    : method === "state_attention" ? lists[String(p.list)] && !p.cursor ? { items: lists[String(p.list)], next_cursor: null, as_of_ns: 1 } : Promise.reject({ code: -32602 })
+    : Promise.reject({ code: -32601 }));
+}
+
+test("the attention badge counts exactly the listed open decisions and deferred items", async () => {
+  const { reader, calls } = attentionZeta(2);
+  const [a] = (await reader.catalog(signal())).items;
+  const listed = await reader.attention?.(a!, signal());
+  expect([a!.state?.attention, listed?.decisions.length]).toEqual([2, 2]);
+  expect(calls.filter(([method]) => method === "state_attention").map(([, p]) => p)).toEqual([
+    { list: "action", cursor: null, limit: 200 }, { list: "fyi", cursor: null, limit: 200 },
+  ]);
+});
+
+test("decisions and FYI notes come from zeta's split lists and stay apart", async () => {
+  const { reader } = attentionZeta(2);
+  const [a] = (await reader.catalog(signal())).items;
+  const listed = await reader.attention?.(a!, signal());
+  expect([listed?.decisions.map(({ id, kind }) => [id, kind]), listed?.notes.map(({ id, kind }) => [id, kind])]).toEqual([
+    [["d1", "decision"], ["d2", "deferred"]], [["n1", "answer"], ["n2", "decided"]],
+  ]);
+  // a note in the action list (or the reverse) is malformed, not a decision
+  const swapped = attentionZeta(0, { action: [item("n1", "a", "answer")], fyi: [item("d1", "a", "decision")] });
+  const [b] = (await swapped.reader.catalog(signal())).items;
+  expect(await swapped.reader.attention?.(b!, signal())).toMatchObject({ decisions: [], notes: [], omitted: 2 });
+});
+
+test("an older zeta has no attention place", async () => {
+  const offered = serve(() => null, ["state_read_v1"]).reader.attention;
+  const older = createSessionsReader({ features: ["state_read_v1"], request: async () => null } as unknown as ZetaClient, (method) => method !== "state_attention").attention;
+  expect([typeof offered, typeof older]).toEqual(["function", "undefined"]);
+  // a zeta before the split refuses the list param
+  const { reader } = attentionZeta(0, {});
+  const [a] = (await reader.catalog(signal())).items;
+  expect(await reader.attention?.(a!, signal()).then(() => "listed", readError)).toBe("the attention list needs a newer zeta");
+});
