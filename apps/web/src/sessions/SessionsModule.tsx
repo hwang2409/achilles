@@ -61,6 +61,15 @@ function useRead<T>(load: ((signal: AbortSignal) => Promise<T>) | undefined, int
   return { data, error, refreshing, refresh: () => refresh((n) => n + 1) };
 }
 
+// never-sent achilles chats, hidden here as in the sidebar; a failed read hides nothing
+async function loadUnsent(signal: AbortSignal) {
+  try {
+    const response = await fetch("/api/chats/unsent", { cache: "no-store", signal });
+    const ids: unknown = response.ok ? (await response.json()).session_ids : undefined;
+    return new Set(Array.isArray(ids) ? ids.filter((one): one is string => typeof one === "string") : []);
+  } catch { return new Set<string>(); }
+}
+
 function StateTag({ state }: { state: SessionRow["status"] }) {
   return <span className="sessions-state" data-status={state}>{state === "approval" ? "needs you" : state}</span>;
 }
@@ -72,6 +81,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
 }) {
   const reader = useMemo(() => client ? createSessionsReader(client, advertised) : undefined, [client, advertised]);
   const { data, error, refreshing, refresh } = useRead(reader?.catalog, 30000);
+  const unsent = useRead(loadUnsent, 30000).data;
   const [{ id, view, invalid }, setSelection] = useState(selection);
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
   const search = useRef<HTMLInputElement>(null);
@@ -116,7 +126,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
     </div> : <>
       {!client && <p className="sessions-notice" role="status">zeta is offline · showing data from {stamp(data.reportedAt)} <button type="button" onClick={retry}>retry now</button></p>}
       <div className="sessions-split" data-detail={!!id || invalid}>
-        <SessionCatalog result={{ data, error, refreshing, refresh }} online={!!client} id={id} owned={owned} search={search} rowRefs={rowRefs} follow={follow} />
+        <SessionCatalog result={{ data, error, refreshing, refresh }} online={!!client} id={id} owned={owned} unsent={unsent} search={search} rowRefs={rowRefs} follow={follow} />
         <DetailPane id={id} row={row} view={view} invalid={invalid} complete={data.complete} reader={reader}
           owned={!!row && owned.has(row.id)} detail={detail} follow={follow} continueSession={continueSession} />
       </div>
@@ -126,12 +136,12 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
 
 type Follow = (event: MouseEvent<HTMLAnchorElement>, url: string) => void;
 type CatalogResult = ReturnType<typeof useRead<Awaited<ReturnType<SessionsReader["catalog"]>>>>;
-function SessionCatalog({ result, online, id, owned, search, rowRefs, follow }: {
-  result: CatalogResult & { data: NonNullable<CatalogResult["data"]> }; online: boolean; id?: string; owned: Set<string>;
+function SessionCatalog({ result, online, id, owned, unsent, search, rowRefs, follow }: {
+  result: CatalogResult & { data: NonNullable<CatalogResult["data"]> }; online: boolean; id?: string; owned: Set<string>; unsent?: Set<string>;
   search: RefObject<HTMLInputElement | null>; rowRefs: RefObject<Map<string, HTMLAnchorElement>>; follow: Follow;
 }) {
   const { data, error, refreshing, refresh } = result;
-  const rows = data.items;
+  const rows = data.items.filter((one) => one.id === id || !!one.preview || !unsent?.has(one.id));
   const [query, setQuery] = useState("");
   const [projectFilter, setProject] = useState("any");
   const [statusFilter, setStatus] = useState("any");

@@ -413,6 +413,12 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         approval_count = await anyio.to_thread.run_sync(store.approval_count)
         return JSONResponse({"chats": rows, "next": next_cursor, "approval_count": approval_count})
 
+    async def unsent_chats(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        ids = await anyio.to_thread.run_sync(store.unsent_chat_ids)
+        return JSONResponse({"session_ids": ids})
+
     async def register_chat(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
@@ -708,6 +714,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             Route("/api/zeta/discovery", _discovery),
             Route("/api/pages", pages),
             Route("/api/chats", chats),
+            Route("/api/chats/unsent", unsent_chats),
             Route("/api/chats/{session_id}", patch_chat, methods=["PATCH"]),
             Route("/api/pages/{id}/chats", register_chat, methods=["POST"]),
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
