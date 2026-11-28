@@ -1,19 +1,19 @@
 .accounts-place { padding: var(--g1-page-padding); container-type: inline-size; }
-.accounts-place:focus { outline: none; }
 .account-rows { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--fulcrum-border); }
 .account-rows > li { display: grid; gap: 16px; padding: 16px; border-bottom: 1px solid var(--g1-rule); overflow-wrap: anywhere; }
 .account-identity h3 { font-size: 1em; margin: 0; }
 .account-identity p { display: flex; gap: 4px 12px; flex-wrap: wrap; margin: 6px 0 0; }
-.account-identity p, .account-usage p, .account-window[data-reset-passed="true"] > div { color: var(--fulcrum-muted); }
-[data-limited="true"] .account-availability { color: var(--g1-warn); }
+.account-identity p, .account-usage p, .account-window[data-stale="true"] > div { color: var(--fulcrum-muted); }
+[data-tone="warn"] .account-availability { color: var(--g1-warn); }
 .account-usage { display: grid; gap: 8px; }
 .account-usage p { margin: 0; }
-[data-available="false"] .account-availability, .account-usage [data-failed="true"] { color: var(--fulcrum-danger); }
+[data-tone="danger"] .account-availability, .account-usage .account-refresh-failed { color: var(--fulcrum-danger); }
 .account-window { display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
 .account-window > div { display: flex; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
-.account-window meter { width: 100%; height: 4px; accent-color: var(--g1-muted); }
+.account-window meter { width: 100%; height: 4px; accent-color: var(--g1-fg); }
 .account-window meter::-webkit-meter-bar { background: var(--fulcrum-border); border: 0; border-radius: 0; }
-.account-window meter::-webkit-meter-optimum-value { background: var(--g1-muted); }
+.account-window meter::-webkit-meter-optimum-value { background: var(--g1-fg); }
+.account-window[data-stale="true"] meter::-webkit-meter-optimum-value { background: var(--g1-muted); }
 @container (min-width: 35rem) {
   .account-rows > li { grid-template-columns: 1fr 1fr; gap: 32px; }
 }
@@ -33,7 +33,8 @@
 
 .account-stale { margin: var(--g1-space-2) 0; color: var(--g1-muted); font-size: inherit; }
 .account-window meter::-webkit-meter-suboptimum-value { background: var(--g1-warn); }
-.account-window meter::-moz-meter-bar { background: var(--g1-muted); }
+.account-window meter::-moz-meter-bar { background: var(--g1-fg); }
+.account-window[data-stale="true"] meter::-moz-meter-bar { background: var(--g1-muted); }
 .account-window meter:-moz-meter-sub-optimum::-moz-meter-bar { background: var(--g1-warn); }
 
 .account-switch-receipt:not(:has(time)) { display: none; }

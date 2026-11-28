@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
-import { ACCOUNT_LIST_IDLE_FEATURE, AccountReadError, OBSERVER_READ_REASON, readAccounts, supportsFeature, type Account, type Connection } from "../zeta";
+import { ACCOUNT_LIST_IDLE_FEATURE, AccountReadError, accountStatus, OBSERVER_READ_REASON, readAccounts, supportsFeature, type Account, type Connection } from "../zeta";
 import { Confirmation, reviewText, type ReviewText } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { loginIdentity, type createAccountLogin, type LoginTarget } from "./accountLogin";
@@ -19,48 +19,54 @@ type Props = {
 const startedReview = { status: "committed", receipt: reviewText("sign-in attempt checked") } as const;
 const resetTime = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hourCycle: "h23" });
 const percent = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
+const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 const windowLabel = (minutes: number) => minutes % 1440 === 0 ? `${minutes / 1440}d` : minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
+// Returning to the tab re-reads accounts at most this often.
+export const WAKE_READ_MS = 30_000;
 
-function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void }) {
-  // A window whose reset has passed shows old usage; re-render at the next reset so none reads as current.
-  const [now, setNow] = useState(Date.now);
-  const next = Math.min(...accounts.flatMap(({ usage }) => usage?.windows.map(({ resetsAt }) => resetsAt) ?? []).filter(time => time > now));
-  useEffect(() => {
-    if (!Number.isFinite(next)) return;
-    const timer = setTimeout(() => setNow(Date.now()), Math.min(next - Date.now(), 2 ** 31 - 1));
-    return () => clearTimeout(timer);
-  }, [next, now]);
-  return <>{accounts.some(({ usage }) => usage?.freshness === "stale") && <p className="account-stale">Some usage data may be out of date.</p>}<ul className="account-rows" aria-label={stale ? "last loaded accounts" : "model accounts"} data-stale={stale}>
-    {accounts.map(({ account, label, available, current, default: isDefault, usage }) => {
-      const limited = !!usage?.windows.some(({ usedPercent, resetsAt }) => usedPercent >= 100 && resetsAt > now);
-      return <li key={account} data-default={isDefault} data-available={available} data-limited={limited}>
+function ago(time: number, now: number) {
+  const minutes = Math.floor((now - time) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return relative.format(-minutes, "minute");
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? relative.format(-hours, "hour") : relative.format(-Math.floor(hours / 24), "day");
+}
+const Time = ({ at, children }: { at: number; children: string }) =>
+  <time dateTime={new Date(at).toISOString()} title={resetTime.format(at)}>{children}</time>;
+
+function staleBanner(stale: number, total: number) {
+  if (!stale) return null;
+  if (stale < total) return `Usage data for ${stale} of ${total} accounts may be out of date.`;
+  return total === 1 ? "Usage data may be out of date." : `Usage data for all ${total} accounts may be out of date.`;
+}
+
+function AccountRows({ accounts, now, stale, signIn }: { accounts: Account[]; now: number; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void }) {
+  const rows = accounts.map(account => ({ ...account, status: accountStatus(account, now) }));
+  const banner = staleBanner(rows.filter(({ status }) => status.windows.some(window => window.stale)).length, rows.length);
+  return <>{banner && <p className="account-stale">{banner}</p>}<ul className="account-rows" aria-label={stale ? "Last loaded accounts" : "Model accounts"} data-stale={stale}>
+    {rows.map(({ account, label, current, default: isDefault, usage, status }) => <li key={account} data-tone={status.tone}>
       <div className="account-identity">
         <h3>{account}</h3>
         <p>{label !== account.slice(account.indexOf(":") + 1) && <span>{label}</span>}
-          <span className="account-availability">{!available ? "needs sign-in" : limited ? "limit reached" : "available"}</span>
-          {isDefault && <span className="account-default">default</span>}
-          {current && <span>in use</span>}
+          <span className="account-availability">{status.label}</span>
+          {isDefault && <span className="account-default">Default</span>}
+          {current && <span>In use</span>}
         </p>
       </div>
       <div className="account-usage">
         {!usage && <p>Usage unavailable</p>}
-        {usage?.windows.map(({ kind, minutes, usedPercent, resetsAt }, index) => {
-          const passed = resetsAt <= now;
-          return <div className="account-window" key={`${kind}-${index}`} data-reset-passed={passed}>
+        {usage?.capturedAt != null && status.windows.map(({ kind, minutes, usedPercent, resetsAt, passed, stale }, index) =>
+          <div className="account-window" key={`${kind}-${index}`} data-stale={stale}>
             <div><span>{windowLabel(minutes)} window</span><span>{percent.format(usedPercent / 100)} used</span></div>
-            <meter high={passed ? undefined : 95} optimum={0} aria-label={`${account} ${windowLabel(minutes)} usage`} min={0} max={100} value={usedPercent} />
-            {passed
-              // capturedAt is null only for a usage with no windows.
-              ? <p>reset passed · last read <time dateTime={new Date(usage.capturedAt!).toISOString()}>{resetTime.format(usage.capturedAt!)}</time></p>
-              : <p>{usedPercent >= 100 && "limit reached · "}resets <time dateTime={new Date(resetsAt).toISOString()}>{resetTime.format(resetsAt)}</time></p>}
-          </div>;
-        })}
-        {usage?.refreshFailed && <p className="account-availability" data-failed="true">last usage refresh failed</p>}
+            <meter high={stale ? undefined : 95} optimum={0} aria-label={`${account} ${windowLabel(minutes)} usage`} min={0} max={100} value={usedPercent} />
+            <p>{passed ? "Reset passed" : <>Resets <time dateTime={new Date(resetsAt).toISOString()}>{resetTime.format(resetsAt)}</time></>}
+              {" · last read "}<Time at={usage.capturedAt}>{ago(usage.capturedAt, now)}</Time></p>
+          </div>)}
+        {usage?.error && <p className="account-refresh-failed">Usage refresh failed: {usage.error}</p>}
       </div>
-      {!available && signIn && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
+      {status.signIn && signIn && <button className="ui-button account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
         aria-label={`sign in again to ${account}`} onClick={event => signIn({ provider: account.startsWith("anthropic:") ? "claude" : "codex", account }, event.currentTarget)}>sign in again</button>}
-    </li>;
-    })}
+    </li>)}
   </ul></>;
 }
 
@@ -74,7 +80,16 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const [last, setLast] = useState<{ client: ZetaClient | null; accounts: Account[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const heading = useRef<HTMLDivElement>(null);
+  const place = useRef<HTMLDivElement>(null);
+  // The title belongs to ModuleFrame; focusing it on arrival keeps keyboard focus off <body>.
+  const focusTitle = () => {
+    const title = place.current?.closest(".module-frame")?.querySelector("h1");
+    if (!title) return;
+    title.tabIndex = -1;
+    title.focus();
+  };
+  useEffect(focusTitle, []);
+  const [now, setNow] = useState(Date.now);
   const supported = client && supportsFeature(client, ACCOUNT_LIST_IDLE_FEATURE);
   // an observer tab (zeta was full) waits for the banner's take control, then reads as controller
   const observer = (client as { authority?: string } | null)?.authority === "observer";
@@ -83,18 +98,30 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const rows = (refreshed?.value.accounts ?? last?.accounts) ?? [];
   const fresh = !!client && (refreshed ? refreshed.client === client : last?.client === client);
   const canSignIn = fresh && !!supported && !loading && !failure && !active;
+  // Re-render when a reset passes or a reading turns stale, so no row reads as current after its time.
+  const next = Math.min(...rows.map(row => accountStatus(row, now).next));
+  useEffect(() => {
+    if (!Number.isFinite(next)) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(next - Date.now(), 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [next, now]);
   const attempted = useRef(false);
   const inFlight = useRef(false);
-  const show = async (focus: boolean) => {
+  const lastRead = useRef(-Infinity);
+  const show = async ({ focus = false, quiet = false } = {}) => {
     if (!supported || inFlight.current || active || review) return;
     inFlight.current = true;
-    if (focus) heading.current?.focus();
-    setLoading(true);
-    setFailure(null);
+    lastRead.current = Date.now();
+    if (focus) focusTitle();
+    if (!quiet) {
+      setLoading(true);
+      setFailure(null);
+    }
     try {
       const result = await connection.withControl(readAccounts);
       if ("refused" in result) setFailure(result.refused);
       else {
+        setFailure(null);
         setReadAfter(latestCatalog);
         setLast({ client: connection.client, accounts: result.value.accounts });
       }
@@ -103,26 +130,40 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
     } finally {
       inFlight.current = false;
       setLoading(false);
+      setNow(Date.now());
     }
   };
+  // Back on the tab (also after sleep, when timers ran late): re-read the clock, and accounts at most every WAKE_READ_MS.
+  const wake = useRef(() => {});
+  wake.current = () => {
+    if (document.visibilityState === "hidden") return;
+    setNow(Date.now());
+    if (fresh && !observer && Date.now() - lastRead.current >= WAKE_READ_MS) void show({ quiet: true });
+  };
+  useEffect(() => {
+    const onWake = () => wake.current();
+    window.addEventListener("focus", onWake);
+    document.addEventListener("visibilitychange", onWake);
+    return () => { window.removeEventListener("focus", onWake); document.removeEventListener("visibilitychange", onWake); };
+  }, []);
   useEffect(() => { attempted.current = false; }, [observer]);
   useEffect(() => {
     if (attempted.current || !supported || observer || fresh || active || review) return;
     attempted.current = true;
-    void show(false);
+    void show();
   });
-  const showAction = { label: "Try again", run: () => void show(true) };
+  const showAction = { label: "Try again", run: () => void show({ focus: true }) };
   return <ModuleFrame title="Accounts">
-    <div className="accounts-place" ref={heading} tabIndex={-1} role="region" aria-label="model accounts">
-      {active ? null : loading ? <ModuleState kind="loading" title="loading accounts…" />
-        : !client ? (connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
-          : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />)
-        : !supported ? <ModuleState kind="unsupported" title="update zeta to manage accounts here" detail="on this version, use /accounts inside an active chat." />
+    <div className="accounts-place" ref={place}>
+      {active ? null : loading ? <ModuleState kind="loading" title="Loading accounts…" />
+        : !client ? (connecting ? <ModuleState kind="loading" title="Connecting to zeta…" />
+          : <ModuleState kind="offline" title="Could not connect to zeta" detail="Retrying automatically" action={{ label: "Retry now", run: () => connection.retryNow() }} />)
+        : !supported ? <ModuleState kind="unsupported" title="Update zeta to manage accounts here" detail="On this version, use /accounts inside an active chat." />
         : observer && !failure ? <ModuleState kind="observer" title={OBSERVER_READ_REASON} />
-        : failure ? <ModuleState kind="failed" title="could not load accounts" detail={failure} action={showAction} />
-        : !fresh ? <ModuleState kind="loading" title="loading accounts…" />
+        : failure ? <ModuleState kind="failed" title="Could not load accounts" detail={failure} action={showAction} />
+        : !fresh ? <ModuleState kind="loading" title="Loading accounts…" />
         : !rows.length && <ModuleState kind="empty" title="no model accounts yet" detail="sign in to a model provider to start." />}
-      {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} />}
+      {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} now={now} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} />}
       {attempt && <AccountLoginStatus attempt={attempt} login={login} canSignIn={canSignIn} signIn={signIn}
         available={fresh && rows.some(row => row.account === loginIdentity(attempt.target) && row.available)} />}
       {canSignIn && !rows.length && <div className="account-actions">
@@ -132,17 +173,17 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
           onClick={event => signIn({ provider: "codex" }, event.currentTarget)}>sign in to codex</button>
       </div>}
       {review && <Confirmation level={2} external={{ onKeep: () => { setReview(null); review.opener.focus(); } }}
-        action={review.target.account ? reviewText("sign in again") : reviewText("sign in")} keep={reviewText("go back")}
+        action={review.target.account ? reviewText("sign in again") : reviewText("sign in")} keep={reviewText("Go back")}
         title={reviewText("review browser sign-in")}
         effect={`start browser sign-in for ${loginIdentity(review.target)}` as ReviewText}
         scope={reviewText("zeta account store on this computer")}
-        current={reviewText("not available")} after={reviewText("credentials may be saved and the account becomes available")}
+        current={rows.find(row => row.account === review.target.account)?.available ? reviewText("signed in, but zeta reports authentication failed") : reviewText("not available")} after={reviewText("credentials may be saved and the account becomes available")}
         undo={reviewText("cancel while pending; after credentials save, sign-out is not available from this page on this zeta")}
         proof={{ kind: "scope" }}
         execute={async () => {
           await login.start(review.target);
           setReview(null);
-          requestAnimationFrame(() => heading.current?.focus());
+          requestAnimationFrame(focusTitle);
           return startedReview;
         }} checkResult={async () => startedReview} />}
 

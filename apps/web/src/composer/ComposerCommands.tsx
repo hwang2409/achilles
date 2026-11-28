@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listSlashCommands, MODEL_INPUT_IDS_FEATURE, runSlashCommand, sendModelInput, type SlashCommandInfo, type ZetaClient } from "@fulcrum/zeta";
 import { restorableFocus } from "../keyboard";
 import { WRITE_SURFACE } from "../writeSurfaces";
-import { listAccounts, safeAccountId, supportsFeature, supportsRequest, type Account } from "../zeta";
+import { accountStatus, listAccounts, safeAccountId, supportsFeature, supportsRequest, type Account } from "../zeta";
 import { useAccountSwitch } from "../accounts/AccountSwitchReview";
 import { currentAccount, type ChatDestination } from "../accounts/accountSwitch";
 import { getSettings, updateSettings } from "../settings";
@@ -126,6 +126,9 @@ export function useComposerCommands(client: ZetaClient | null, chat: ChatDestina
   };
 }
 
+// Only states that matter when choosing an account; the page shows the rest.
+const accountHint = (account: Account) => { const { label, tone } = accountStatus(account, Date.now()); return tone === "ok" ? "" : label; };
+
 export function CommandOutput({ commands, opener }: { commands: ReturnType<typeof useComposerCommands>; opener: HTMLElement | null }) {
   const panel = useRef<HTMLDivElement>(null);
   const { output, close, canSwitch, switchTo } = commands;
@@ -157,7 +160,7 @@ export function CommandOutput({ commands, opener }: { commands: ReturnType<typeo
     {"accounts" in output && <ul>
       {output.accounts.map((account) => <li key={account.account}>
         <span>{account.account}</span>
-        <small>{[account.current ? "current" : account.default ? "default" : "", !account.available ? "needs login" : ""].filter(Boolean).join(" · ")}</small>
+        <small>{[account.current ? "Current" : account.default ? "Default" : "", accountHint(account)].filter(Boolean).join(" · ")}</small>
         {!account.current && <button type="button" data-write-surface={WRITE_SURFACE.composerAccountSwitch} disabled={!canSwitch || !account.available} aria-label={`switch to ${account.account}`} onClick={() => switchTo(output.accounts, account.account, opener)}>switch</button>}
       </li>)}
     </ul>}

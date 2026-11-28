@@ -105,7 +105,7 @@ test("projects every usage window and drops unknown secret-shaped fields at ever
   };
   const { read } = fixture({ result: wire });
   expect(await read()).toEqual({ revision, accounts: [{ ...row, usage: {
-    freshness: "now", refreshFailed: true, capturedAt: Date.parse(snapshot.captured_at), windows: [
+    freshness: "now", error: "rate limited; retry later", capturedAt: Date.parse(snapshot.captured_at), windows: [
       { kind: "five_hour", usedPercent: 62, minutes: 300, resetsAt: Date.parse(reset) },
       { kind: "seven_day", usedPercent: 8, minutes: 10080, resetsAt: Date.parse(reset) },
     ],
