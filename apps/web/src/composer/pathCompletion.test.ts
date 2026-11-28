@@ -17,20 +17,24 @@ const entries = (...rows: PathCompletionEntry[]): PathCompletionResult => ({ kin
 
 function mount(completePaths?: CompletePaths) {
   const submitted: string[] = [];
-  const result = render(React.createElement(RunProvider, { store: createRunStore() }, React.createElement(PlainComposer, {
+  const store = createRunStore();
+  const composer = (chatId: string, complete?: CompletePaths) => React.createElement(RunProvider, { store }, React.createElement(PlainComposer, {
     state: "idle" as const,
     onSubmit: async (text: string) => { submitted.push(text); },
     onDraftChange: () => {},
     onDraftSubmit: () => {},
-    chatId: `path-test-${chatSeq++}`,
+    chatId,
     label: "message",
-    completePaths,
-  })));
+    completePaths: complete,
+  }));
+  const result = render(composer(`path-test-${chatSeq++}`, completePaths));
   const field = result.container.querySelector("textarea") as HTMLTextAreaElement;
+  /** what the app does on a chat switch: a new chat id and a new completer bound to it */
+  const switchChat = (complete?: CompletePaths) => act(() => { result.rerender(composer(`path-test-${chatSeq++}`, complete)); });
   const type = (value: string) => act(() => { fireEvent.change(field, { target: { value } }); });
   const key = (name: string, init: KeyboardEventInit = {}) => act(() => { fireEvent.keyDown(field, { key: name, ...init }); });
   const options = () => [...result.container.querySelectorAll('[role="option"]')].map((option) => `${option.getAttribute("aria-selected") === "true" ? ">" : ""}${option.textContent}`);
-  return { field, type, key, options, submitted, listbox: () => result.getByRole("listbox", { name: "path completions" }) };
+  return { field, type, key, options, submitted, switchChat, unmount: result.unmount, container: result.container, listbox: () => result.getByRole("listbox", { name: "path completions" }) };
 }
 
 test("the token rule matches zeta's: an @ at a word start, quoted or bare, up to the cursor", () => {
@@ -111,4 +115,78 @@ test("without path completion (an older zeta, or an observer) nothing asks and e
   expect(composer.field.getAttribute("aria-autocomplete")).toBeNull();
   await composer.key("Enter");
   expect(composer.submitted).toEqual(["@s"]);
+});
+
+test("a send before the pause ends asks nothing and shows no list over the empty composer", async () => {
+  const asked: string[] = [];
+  const composer = mount(async (text) => { asked.push(text); return entries(entry("src/", -1)); });
+  await composer.type("@s");
+  await composer.key("Enter");
+  expect(composer.submitted).toEqual(["@s"]);
+  await settle();
+  expect(composer.field.value).toBe("");
+  expect(composer.options()).toEqual([]);
+  expect(asked).toEqual([]);
+});
+
+test("editing the same token keeps only the entries that still match, and enter sends when none do", async () => {
+  const replies: Array<(result: PathCompletionResult) => void> = [];
+  const composer = mount(() => new Promise((resolve) => { replies.push(resolve); }));
+  await composer.type("@s");
+  await settle();
+  await act(async () => { replies[0](entries(entry("scripts/", -1), entry("src/", -1), entry('"stuff dir/', -1))); });
+  expect(composer.options()).toEqual([">@scripts/", "@src/", '@"stuff dir/']);
+  // a path with a space comes back quoted; it still matches the bare token
+  await composer.type("@st");
+  expect(composer.options()).toEqual(['>@"stuff dir/']);
+  await composer.type("@sx");
+  expect(composer.options()).toEqual([]);
+  await composer.key("Enter");
+  expect(composer.field.value).toBe("");
+  expect(composer.submitted).toEqual(["@sx"]);
+  await composer.type("@s");
+  await settle();
+  await act(async () => { replies[1](entries(entry("scripts/", -1), entry("src/", -1))); });
+  // a fast enter before the reply for the new text takes the entry that still matches
+  await composer.type("@sr");
+  expect(composer.options()).toEqual([">@src/"]);
+  await composer.key("Enter");
+  expect(composer.field.value).toBe("@src/");
+});
+
+test("a quoted path inserts after the quote and keeps the text after the caret", async () => {
+  const asked: string[] = [];
+  const composer = mount(async (text) => { asked.push(text); return entries(entry("my file.txt\"", -5, "file")); });
+  await act(() => {
+    fireEvent.change(composer.field, { target: { value: 'read @"my fi now' } });
+    composer.field.setSelectionRange(12, 12);
+    fireEvent.select(composer.field);
+  });
+  await settle();
+  expect(asked.at(-1)).toBe('read @"my fi');
+  expect(composer.options()).toEqual(['>@my file.txt"']);
+  await composer.key("Enter");
+  expect(composer.field.value).toBe('read @"my file.txt" now');
+  expect(composer.field.selectionStart).toBe(19);
+  expect(composer.options()).toEqual([]);
+  expect(composer.submitted).toEqual([]);
+});
+
+test("an unmount or a chat switch inside the pause asks nothing and shows no list", async () => {
+  const asked: string[] = [];
+  const complete: CompletePaths = async (text) => { asked.push(text); return entries(entry("src/", -1)); };
+  const switched = mount(complete);
+  await switched.type("@s");
+  // the app binds a new completer to each chat
+  await switched.switchChat((text, signal) => complete(text, signal));
+  await settle();
+  expect(asked).toEqual([]);
+  expect(switched.options()).toEqual([]);
+  cleanup();
+  const unmounted = mount(complete);
+  await unmounted.type("@s");
+  unmounted.unmount();
+  await settle();
+  expect(asked).toEqual([]);
+  expect(unmounted.container.querySelector('[role="option"]')).toBeNull();
 });

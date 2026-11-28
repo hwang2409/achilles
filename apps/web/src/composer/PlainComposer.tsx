@@ -47,6 +47,8 @@ export function PlainComposer(props: ComposerAdapterProps) {
     input.current.setSelectionRange(caret.current, caret.current);
     caret.current = null;
   });
+  // a send or any other clear changes the draft without an edit event: a waiting request or a shown list is then stale
+  useLayoutEffect(() => { if (input.current && state !== "read-only") paths.sync(input.current); }, [model.draft]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (paths.onKeyDown(event)) return;

@@ -40,8 +40,15 @@ export function usePathCompletion(complete: CompletePaths | undefined, insert: (
     if (before !== dismissed.current) dismissed.current = null;
     const from = before === null || dismissed.current !== null ? null : pathTokenStart(before);
     if (!complete || before === null || from === null) { setList(null); return; }
-    // the shown list stays while the same token is edited, so it does not blink on every key
-    setList((shown) => (shown && pathTokenStart(shown.before) === from ? shown : null));
+    // the shown list stays while the same token is edited, so it does not blink on every key, but keeps only the
+    // entries that still match: zeta's rule is a prefix match, and an entry for a path with spaces adds a leading quote
+    const token = before.slice(from);
+    setList((shown) => {
+      if (!shown || pathTokenStart(shown.before) !== from) return null;
+      const kept = shown.entries.filter((entry) => entry.text.replace(/^"/, "").startsWith(token));
+      if (!kept.length) return null;
+      return { ...shown, entries: kept, active: Math.max(0, kept.indexOf(shown.entries[shown.active])) };
+    });
     const abort = new AbortController();
     pending.current = {
       abort,
