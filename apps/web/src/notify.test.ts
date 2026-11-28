@@ -48,13 +48,16 @@ describe("createNotifier", () => {
 
 describe("useApprovalIntent", () => {
   const frame = () => act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-  afterEach(() => { cleanup(); history.replaceState(null, "", "/"); });
-  function Chat({ approval }: { approval: boolean }) {
+  const now = performance.now;
+  afterEach(() => { cleanup(); history.replaceState(null, "", "/"); performance.now = now; });
+  // card: the approval card has rendered (it can come a frame after the approval state)
+  function Chat({ approval, card = approval }: { approval: boolean; card?: boolean }) {
     useApprovalIntent(approval);
     return createElement("div", null,
       createElement("textarea", { "aria-label": "composer" }),
-      approval && createElement("div", { "data-part": "approval-actions" }, createElement("button", null, "approve")));
+      card && createElement("div", { "data-part": "approval-actions" }, createElement("button", null, "approve")));
   }
+  const focused = () => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent;
 
   // the tab already shows ?chat=s1, waiting on an approval; the note's click is a same-document navigation that only
   // changes the hash
@@ -82,5 +85,49 @@ describe("useApprovalIntent", () => {
     ui.rerender(createElement(Chat, { approval: true }));
     await frame();
     expect(document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent).toBe("composer");
+  });
+
+  // the chat waits on an approval whose card has not rendered yet when the intent arrives
+  async function clickBeforeTheCard() {
+    history.replaceState(null, "", "/?chat=s1");
+    const ui = render(createElement(Chat, { approval: true, card: false }));
+    ui.getByLabelText("composer").focus();
+    await act(() => new Promise<void>((resolve) => { addEventListener("hashchange", () => resolve(), { once: true }); location.hash = "#approval"; }));
+    await frame();
+    return ui;
+  }
+
+  test.each([
+    {
+      name: "the card renders a frame late: approve takes focus, and only then the intent is used up",
+      async run(ui: Awaited<ReturnType<typeof clickBeforeTheCard>>) {
+        expect(location.hash).toBe("#approval");
+        ui.rerender(createElement(Chat, { approval: true, card: true }));
+        await frame();
+        expect(focused()).toBe("approve");
+      },
+    },
+    {
+      name: "the approval ends before its card renders: the intent ends, and a later approval keeps focus",
+      async run(ui: Awaited<ReturnType<typeof clickBeforeTheCard>>) {
+        ui.rerender(createElement(Chat, { approval: false }));
+        await frame();
+        expect(location.search + location.hash).toBe("?chat=s1");
+        ui.rerender(createElement(Chat, { approval: true }));
+        await frame();
+        expect(focused()).toBe("composer");
+      },
+    },
+    {
+      name: "the card never renders: when the wait ends, the intent ends without a focus move",
+      async run() {
+        performance.now = () => now.call(performance) + 60_000;
+        await frame();
+        expect(focused()).toBe("composer");
+      },
+    },
+  ])("$name", async ({ run }) => {
+    await run(await clickBeforeTheCard());
+    expect(location.search + location.hash).toBe("?chat=s1");
   });
 });
