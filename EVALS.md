@@ -111,8 +111,8 @@ public, so never commit eval results. `report.md` reads top to bottom:
 4. the `BASE` diff, when there is a base run.
 5. the results: the run header, a table per run (status, score, turns, tool
    calls, approvals, wall time, tokens), a `diagnostics` table (usage detail,
-   host tools gap, first-call validity, tool errors, cap hit), unmapped values,
-   and the per-task table.
+   host tools gap, first-call validity, tool errors, cap hit), and the per-task
+   table.
 
 the eval command prints the same result line, tool set, and failures at the end.
 
@@ -123,8 +123,8 @@ including zeta sessions and serve logs, is kept under `.cache/evals/<run>/`.
 
 each task row carries:
 
-- status: one of `pass`, `agent_fail`, `harness_error`, `unsupported`,
-  `needs_review`, or `agent_fail (goal not reachable on this revision)`.
+- status: one of `pass`, `agent_fail`, `harness_error`, `unsupported`, or
+  `agent_fail (goal not reachable on this revision)`.
 - score: percent of checks that passed. a task passes when every required check
   passes and score is at least 80.
 - checks: the per-check pass/fail list, in `report.json`, with the expected and
@@ -133,8 +133,8 @@ each task row carries:
 - tokens (usage): input, output, reasoning, and cache tokens; `unavailable` when
   a run did not report them.
 - transcripts and snapshots: the graded evidence is the snapshot json (pages,
-  records, tool calls and results, approvals, session history). the full model
-  transcript and serve logs live in the retained stack under `.cache/evals/`.
+  code revisions, records, tool calls and results, approvals, session history).
+  the full model transcript and serve logs live in the retained stack under `.cache/evals/`.
 - `make eval-selfcheck-real DIR=/path/to/eval-run` re-grades a run's snapshots
   against the current task definitions, to confirm a grader change did not move a
   real result.
@@ -150,10 +150,8 @@ classify a failure before you act on it:
   to start, or static assets were missing. fix the harness or the seed.
 - task: the task spec is wrong (impossible steps, wrong expected value). fix the
   task json.
-- grader: the agent did the task right but a check failed, or the run landed in
-  `needs_review` because the value map did not recognize a valid answer. this is
-  a grader false negative; extend the map or fix the check, never relax a real
-  assertion.
+- grader: the agent did the task right but a check failed. this is a grader
+  false negative; fix the check, never relax a real assertion.
 
 ## add a task
 
@@ -168,7 +166,11 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   `created`), `bind_chat`, `create_mode`, and an optional `route`. every
   `fixture` or `setup` page is the home page, except a `fixture` page with a
   `route`: the harness creates that second page with a minimal React shell before the
-  run. a `created` page's `route` names the page the agent creates.
+  run. a `created` page's `route` names the page the agent creates. a `fixture`
+  page with a `route` may carry `code: { source, dependencies, expect_failed? }`:
+  the harness writes that source after creating the page, and setup fails unless
+  the build failed exactly when `expect_failed` is `true`. a failed build stays
+  the page's newest revision (its candidate) over the working shell.
 - `setup` (optional): the seeds. `tools` (name, operation, collection, optional
   `input_schema`) and `records` (id, collection, data).
 - `steps`: the prompts and events, in order. each has an `id`, a `kind`, the
@@ -195,6 +197,15 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     result in the snapshot's `user_writes` (never the credential). if the write
     fails or does not bump the revision, the run is `harness_error`. it uses no
     model turn; `chat` only labels the actor.
+  - `page_action`: click one button inside the compiled page, like a user, with
+    no model turn. it takes `click: { role: "button", name }` (the exact
+    accessible name). every `page_action` comes after every other step (the
+    lint rejects one before a model step); they run in order once every chat
+    is closed. each is a required check `page_action:<id>`: the button must
+    show in the page frame and the click must make a record write through the
+    page's bridge that succeeds. a missing button or a click that writes
+    nothing is `agent_fail`; a browser crash is `harness_error`. rows go to
+    the snapshot's `page_actions`.
   - `approval` (optional, `"approve"`, `"deny"`, or `{ tool, decisions }`,
     default `"approve"`): how the harness answers every approval request during
     a model step. `"deny"` sends zeta's real `deny`. `{ tool, decisions }`
@@ -221,6 +232,10 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     for every listed operation), `assigned_tools_only` (the chat called only
     the page's assigned tools), `tool_evolution` (a tool gained a field and old
     records stay readable), `schema_roundtrip`.
+  - page code: `code_changed` (the page's final active code revision is newer
+    than its initial one, built, and has no runtime error; with
+    `after_failed: true` it must be newer than the seeded failed candidate, and
+    a seed without one is a `harness_error`).
   - records and results: `record` (some record contains `value`),
     `records_exact` (exactly these records; a top-level row field set to
     `{ "absent": true }` must be missing from the matched record; deeper in a
@@ -247,6 +262,11 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   an exact number, or `max` to pass when there is at least one request and at
   most `max` (the agent tried, then stopped instead of looping).
 - `no_new_page` passes when every page after the run existed before it.
+- `browser_text` opens the page after every model step and reads the compiled
+  page frame's text (the app shell around it is kept only as a diagnostic); text
+  that never shows, or a frame that never loads (a playwright `TimeoutError`),
+  fails the check (`agent_fail`). only a shell that does not become ready or a
+  non-timeout playwright error is a `harness_error`.
 - `answer_mentions` grades a step's final answer text (the snapshot keeps it as
   `answers[step_id]`). it names the `step` and a `value` list; any one value
   must appear, case-insensitively, as a whole token ("12" never matches "120",

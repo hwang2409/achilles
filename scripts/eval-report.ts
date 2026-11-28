@@ -4,8 +4,7 @@ import { basename, join } from "node:path";
 import { MAX_AGENT_TURNS } from "./eval-grade";
 import { PINNED_OUTPUT_UNAVAILABLE, type TranscriptUsage } from "./eval-usage";
 
-export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported" | "needs_review"; cap_hit?: boolean; gap?: string };
-export type UnmappedValue = { task_id: string; check_id: string; field: string; before: unknown; after: unknown };
+export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported"; cap_hit?: boolean; gap?: string };
 export type EvalReport = {
   run_id: string;
   // what ran: the SUITE name for a full run, else the sorted TASK ids; BASE=last matches on it
@@ -13,7 +12,6 @@ export type EvalReport = {
   agent: { provider: string; model: string; tool_policy: string; observed_catalog: string[]; achilles_sha?: string; zeta_sha?: string };
   repeats: number;
   tasks: Array<TaskResult & { transcript?: string }>;
-  unmapped_values: UnmappedValue[];
   totals?: { turns: number; wall_ms: number; usage?: TranscriptUsage | "unavailable" };
 };
 
@@ -31,23 +29,14 @@ function aggregateUsage(tasks: EvalReport["tasks"]): TranscriptUsage | "unavaila
   };
 }
 
-export function makeReport(input: Omit<EvalReport, "tasks" | "unmapped_values"> & { tasks: EvalReport["tasks"] }): EvalReport {
-  const tasks = input.tasks.map((task) => {
-    const failedChecks = task.checks.filter(check => !check.pass);
-    const onlyUnmapped = task.task_id === "reading-list-one-prompt" && failedChecks.length > 0 && failedChecks.every(check => check.reason?.startsWith("unmapped_after_value:"));
-    return { ...task, status: onlyUnmapped ? "needs_review" : task.status, usage: task.usage ?? "unavailable" };
-  });
-  const unmapped_values = tasks.flatMap(task => task.task_id === "reading-list-one-prompt" ? task.checks.flatMap(check => {
-    if (!check.reason?.startsWith("unmapped_after_value:")) return [];
-    const transition = (check.evidence as { transition?: Omit<UnmappedValue, "task_id" | "check_id"> }).transition;
-    return transition ? [{ task_id: task.task_id, check_id: check.id, ...transition }] : [];
-  }) : []);
-  return { ...input, totals: input.totals && { ...input.totals, usage: aggregateUsage(tasks) }, tasks, unmapped_values };
+export function makeReport(input: EvalReport): EvalReport {
+  const tasks = input.tasks.map(task => ({ ...task, usage: task.usage ?? "unavailable" }));
+  return { ...input, totals: input.totals && { ...input.totals, usage: aggregateUsage(tasks) }, tasks };
 }
 
 export function aggregateTaskResults(results: Array<{ task_id: string; pass: boolean; score: number; turns: number; tool_calls: number; wall_ms: number }>) {
   const grouped = new Map<string, typeof results>();
-  for (const result of results) if (!["harness_error", "unsupported", "needs_review"].includes((result as { status?: string }).status ?? "")) grouped.set(result.task_id, [...(grouped.get(result.task_id) ?? []), result]);
+  for (const result of results) if (!["harness_error", "unsupported"].includes((result as { status?: string }).status ?? "")) grouped.set(result.task_id, [...(grouped.get(result.task_id) ?? []), result]);
   return Object.fromEntries([...grouped].map(([task_id, rows]) => [task_id, {
     passes: rows.filter((row) => row.pass).length,
     total: rows.length,
@@ -72,14 +61,13 @@ const usageText = (usage: unknown) => {
   const value = usage as TranscriptUsage;
   return `input ${value.input_tokens}; output ${value.output_tokens}; reasoning ${value.reasoning_output_tokens}; cache read ${value.cache_read_input_tokens}; cache write ${value.cache_creation_input_tokens}`;
 };
-const runPassed = (task: EvalReport["tasks"][number]) => task.pass && task.status !== "needs_review";
 const short = (sha?: string) => sha ? sha.slice(0, 7) : "unavailable";
 const clip = (value: unknown, limit = 200) => { const text = typeof value === "string" ? value : JSON.stringify(value) ?? String(value); return text.length > limit ? `${text.slice(0, limit)}...` : text; };
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 // final answers per run, keyed by the run's snapshot path (`task.transcript`); each value maps step id -> answer
 export type FinalAnswers = Record<string, Record<string, string> | undefined>;
 
-const passCount = (tasks: BaseReport["tasks"]) => { const graded = tasks.filter(task => task.status !== "unsupported"); return { passed: graded.filter(task => task.pass && task.status !== "needs_review").length, graded: graded.length, unsupported: tasks.length - graded.length }; };
+const passCount = (tasks: BaseReport["tasks"]) => { const graded = tasks.filter(task => task.status !== "unsupported"); return { passed: graded.filter(task => task.pass).length, graded: graded.length, unsupported: tasks.length - graded.length }; };
 
 // the top of report.md and the terminal summary: one result line, the eval tool set, then every failed run
 export function reportSummary(report: EvalReport, answers: FinalAnswers = {}): string {
@@ -93,7 +81,7 @@ export function reportSummary(report: EvalReport, answers: FinalAnswers = {}): s
     "live `make dev` page chats differ: zeta's default tool set plus all MCP servers, zeta's default limit of 150 turns, auto memory on, no `--yolo`.",
     "", "## failures", "",
   ];
-  const failed = report.tasks.filter(task => task.status !== "unsupported" && !runPassed(task));
+  const failed = report.tasks.filter(task => task.status !== "unsupported" && !task.pass);
   if (!failed.length) lines.push("none");
   for (const task of failed) lines.push(...failureBlock(task, answers));
   return lines.join("\n").trimEnd() + "\n";
@@ -124,7 +112,6 @@ export function reportMarkdown(report: EvalReport, base?: BaseReport, answers: F
     `suite tokens: ${usageText(report.totals?.usage)}`,
     `harness errors: ${report.tasks.filter(task => task.status === "harness_error").length}`,
     `unsupported: ${report.tasks.filter(task => task.status === "unsupported").length}`,
-    `needs review: ${report.tasks.filter(task => task.status === "needs_review").length}`,
     `cap hits: ${report.tasks.filter(task => task.cap_hit).length}`,
     `conflict seen (report only, not graded): ${report.tasks.filter(task => task.diagnostics?.conflict_seen !== undefined).map(task => `${task.task_id} ${task.diagnostics.conflict_seen ? "yes" : "no"}`).join(", ") || "n/a"}`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
@@ -138,14 +125,8 @@ export function reportMarkdown(report: EvalReport, base?: BaseReport, answers: F
     const first = task.diagnostics?.first_call_validity ?? {};
     lines.push(`| ${task.task_id} | ${usageText(task.usage)} | ${task.host_tools_gap ? "yes" : "no"} | ${first.create_page === undefined ? "n/a" : first.create_page ? "yes" : "no"} | ${first.create_tool === undefined ? "n/a" : first.create_tool ? "yes" : "no"} | ${task.diagnostics?.structured_tool_errors.length ?? 0} | ${task.diagnostics?.unstructured_tool_errors ?? 0} | ${task.cap_hit ? "yes" : "no"} |`);
   }
-  lines.push("", "## unmapped values", "");
-  if (!report.unmapped_values.length) lines.push("none");
-  else {
-    lines.push("| task | check | field | before | after |", "| --- | --- | --- | --- | --- |");
-    for (const value of report.unmapped_values) lines.push(`| ${value.task_id} | ${value.check_id} | ${value.field} | ${String(value.before)} | ${String(value.after)} |`);
-  }
   // one row per task over every run; pass rate, mean score, and mean turns use graded runs only
-  lines.push("", "## per task", "", "runs counts every run. pass rate, mean score, and mean turns count graded runs only: unsupported, needs-review, and harness-error runs are left out.", "needs review: extend the value map or confirm agent fail", "", "| task | runs | passes | pass rate | mean score | mean turns | cap hits | harness errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  lines.push("", "## per task", "", "runs counts every run. pass rate, mean score, and mean turns count graded runs only: unsupported and harness-error runs are left out.", "", "| task | runs | passes | pass rate | mean score | mean turns | cap hits | harness errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const id of [...new Set(report.tasks.map(task => task.task_id))]) {
     const runs = report.tasks.filter(task => task.task_id === id); const value = grouped[id];
     const graded = value ? `${value.passes}/${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.mean_score.toFixed(0)} | ${value.mean_turns.toFixed(1)}` : "0/0 | n/a | n/a | n/a";
@@ -211,7 +192,7 @@ const percent = (from: number, to: number) => from === 0 ? (to === 0 ? 0 : Infin
 function summarize(tasks: BaseReport["tasks"]) {
   const grouped = aggregateTaskResults(tasks.map(task => ({ ...task, score: 0, tool_calls: 0, wall_ms: 0 })));
   return new Map(Object.entries(grouped).map(([id, value]) => {
-    const tokens = tasks.filter(task => task.task_id === id && !["harness_error", "unsupported", "needs_review"].includes(task.status ?? "")).map(task => totalTokens(task.usage));
+    const tokens = tasks.filter(task => task.task_id === id && !["harness_error", "unsupported"].includes(task.status ?? "")).map(task => totalTokens(task.usage));
     return [id, { passes: value.passes, total: value.total, rate: value.pass_rate, turns: value.median_turns, tokens: tokens.every(token => token !== undefined) ? median(tokens as number[]) : undefined }];
   }));
 }
@@ -247,7 +228,7 @@ export function diffMarkdown(base: BaseReport, report: Pick<EvalReport, "tasks">
   section("tasks not compared", [
     ...[...baseIds].filter(id => !runIds.has(id)).sort().map(id => `- ${id}: only in base`),
     ...[...runIds].filter(id => !baseIds.has(id)).sort().map(id => `- ${id}: only in this run`),
-    ...notComparable.map(id => `- ${id}: no comparable runs in one side (harness error, unsupported, or needs review)`),
+    ...notComparable.map(id => `- ${id}: no comparable runs in one side (harness error or unsupported)`),
   ]);
   return lines.join("\n");
 }

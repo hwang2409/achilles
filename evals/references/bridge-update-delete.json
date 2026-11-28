@@ -1,0 +1,264 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home",
+        "route": "/",
+        "active_code_revision": 2
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "home",
+        "version": 2,
+        "failed": 0,
+        "runtime_error": null
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "alpha",
+        "collection": "chores",
+        "version": 2,
+        "data": {
+          "title": "Alpha",
+          "done": true
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "gamma",
+        "collection": "chores",
+        "version": 1,
+        "data": {
+          "title": "Gamma",
+          "done": false
+        }
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__write_page",
+        "success": true,
+        "data": {
+          "revision": 2
+        }
+      }
+    ],
+    "errors": [],
+    "page_actions": [
+      {
+        "step": "done-alpha",
+        "page_id": "home",
+        "role": "button",
+        "name": "Done Alpha",
+        "clicked": true,
+        "status": 200
+      },
+      {
+        "step": "delete-beta",
+        "page_id": "home",
+        "role": "button",
+        "name": "Delete Beta",
+        "clicked": true,
+        "status": 200
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "alpha",
+          "collection": "chores",
+          "version": 1,
+          "data": {
+            "title": "Alpha",
+            "done": false
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "beta",
+          "collection": "chores",
+          "version": 1,
+          "data": {
+            "title": "Beta",
+            "done": false
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "gamma",
+          "collection": "chores",
+          "version": 1,
+          "data": {
+            "title": "Gamma",
+            "done": false
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home",
+        "route": "/",
+        "active_code_revision": 2
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "home",
+        "version": 2,
+        "failed": 0,
+        "runtime_error": null
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "alpha",
+        "collection": "chores",
+        "version": 1,
+        "data": {
+          "title": "Alpha",
+          "done": false
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "beta",
+        "collection": "chores",
+        "version": 1,
+        "data": {
+          "title": "Beta",
+          "done": false
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "gamma",
+        "collection": "chores",
+        "version": 1,
+        "data": {
+          "title": "Gamma",
+          "done": false
+        }
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__write_page",
+        "success": true,
+        "data": {
+          "revision": 2
+        }
+      }
+    ],
+    "errors": [],
+    "page_actions": [
+      {
+        "step": "done-alpha",
+        "page_id": "home",
+        "role": "button",
+        "name": "Done Alpha",
+        "clicked": true,
+        "status": null
+      },
+      {
+        "step": "delete-beta",
+        "page_id": "home",
+        "role": "button",
+        "name": "Delete Beta",
+        "clicked": true,
+        "status": null
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "alpha",
+          "collection": "chores",
+          "version": 1,
+          "data": {
+            "title": "Alpha",
+            "done": false
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "beta",
+          "collection": "chores",
+          "version": 1,
+          "data": {
+            "title": "Beta",
+            "done": false
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "gamma",
+          "collection": "chores",
+          "version": 1,
+          "data": {
+            "title": "Gamma",
+            "done": false
+          }
+        }
+      ]
+    }
+  }
+}

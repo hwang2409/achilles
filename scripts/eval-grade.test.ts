@@ -462,3 +462,71 @@ test("task schema is closed and count checks name real collections", () => {
   expect(validateTask({ ...task, prompt: "one source", steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a" }] }).prompt).toBe("one source");
   expect(() => validateTask({ ...task, prompt: "duplicate" })).toThrow("prompt source");
 });
+
+const changeTask = (afterFailed: boolean) => ({ ...task, checks: [{ id: "changed", type: "code_changed", page: "p", ...(afterFailed ? { after_failed: true } : {}) }] }) as never;
+// a base without this check type throws inside grading; report that as the status so the assertion shows it
+const changeStatus = (afterFailed: boolean, snapshot: EvalSnapshot) => { try { return gradeReference(changeTask(afterFailed), snapshot).status; } catch (error) { return String(error); } };
+const revision = (version: number, failed = 0, runtime_error: string | null = null) => ({ page_id: "page-1", version, failed, runtime_error });
+const shell = { pages: [{ id: "page-1", active_code_revision: 1 }], code_revisions: [revision(1)] };
+const seeded = { pages: [{ id: "page-1", active_code_revision: 1 }], code_revisions: [revision(1), revision(2, 1)] };
+const final = (active: number | null, revisions: ReturnType<typeof revision>[], initial?: EvalSnapshot) => ({ pages: [{ id: "page-1", alias: "p", active_code_revision: active }], code_revisions: revisions, initial });
+
+test("code_changed accepts a newer built revision, after a failed seed too", () => {
+  expect(changeStatus(false, final(2, [revision(1), revision(2)], shell)), "a newer built revision").toBe("pass");
+  expect(changeStatus(true, final(3, [revision(1), revision(2, 1), revision(3)], seeded)), "a fix after the failed candidate").toBe("pass");
+});
+
+test("code_changed rejects an unchanged, unbuilt, failed, or crashing revision", () => {
+  expect(changeStatus(false, final(1, [revision(1)], shell)), "the seeded revision is still active").toBe("agent_fail");
+  expect(changeStatus(false, final(null, [], { pages: [] })), "a created page that never built").toBe("agent_fail");
+  expect(changeStatus(false, final(2, [revision(1), revision(2, 0, "TypeError: x is undefined")], shell)), "the new revision throws at runtime").toBe("agent_fail");
+  expect(changeStatus(false, final(2, [revision(1)], shell)), "the active revision row is missing").toBe("agent_fail");
+  expect(changeStatus(false, final(2, [revision(1), revision(2)])), "no initial snapshot").toBe("agent_fail");
+  // the active revision must be newer than the failed candidate: the untouched shell is not a fix
+  expect(changeStatus(true, final(1, [revision(1), revision(2, 1)], seeded)), "the failed candidate was never fixed").toBe("agent_fail");
+  expect(changeStatus(true, final(3, [revision(1), revision(2, 1), revision(3, 1)], seeded)), "the fix failed to build too").toBe("agent_fail");
+});
+
+test("code_changed after_failed is a harness error when the seed has no failed candidate", () => {
+  expect(changeStatus(true, final(2, [revision(1), revision(2)], shell)), "a seed whose newest revision built").toBe("harness_error");
+  expect(changeStatus(true, final(2, [revision(1), revision(2)])), "no initial snapshot").toBe("harness_error");
+});
+
+test("code seeds belong to fixture route pages, and after_failed needs a failing seed", () => {
+  const code = { source: "export {}", dependencies: {}, expect_failed: true };
+  const base = { id: "seed-task", page_plan: [{ alias: "p", source: "fixture", route: "/p", bind_chat: true, create_mode: false, code }], agent_turns: 2, steps: [{ id: "fix", kind: "prompt", page: "p", chat: "c", prompt: "fix it" }], checks: [{ id: "fixed", type: "code_changed", page: "p", after_failed: true }] };
+  expect(validateTask(base).page_plan[0].code).toEqual(code);
+  expect(() => validateTask({ ...base, page_plan: [{ ...base.page_plan[0], route: undefined }] })).toThrow("code needs a fixture page with a route");
+  expect(() => validateTask({ ...base, page_plan: [{ ...base.page_plan[0], code: { ...code, extra: 1 } }] })).toThrow("unknown key extra");
+  expect(() => validateTask({ ...base, page_plan: [{ ...base.page_plan[0], code: { source: "export {}", dependencies: {} } }] })).toThrow("needs a code seed with expect_failed");
+  expect(() => validateTask({ ...base, checks: [{ id: "e", type: "no_error", page: "p", after_failed: true }] })).toThrow("after_failed is true on code_changed only");
+});
+
+const clickStep = (id: string, name: string) => ({ id, kind: "page_action", page: "p", chat: "chat-a", click: { role: "button", name } });
+const actionTask = { ...task, steps: [...task.steps, clickStep("done-alpha", "Done Alpha")] };
+
+test("page_action steps come after every other step and name one button", () => {
+  expect(validateTask(actionTask).steps[1].click).toEqual({ role: "button", name: "Done Alpha" });
+  expect(() => validateTask({ ...actionTask, steps: [clickStep("done-alpha", "Done Alpha"), ...task.steps] })).toThrow("page_action must come after every model step");
+  expect(() => validateTask({ ...actionTask, steps: [...actionTask.steps, { id: "w", kind: "user_write", page: "p", chat: "form", tool: "update_x", arguments: { record_id: "a" } }] })).toThrow("page_action must come after every model step");
+  expect(() => validateTask({ ...actionTask, steps: [...task.steps, { ...clickStep("c", "Go"), click: undefined }] })).toThrow("a page_action needs one");
+  expect(() => validateTask({ ...actionTask, steps: [...task.steps, { ...clickStep("c", "Go"), click: { role: "link", name: "Go" } }] })).toThrow('click needs role "button"');
+  expect(() => validateTask({ ...task, steps: [{ ...task.steps[0], click: { role: "button", name: "Go" } }] })).toThrow("click goes on a page_action step");
+});
+
+test("a page_action passes only when its click wrote through the page bridge", () => {
+  const graded = (row?: Record<string, unknown>) => gradeTask(actionTask as never, { pages: [{ id: "home", alias: "p" }], ...(row ? { page_actions: [row] } : {}) });
+  const row = { step: "done-alpha", page_id: "home", role: "button", name: "Done Alpha", clicked: true, status: 200 };
+  expect(graded(row).pass, "the click updated a record").toBe(true);
+  const failures = [
+    [undefined, "the page action did not run"],
+    [{ ...row, clicked: false, status: null, reason: 'no button named "Done Alpha" in the page' }, 'no button named "Done Alpha" in the page'],
+    [{ ...row, status: null }, "the click made no record write through the page bridge"],
+    [{ ...row, status: 409 }, "the page bridge write failed (409)"],
+  ] as const;
+  for (const [actual, reason] of failures) {
+    const result = graded(actual);
+    expect(result.pass, reason).toBe(false);
+    expect(result.checks.find(check => check.id === "page_action:done-alpha")?.reason).toBe(reason);
+  }
+});

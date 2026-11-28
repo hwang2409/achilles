@@ -1,36 +1,134 @@
 {
   "good": {
     "pages": [
-      {"id": "home", "alias": "home"},
-      {"id": "reading", "alias": "reading", "route": "/reading-list"}
+      {
+        "id": "home",
+        "alias": "home",
+        "route": "/",
+        "active_code_revision": 1
+      },
+      {
+        "id": "reading",
+        "alias": "reading",
+        "route": "/reading-list",
+        "active_code_revision": 1
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "reading",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      }
     ],
     "results": [
       {
         "page_id": "home",
         "tool": "achilles__create_page",
         "success": true,
-        "data": {"page_id": "reading", "route": "/reading-list"}
+        "data": {
+          "page_id": "reading",
+          "route": "/reading-list"
+        }
       }
     ],
+    "errors": [],
     "browser": [
-      {"page_id": "reading", "text": "Synthetic Reading List\nBook One"}
-    ]
+      {
+        "page_id": "reading",
+        "text": "Synthetic Reading List\nSynthetic Dune Copy\nSynthetic Atlas\nSynthetic Harbor"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        }
+      ]
+    }
   },
   "bad": {
     "pages": [
-      {"id": "home", "alias": "home"},
-      {"id": "reading", "alias": "reading", "route": "/reading-list"}
+      {
+        "id": "home",
+        "alias": "home",
+        "route": "/",
+        "active_code_revision": 1
+      },
+      {
+        "id": "reading",
+        "alias": "reading",
+        "route": "/reading-list",
+        "active_code_revision": 1
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "reading",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      }
     ],
     "results": [
       {
         "page_id": "home",
         "tool": "achilles__create_page",
         "success": true,
-        "data": {"page_id": "reading", "route": "/reading-list"}
+        "data": {
+          "page_id": "reading",
+          "route": "/reading-list"
+        }
       }
     ],
+    "errors": [],
     "browser": [
-      {"page_id": "reading", "text": "this page has no compiled revision"}
-    ]
+      {
+        "page_id": "reading",
+        "text": "Synthetic Reading List\nSynthetic Dune Copy\nSynthetic Atlas"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        }
+      ]
+    }
   }
 }
