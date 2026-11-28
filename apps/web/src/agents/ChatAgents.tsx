@@ -3,7 +3,7 @@ import type { createRunStore } from "@fulcrum/core";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { wrapTab } from "../keyboard";
 import { AgentSpawn } from "./AgentControlViews";
-import { AgentRunDetail, StateTag } from "./AgentRunDetail";
+import { AgentRunDetail, RetryLine, StateTag } from "./AgentRunDetail";
 import { isTerminal, withLiveRow, type ChildControls } from "./childControls";
 import type { ChildSendOwner } from "./childSend";
 import { createAgentRunsReader, rowKey } from "./reads";
@@ -66,7 +66,7 @@ export function ChatAgents({ client, store, sessionId, title, controls, send, re
         {warning && <p role="status">{warning}</p>}
         {report && (rows.length ? <ul className="chat-agents-runs">{rows.map((row) => <li key={row.runId}>
           <button type="button" className="agents-row" aria-current={row.runId === chosenRun ? "true" : undefined} onClick={() => choose(row.runId)}>
-            <span className="agents-row-copy"><span className="agents-row-title"><b>{row.agentType ?? "agent"}</b>{row.description ? ` ${row.description}` : ""}</span><small><StateTag row={withLiveRow(row, liveOf(row.runId))} /></small></span>
+            <span className="agents-row-copy"><span className="agents-row-title"><b>{row.agentType ?? "agent"}</b>{row.description ? ` ${row.description}` : ""}</span><small><StateTag row={withLiveRow(row, liveOf(row.runId))} />{row.retry && <> · <RetryLine retry={row.retry} /></>}</small></span>
           </button>
         </li>)}</ul> : <p>no agents in this chat yet.</p>)}
         {id && <AgentRunDetail chosen={chosen} parent={parent} title={title} id={id} client={client} send={send} controls={controls} readOnly={readOnly}

@@ -43,6 +43,7 @@ import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
 import { continuationNotification } from "./chat/continuation";
 import "./chat/continuation.css";
+import { withChildRecovery } from "./chat/ChildRecoveryNotice";
 import "./shell.css";
 import "./chat/transcript.css";
 import "./composer/composer.css";
@@ -71,7 +72,7 @@ function ChatNotification({ id }: { id: string }) {
   return <p className="chat-continuation" role="status">{item.event.data.text}</p>;
 }
 
-const renderers: Renderers = { notification: ChatNotification, message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: CompactTool, error: ErrorRow };
+const renderers: Renderers = { notification: withChildRecovery(ChatNotification), unknown: withChildRecovery(Fallback), message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: CompactTool, error: ErrorRow };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
 // inside the reply that is still streaming. it shows here once delivery settles (a drop its turn did not read stays
 // hidden while it goes out again as a new message, which then takes over this row).
