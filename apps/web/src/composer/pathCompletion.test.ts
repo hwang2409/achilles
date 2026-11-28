@@ -230,3 +230,29 @@ test("a remote draft edit asks nothing and closes a list shown for the old text"
   await settle();
   expect(asked).toEqual(["@s", "hi @s"]);
 });
+
+test("a caret move with no keyup or mouseup (a touch trackpad, selection handles) closes a list it left; a focus from code opens none", async () => {
+  const asked: string[] = [];
+  const composer = mount(async (text) => { asked.push(text); return entries(entry("src/", -1)); });
+  await act(() => { composer.field.focus(); });
+  await composer.type("look @s");
+  await settle();
+  expect(composer.options()).toEqual([">@src/"]);
+  await act(() => { composer.field.setSelectionRange(2, 2); document.dispatchEvent(new Event("selectionchange")); });
+  expect(composer.options()).toEqual([]);
+  await act(() => { composer.field.blur(); composer.field.setSelectionRange(7, 7); composer.field.focus(); document.dispatchEvent(new Event("selectionchange")); });
+  await settle();
+  expect(asked).toEqual(["look @s"]);
+  expect(composer.options()).toEqual([]);
+});
+
+test("a click in the field is a caret move: a restored draft's @ token then lists", async () => {
+  const asked: string[] = [];
+  const composer = mount(async (text) => { asked.push(text); return entries(entry("src/", -1)); }, "look @s");
+  await settle();
+  expect(asked).toEqual([]);
+  await act(() => { composer.field.setSelectionRange(7, 7); fireEvent.mouseUp(composer.field); });
+  await settle();
+  expect(asked).toEqual(["look @s"]);
+  expect(composer.options()).toEqual([">@src/"]);
+});
