@@ -40,7 +40,13 @@ class BarrierBackend(FakeBackend):
                 for block in latest_user.content
                 if isinstance(block, TextContent)
                 and block.text
-                in {"open created page", "start allow-mode chat", "sb7 page stream", "park chat b"}
+                in {
+                    "open created page",
+                    "start allow-mode chat",
+                    "sb7 page stream",
+                    "park chat b",
+                    "image paste",
+                }
             ),
             None,
         )
@@ -59,6 +65,11 @@ class BarrierBackend(FakeBackend):
             # the session_park step's second chat, outside the main script's turn order
             "park chat b": FakeBackend(
                 [ScriptedTurn(content=[TextContent("park b ready")])],
+                request_serializer=request_serializer,
+            ),
+            # the image paste step's send_images turn, outside the main script's turn order
+            "image paste": FakeBackend(
+                [ScriptedTurn(content=[TextContent("image received")])],
                 request_serializer=request_serializer,
             ),
             "sb7 page stream": FakeBackend(

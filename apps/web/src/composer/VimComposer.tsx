@@ -7,6 +7,7 @@ import { isEditableTarget } from "../keyboard";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { composerStatus, enterAction, submitAction, type ComposerModel } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
+import { ImageChips, imageInputProps } from "./ImageChips";
 import { ComposerHint } from "./hint";
 import { HeldSend } from "./PlainComposer";
 import { useComposerDelivery, type ComposerAdapterProps } from "./useComposerDelivery";
@@ -33,7 +34,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const focusedRef = useRef(true);
   // a hold makes the editor read-only, not uneditable: it keeps focus (and its caret) through the hold
   const readOnly = useRef(new Compartment()).current;
-  const { model, edit, submit: submitDraft, stop, retry, restore: restoreDraft, cancel, getModel } = useComposerDelivery(props);
+  const { model, edit, addImages, removeImage, submit: submitDraft, stop, retry, restore: restoreDraft, cancel, getModel } = useComposerDelivery(props);
   // enter and edit move text out of and into the box; the editor owns its document, so follow the model here
   const followModel = () => {
     const view = viewRef.current;
@@ -159,7 +160,8 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
   const action = submitAction(model);
-  const queues = model.sending || model.queue.length > 0;
+  // images cannot steer: with a turn running they wait for it, like a queued message
+  const queues = model.sending || model.queue.length > 0 || (steer && model.images.length > 0);
   const { text: message, tone } = composerStatus(model);
   const hint = note || undefined;
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };
@@ -168,8 +170,9 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     return () => { if (document.activeElement === button) viewRef.current?.focus(); };
   }, []);
 
-  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-write-surface={WRITE_SURFACE.composerSend} data-state={state} data-held={props.held || undefined} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
+  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-write-surface={WRITE_SURFACE.composerSend} data-state={state} data-held={props.held || undefined} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit} {...(props.images && state !== "read-only" ? imageInputProps(addImages) : {})}>
     <QueuedMessages model={model} onRetry={(id) => { retry(id); viewRef.current?.focus(); }} onRestore={restore} onCancel={(id) => { cancel(id); viewRef.current?.focus(); }} />
+    {state !== "read-only" && <ImageChips images={model.images} onRemove={(index) => { removeImage(index); viewRef.current?.focus(); }} />}
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <><p data-part="composer-reason">{reason}</p>{(props.controls || props.held) && <div data-part="composer-bar">{props.controls}{props.held && <HeldSend />}</div>}</> : <div data-part="composer-bar">
       {props.controls}
