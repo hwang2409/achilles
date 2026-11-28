@@ -1,6 +1,6 @@
 import { AccountSwitchReceipt } from "./accounts/AccountSwitchReview";
 import type { createAccountLogin } from "./accounts/accountLogin";
-import { PageChatHeader } from "./PageChatHeader";
+import { ALREADY_NEW, PageChatHeader } from "./PageChatHeader";
 import { createContext, useCallback, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { createRunStore } from "@fulcrum/core";
@@ -27,8 +27,7 @@ import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT_LABEL } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { HistoryDialog } from "./page/HistoryDialog";
-import { useRecordWrites } from "./page/RecordForm";
-import { PageView } from "./page/PageView";
+import { PageFrame } from "./page/PageFrame";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, returnFocusToComposer, userTyping, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
@@ -50,8 +49,6 @@ import "./chat/markdown.css";
 import "./chat/fulcrum-g1.css";
 import { CHAT_CONTROLLED_REASON, READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 import "./jumpToLatest.css";
-
-export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 
 export const canWriteForState = (state: ConnectionState) => state.phase === "connected" && state.authority === "controller";
 
@@ -209,6 +206,13 @@ function activeComposerProps(
   return { state: turn === "running" ? "steerable" : "idle", onSubmit, onStop, placeholder };
 }
 
+// a page renders as its compiled react revision; a non-home page without one (a migrated block page) shows the server's notice
+function PageSurface({ page, credential }: { page: Page; credential: string }) {
+  if (page.code) return <PageFrame pageId={page.id} credential={credential} revision={page.code.version} />;
+  return <main className="page-content"><p className="page-unsupported">{page.unsupported_format}</p></main>;
+}
+const hasSurface = (page: Page | null | undefined) => !!page?.code || !!page?.unsupported_format;
+
 function connectionFailure(state: ConnectionState): string | null {
   if (state.phase !== "connected" && "lost" in state && state.lost) return "the connection to zeta was lost.";
   switch (state.phase) {
@@ -251,9 +255,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
   const activePage = ready?.page ?? empty?.page ?? null;
-  const hasBlocks = (activePage?.layout.blocks.length ?? 0) > 0;
-  const recordWrites = useRecordWrites(activePage?.id ?? "");
-  const previousRecordWrites = useRef(recordWrites);
+  const hasPageSurface = hasSurface(activePage);
   const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
   const activeStore = store ?? emptyStore;
@@ -269,7 +271,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
     return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
   } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
-  // a restore from the history list changes the layout or a tool without a chat turn
+  // a restore from the history list changes a tool without a chat turn
   const [restores, setRestores] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyOpener = useRef<HTMLElement | null>(null);
@@ -290,7 +292,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const { narrow, open: mobileChatOpen, setOpen: setMobileChatOpen } = usePageChatSheet();
-  const mobilePageChat = narrow && hasBlocks;
+  const mobilePageChat = narrow && hasPageSurface;
   const pageChatSheetOpen = mobilePageChat && mobileChatOpen;
   const pageChatSheetClosed = mobilePageChat && !mobileChatOpen;
   const mobileChatWasOpen = useRef(false);
@@ -318,10 +320,10 @@ export function AgentSurface({ connection, childControls, childSend, client, con
       if (item.kind !== "tool") continue;
       const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
       const name = value?.tool_call?.name ?? "";
-      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout", "restore_version", "achilles__restore_version"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+      if (value && ["create_page", "achilles__create_page", "restore_version", "achilles__restore_version", "write_page", "achilles__write_page", "edit_page", "achilles__edit_page"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
         completedCreatePages.current.add(item.id);
         setPageRefreshNonce((current) => current + 1);
-        if (["update_layout", "achilles__update_layout", "restore_version", "achilles__restore_version"].includes(name)) void active.refreshPage();
+        if (["restore_version", "achilles__restore_version"].includes(name)) void active.refreshPage();
       }
     }
   }), [active.refreshPage, store]);
@@ -331,29 +333,14 @@ export function AgentSurface({ connection, childControls, childSend, client, con
     void active.refreshPage();
   }, [refreshKey]);
   useEffect(() => {
-    // A form insert does not advance refreshKey (no chat turn), so count metrics computed into
-    // the page layout would stay stale; record list/detail blocks already refetch on their own
-    // through useRecordWrites in LayoutBlock, so this only refreshes the page object itself.
-    if (previousRecordWrites.current === recordWrites) return;
-    previousRecordWrites.current = recordWrites;
-    void active.refreshPage();
-  }, [recordWrites]);
-  useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
   useLayoutEffect(() => {
-    const openContinuation = hasBlocks && ready?.continued;
+    const openContinuation = hasPageSurface && ready?.continued;
     setMobileChatOpen(!!openContinuation);
     setPageChatFocusRequest(openContinuation ? 1 : 0);
   }, [ready?.sessionId, activePage?.id, ready?.continued, setMobileChatOpen]);
   useModalFocus(pageChatSheetOpen, pageChatSurface, pageChatClose, true);
-  const askPageChat = (draft: string) => {
-    const sessionId = ready?.sessionId ?? (activePage ? `new:${activePage.id}` : null);
-    if (!sessionId) return;
-    if (!draftStore.get(sessionId).trim()) draftStore.set(sessionId, draft);
-    setPageChatFocusRequest((value) => value + 1);
-    if (mobilePageChat) { setMobileChatOpen(true); }
-  };
   useEffect(() => {
     if (!pageChatSheetOpen) {
       if (mobileChatWasOpen.current && mobilePageChat) pageChatButton.current?.focus();
@@ -413,7 +400,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} took={tookControl} disabledReason={!chatCanWrite ? heldElsewhere ? "approve it in the tab that has this chat." : chatReadOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!chatCanWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!chatCanWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
-  const placeholder = hasBlocks ? "Ask about this page" : "Message Zeta";
+  const placeholder = hasPageSurface ? "Ask about this page" : "Message Zeta";
   // canWrite here means only this chat is off: another tab holds it
   const composerProps: ComposerProps & { held?: boolean } = !chatCanWrite ? { state: "read-only", reason: chatReadOnlyReason, onSubmit: send, placeholder: "read-only" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
@@ -472,7 +459,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   }, [state]);
   const title = ready?.title ?? "new chat";
   const newPageChatReason = !connected ? "new chat is off until zeta is back" : !canWrite ? readOnlyReason
-    : active.creatingChat ? "creating chat…" : ready?.controlledElsewhere ? undefined : empty || (ready && !ready.sent) ? "already in a new chat"
+    : active.creatingChat ? "creating chat…" : ready?.controlledElsewhere ? undefined : empty || (ready && !ready.sent) ? ALREADY_NEW
     : undefined;
   const createMode: CreateModeOwner | undefined = !landing && activePage ? {
     available: connected && chatCanWrite && !active.creatingChat && (!active.toggleBlocked || active.toggleRetryable),
@@ -516,17 +503,17 @@ export function AgentSurface({ connection, childControls, childSend, client, con
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" && active.state.error === TOO_MANY_CHATS ? <div className="full-state"><LimitNotice kind="resident" className="limit-state" parked={parked.map((row) => ({ sessionId: row.session_id, chat: nav.catalog.chats.find((chat) => chat.session_id === row.session_id) ?? null, finishing: false }))} stop={active.stop} chats={nav.catalog.chats} onOpen={active.selectChat} onStop={() => void active.stopAndRetry()} onRetry={active.retryLimit} onRetryStopped={active.retryStopped} onStay={stay} canWrite={canWrite} /></div>
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
-      : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
+      : busyPage ? <>{hasSurface(busyPage.page) && <PageSurface page={busyPage.page} credential={busyPage.credential} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
-        <div className={hasBlocks ? "page-view docked" : "page-view"}>
-        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={chatCanWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
-        <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetClosed ? " page-chat-sheet-closed" : ""}`}>
-        {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>Page chat</span>{state !== "idle" && <span className="page-chat-bar-state">{stateLabel}</span>}<span aria-hidden="true">⌃</span></button>}
+        <div className={hasPageSurface ? "page-view docked" : "page-view"}>
+        {hasPageSurface && <PageSurface page={activePage} credential={(ready ?? empty)!.credential} />}
+        <div className={`page-chat${hasPageSurface ? " page-chat-docked" : ""}${pageChatSheetClosed ? " page-chat-sheet-closed" : ""}`}>
+        {hasPageSurface && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>Page chat</span>{state !== "idle" && <span className="page-chat-bar-state">{stateLabel}</span>}<span aria-hidden="true">⌃</span></button>}
         {pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
         <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={pageChatSheetOpen ? "dialog" : undefined} aria-modal={pageChatSheetOpen ? "true" : undefined} aria-label={pageChatSheetOpen ? "page chat" : undefined} inert={pageChatSheetClosed}>
-        {hasBlocks && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${pageChatSheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
+        {hasPageSurface && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${pageChatSheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
           onSelect={active.selectChat} newChat={newPageChatReason ? undefined : active.newChat} newReason={canWrite ? newPageChatReason : undefined}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
         <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={chatCanWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId} cwd={ready.cwd}><SubAgentNavigationProvider value={agentNavigation}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></SubAgentNavigationProvider></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
@@ -543,14 +530,15 @@ export function AgentSurface({ connection, childControls, childSend, client, con
         </div>
       </RunProvider>}
   </>;
-  // a chat on a page that is not home belongs to Pages, as its header crumb says; the address decides, so loading and missing pages agree
-  const onPage = current === chatsRoute && location.pathname !== "/" && location.pathname !== homeAlias;
+  // a chat on a page that is not home belongs to Pages, as its header crumb says; the address decides, so loading and missing
+  // pages agree. home belongs to Pages too once it shows a page
+  const onPage = current === chatsRoute && (hasPageSurface || (location.pathname !== "/" && location.pathname !== homeAlias));
   const place = landing ? createRoute : current === createRoute ? chatsRoute : onPage ? pagesRoute : current;
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
     workspace: landing ? undefined : { canWrite, serverForcesAsk, createMode },
-    header: !landing && activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onRenameRefused={ready?.controlledElsewhere ? refuseRename : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} onAgents={ready ? (opener) => setAgents({ sessionId: ready.sessionId, opener }) : undefined} />,
-    children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} /> : content,
+    header: !landing && activePage && <ChatHeader page={activePage} docked={hasPageSurface} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onRenameRefused={ready?.controlledElsewhere ? refuseRename : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} onAgents={ready ? (opener) => setAgents({ sessionId: ready.sessionId, opener }) : undefined} />,
+    children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} client={client} /> : content,
   });
 }
 

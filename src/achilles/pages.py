@@ -7,11 +7,13 @@ import secrets
 import shutil
 import sqlite3
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+from .page_build import PageBuildError, atomic_private_write, build_page, effective_dependencies
 from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
 
@@ -32,164 +34,24 @@ _EQUALITY_FILTER_SCHEMA = {
     "additionalProperties": False,
 }
 
-_BLOCK_FIELDS_SCHEMA = {"type": "array", "items": {"type": "string"}, "uniqueItems": True}
-
-_LAYOUT_BLOCK_SCHEMA = {
-    "oneOf": [
-        {
-            "type": "object",
-            "properties": {
-                "type": {"const": "list"},
-                "title": {"type": "string"},
-                "collection": {"type": "string"},
-                "fields": {
-                    **_BLOCK_FIELDS_SCHEMA,
-                    "description": (
-                        "Columns, in order, from the collection's data schema. Leave it out "
-                        "to show required fields first, then the rest sorted."
-                    ),
-                },
-                "filter": {**_EQUALITY_FILTER_SCHEMA, "description": "Show only matching records."},
-            },
-            "required": ["type", "title", "collection"],
-            "additionalProperties": False,
-        },
-        {
-            "type": "object",
-            "description": (
-                "Shows field labels only unless filter selects records from collection, for "
-                'example {"field":"run_id","equals":"run-002"}. One match shows its '
-                "values; multiple matches show the highest creation time, with ties resolved "
-                "by highest record id. Get field names from an assigned tool's schema."
-            ),
-            "properties": {
-                "type": {"const": "detail"},
-                "title": {"type": "string"},
-                "collection": {"type": "string"},
-                "fields": {"type": "array", "items": {"type": "string"}},
-                "filter": _EQUALITY_FILTER_SCHEMA,
-            },
-            "required": ["type", "title", "fields"],
-            "dependentRequired": {"filter": ["collection"]},
-            "additionalProperties": False,
-        },
-        {
-            "type": "object",
-            "properties": {
-                "type": {"const": "form"},
-                "title": {"type": "string"},
-                "tool": {"type": "string"},
-                "fields": {
-                    **_BLOCK_FIELDS_SCHEMA,
-                    "description": (
-                        "Input order, from the tool's input schema; inputs you leave out "
-                        "follow, required first."
-                    ),
-                },
-            },
-            "required": ["type", "title", "tool"],
-            "additionalProperties": False,
-        },
-        {
-            "type": "object",
-            "properties": {"type": {"const": "text"}, "text": {"type": "string"}},
-            "required": ["type", "text"],
-            "additionalProperties": False,
-        },
-        {
-            "type": "object",
-            "properties": {
-                "type": {"const": "metric"},
-                "label": {"type": "string"},
-                "value": {"type": "string"},
-                "detail": {"type": "string"},
-                "delta": {"type": "string"},
-                "status": {"type": "string"},
-                "warn": {"type": "boolean"},
-            },
-            "required": ["type", "label", "value"],
-            "additionalProperties": False,
-        },
-        {
-            "type": "object",
-            "properties": {
-                "type": {"const": "metric"},
-                "label": {"type": "string"},
-                "collection": {"type": "string"},
-                "count": {"const": True},
-                "where": _EQUALITY_FILTER_SCHEMA,
-                "detail": {"type": "string"},
-                "delta": {"type": "string"},
-                "status": {"type": "string"},
-                "warn": {"type": "boolean"},
-            },
-            "required": ["type", "label", "collection", "count"],
-            "additionalProperties": False,
-        },
-    ]
-}
-LAYOUT_SCHEMA = {
-    "type": "object",
-    "properties": {"blocks": {"type": "array", "items": _LAYOUT_BLOCK_SCHEMA}},
-    "required": ["blocks"],
-    "additionalProperties": False,
-}
-UPDATE_LAYOUT_SCHEMA = {
+PAGE_PACKAGE_SCHEMA = {
     "type": "object",
     "properties": {
-        "layout": {
-            **LAYOUT_SCHEMA,
-            "description": (
-                "When achilles__inspect_page reports layout_complete true, copy its complete "
-                "stored layout; any block you leave out is deleted. When layout_complete is "
-                "false, do not change the page; tell the user it is too large to edit from chat."
-            ),
-            "properties": {
-                "blocks": {
-                    **LAYOUT_SCHEMA["properties"]["blocks"],
-                    "description": (
-                        "The full ordered block list; insert, reorder, or remove blocks "
-                        "from the inspected list."
-                    ),
-                }
-            },
-        },
-        "expected_version": {
-            "type": "integer",
-            "minimum": 1,
-            "description": (
-                "The layout_version from achilles__inspect_page; pass it as "
-                "expected_version. On a conflict, inspect again and retry."
-            ),
-        },
+        "source": {"type": "string", "minLength": 1},
+        "dependencies": {"type": "object", "additionalProperties": {"type": "string"}},
     },
-    "required": ["layout", "expected_version"],
+    "required": ["source", "dependencies"],
     "additionalProperties": False,
 }
 _VERSION_NUMBER = {"type": "integer", "minimum": 1}
 RESTORE_VERSION_SCHEMA = {
     "type": "object",
     "properties": {
-        "kind": {"enum": ["layout", "tool"]},
+        "kind": {"enum": ["code", "tool"]},
         "name": {"type": "string", "description": "The tool name; required when kind is tool."},
-        "version": {
-            **_VERSION_NUMBER,
-            "description": (
-                "The version to restore: a layout_versions entry or an earlier tool version "
-                "from achilles__inspect_page."
-            ),
-        },
-        "expected_version": {
-            **_VERSION_NUMBER,
-            "description": (
-                "The current version from achilles__inspect_page: layout_version for a layout, "
-                "the tool's version for a tool. On a conflict, inspect again and retry."
-            ),
-        },
-        "route": {
-            "type": "string",
-            "description": "Optional; must be this page's route.",
-        },
+        "version": _VERSION_NUMBER,
+        "expected_version": _VERSION_NUMBER,
+        "route": {"type": "string", "description": "Optional; must be this page's route."},
     },
     "required": ["kind", "version", "expected_version"],
     "additionalProperties": False,
@@ -199,7 +61,41 @@ _RESTORE_ARGS_SCHEMA = {
     "properties": {"version": _VERSION_NUMBER, "expected_version": _VERSION_NUMBER},
     "required": ["version", "expected_version"],
 }
-LAYOUT_HISTORY_LIMIT = 20
+STALE_BUILD = "build started at revision"
+REBUILD_RETRY_SECONDS = 60
+PAGE_FILES = ("src/Page.tsx", "package.json")
+READ_PAGE_FILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"enum": list(PAGE_FILES)},
+        "offset": {"type": "integer", "minimum": 0, "description": "First line, from 0."},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 2000},
+    },
+    "required": ["path"],
+    "additionalProperties": False,
+}
+EDIT_PAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"enum": list(PAGE_FILES)},
+        "edits": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "old_string": {"type": "string", "minLength": 1},
+                    "new_string": {"type": "string"},
+                },
+                "required": ["old_string", "new_string"],
+                "additionalProperties": False,
+            },
+        },
+        "expected_revision": {"type": "integer", "minimum": 1},
+    },
+    "required": ["path", "edits", "expected_revision"],
+    "additionalProperties": False,
+}
 INSPECT_MAX_BYTES = 8 * 1024
 DETAIL_SUGGESTION_RECORD_LIMIT = 200
 
@@ -233,68 +129,79 @@ CREATE_PAGE_SCHEMA = {
             ),
         },
         "title": {"type": "string", "minLength": 1},
-        "layout": LAYOUT_SCHEMA,
+        "package": PAGE_PACKAGE_SCHEMA,
         "tools": {"type": "array", "items": TOOL_BUNDLE_SCHEMA},
     },
-    "required": ["route", "title", "layout"],
+    "required": ["route", "title"],
     "additionalProperties": False,
 }
 
+_MINIMAL_PAGE_SOURCE = """import { createRoot } from "react-dom/client";
+function Page() { return <main />; }
+createRoot(document.getElementById("root")!).render(<Page />);
+"""
+
 
 def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    result = {
-        **value,
-        "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
-        "layout_complete": True,
-        "metric_values": list(value["metric_values"]),
-        "detail_filter_matches": list(value["detail_filter_matches"]),
-        "tools": list(value["tools"]),
-        "collections": dict(value["collections"]),
-        "layout_versions": list(value["layout_versions"]),
-    }
-
-    def serialize() -> str:
-        return json.dumps(result, sort_keys=True, separators=(",", ":"))
-
-    encoded = serialize()
+    result = json.loads(json.dumps(value))
+    encoded = json.dumps(result, sort_keys=True, separators=(",", ":"))
     if len(encoded.encode()) <= INSPECT_MAX_BYTES:
         return result, encoded
-
+    code = result.get("code")
+    if isinstance(code, dict):
+        code.pop("source", None)
+        code.pop("lockfile", None)
+        code.pop("warnings", None)
+        code.pop("revisions", None)
     result["truncated"] = True
-    result["omitted"] = {}
-    for key in (
-        "layout_versions",
-        "metric_values",
-        "detail_filter_matches",
-        "tools",
-        "collections",
-        "title",
-    ):
-        omitted = result.pop(key)
-        result["omitted"][key] = len(omitted) if not isinstance(omitted, str) else 1
-        encoded = serialize()
-        if len(encoded.encode()) <= INSPECT_MAX_BYTES:
-            return result, encoded
-
-    result["layout"] = None
-    result["layout_complete"] = False
-    result["message"] = "do not change this page; tell the user it is too large to edit from chat"
-    return result, serialize()
+    encoded = json.dumps(result, sort_keys=True, separators=(",", ":"))
+    candidate = result.get("candidate")
+    # escaped non-ascii diagnostics can take up to 12 bytes per character
+    while len(encoded.encode()) > INSPECT_MAX_BYTES and candidate and candidate["diagnostics"]:
+        candidate["diagnostics"] = candidate["diagnostics"][: len(candidate["diagnostics"]) // 2]
+        encoded = json.dumps(result, sort_keys=True, separators=(",", ":"))
+    if len(encoded.encode()) > INSPECT_MAX_BYTES:
+        raise ValidationError("", f"inspectable page <= {INSPECT_MAX_BYTES} bytes", "too_large")
+    return result, encoded
 
 
-def require_inspectable(value: dict[str, Any]) -> None:
-    bounded, _ = bounded_inspect(value)
-    if not bounded["layout_complete"]:
-        raise ValidationError(
-            "/layout",
-            f"inspect_page result no larger than {INSPECT_MAX_BYTES} bytes",
-            "layout_too_large",
-            "Keep the page smaller, e.g. use fewer or shorter blocks.",
-        )
+def _build_report(built: dict[str, Any]) -> str:
+    """What inspect_page reports about a build besides versions and size."""
+    return json.dumps(
+        {
+            "install_scripts": built.get("install_scripts", []),
+            "warnings": built.get("warnings", []),
+        }
+    )
+
+
+_NO_CODE_HINT = "this page has no code yet; write it with write_page."
+
+
+def _page_files(row: sqlite3.Row) -> dict[str, str]:
+    """A code revision as the files an agent reads and edits."""
+    package = {"dependencies": json.loads(row["dependencies"])}
+    return {
+        "src/Page.tsx": row["source"],
+        "package.json": json.dumps(package, indent=2, sort_keys=True) + "\n",
+    }
+
+
+_CANDIDATE_DIAGNOSTICS_CHARS = 2000
+
+
+def _file_sizes(row: sqlite3.Row) -> list[dict[str, Any]]:
+    return [{"path": path, "bytes": len(text.encode())} for path, text in _page_files(row).items()]
 
 
 def validate_page_route(route: str) -> None:
     validate_schema(route, CREATE_PAGE_SCHEMA["properties"]["route"], "/route")
+
+
+def edits_own_page(page: sqlite3.Row) -> bool:
+    """A page's own chat may rewrite and restore that page's code; the home chat needs create
+    mode for that, and creating pages or tools always needs it."""
+    return page["id"] != "home" or bool(page["create_mode"])
 
 
 class ChatChanged(Exception):
@@ -316,30 +223,6 @@ def chat_row(row) -> dict[str, Any]:
     }
 
 
-def _first_block_label(blocks: list[dict[str, Any]]) -> str | None:
-    """A short label from the first block, so near-identical layout versions read apart."""
-    if not blocks:
-        return None
-    for key in ("title", "label", "text"):
-        value = blocks[0].get(key)
-        if isinstance(value, str) and value.strip():
-            return " ".join(value.split())[:80]
-    return None
-
-
-def _layout_version_row(row) -> dict[str, Any]:
-    blocks = json.loads(row[2])["blocks"]
-    return {
-        "version": row[0],
-        "created_at": row[1],
-        "block_types": [block["type"] for block in blocks],
-        "summary": _first_block_label(blocks),
-        "active": bool(row[3]),
-        "action": row[4],
-        "restored_from": row[5] if row[4] == "restore_layout" else None,
-    }
-
-
 def ensure_column(conn, table: str, column: str, ddl: str, backfill: str | None = None) -> None:
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -354,114 +237,6 @@ def ensure_column(conn, table: str, column: str, ddl: str, backfill: str | None 
         raise
 
 
-def validate_layout(
-    layout: Any,
-    assigned_tools: set[str] | None = None,
-    assigned_collections: set[str] | None = None,
-    prefix: str = "",
-    collection_fields: dict[str, set[str]] | None = None,
-    suggest_field: Callable[[str, str, Any, set[str]], str | None] | None = None,
-    tool_fields: dict[str, set[str]] | None = None,
-) -> dict[str, Any]:
-    validate_schema(layout, LAYOUT_SCHEMA, prefix)
-    tools = assigned_tools or set()
-    for index, block in enumerate(layout["blocks"]):
-        if block["type"] == "form" and block["tool"] not in tools:
-            raise ValidationError(
-                f"{prefix}/blocks/{index}/tool",
-                "assigned tool name",
-                hint=(
-                    "Add a tool with this name to create_page.tools (or call create_tool first), "
-                    "then retry."
-                ),
-            )
-        if (
-            block["type"] in {"list", "detail"}
-            and "collection" in block
-            and assigned_collections is not None
-            and block["collection"] not in assigned_collections
-        ):
-            raise ValidationError(
-                f"{prefix}/blocks/{index}/collection",
-                "assigned collection",
-                hint=(
-                    "Add a tool for this collection in create_page.tools (or call create_tool "
-                    'first), for example: {"format_version":1,"kind":"data_operation",'
-                    '"name":"list_collection_name","description":"list records",'
-                    '"input_schema":{"type":"object","properties":{}},'
-                    '"implementation":{"operation":"list",'
-                    '"collection":"collection_name","data_schema":{"type":'
-                    '"object","properties":{}}}}. A simple inferred input_schema is fine.'
-                ),
-            )
-        _validate_layout_filter(block, index, prefix, collection_fields, suggest_field)
-        _validate_block_fields(block, index, prefix, collection_fields, tool_fields)
-    return layout
-
-
-def _validate_block_fields(
-    block: dict[str, Any],
-    index: int,
-    prefix: str,
-    collection_fields: dict[str, set[str]] | None,
-    tool_fields: dict[str, set[str]] | None,
-) -> None:
-    if "fields" not in block:
-        return
-    if block["type"] == "list" and collection_fields is not None:
-        known = collection_fields.get(block["collection"], set())
-        source = f"the {block['collection']} collection schema"
-    elif block["type"] == "form" and tool_fields is not None:
-        known = tool_fields.get(block["tool"], set())
-        source = f"the {block['tool']} tool input schema"
-    else:
-        return
-    for position, field in enumerate(block["fields"]):
-        if field in known:
-            continue
-        raise ValidationError(
-            f"{prefix}/blocks/{index}/fields/{position}",
-            f"field in {source}",
-            hint=unknown_field_hint(source, field, known),
-        )
-
-
-def _validate_layout_filter(
-    block: dict[str, Any],
-    index: int,
-    prefix: str,
-    collection_fields: dict[str, set[str]] | None,
-    suggest_field: Callable[[str, str, Any, set[str]], str | None] | None,
-) -> None:
-    if block["type"] in {"list", "detail"} and "filter" in block:
-        filter_name = "filter"
-    elif block["type"] == "metric" and "where" in block:
-        filter_name = "where"
-    else:
-        return
-    if collection_fields is None:
-        return
-
-    field_filter = block[filter_name]
-    fields = collection_fields.get(block["collection"], set())
-    field = field_filter["field"]
-    if field in fields:
-        return
-
-    suggestion = (
-        suggest_field(block["collection"], field, field_filter["equals"], fields)
-        if suggest_field is not None
-        else None
-    )
-    raise ValidationError(
-        f"{prefix}/blocks/{index}/{filter_name}/field",
-        "field in collection schema",
-        hint=unknown_field_hint(
-            f"the {block['collection']} collection schema", field, fields, suggestion
-        ),
-    )
-
-
 def unknown_field_hint(
     source: str, field: str, fields: set[str], suggestion: str | None = None
 ) -> str:
@@ -470,10 +245,6 @@ def unknown_field_hint(
     if suggestion is not None:
         hint += f" Did you mean {suggestion}?"
     return hint
-
-
-def _tool_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
-    return {bundle["name"]: set(bundle["input_schema"].get("properties", {})) for bundle in bundles}
 
 
 def _collection_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
@@ -539,14 +310,6 @@ def _same_json_scalar(left: Any, right: Any) -> bool:
     return type(left) is type(right) and left == right
 
 
-def _filter_value_text(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return str(value).lower()
-    return str(value)
-
-
 def _suggest_filter_field(
     db: sqlite3.Connection,
     page_id: str,
@@ -578,57 +341,89 @@ def _suggest_filter_field(
     )
 
 
-def detail_filter_result(
-    db: sqlite3.Connection,
-    page_id: str,
-    collection: str,
-    field_filter: dict[str, Any],
-    collection_fields: set[str],
-) -> dict[str, Any]:
-    field_filter = validate_record_filter(field_filter)
-    field = field_filter["field"]
-    expected = field_filter["equals"]
-    predicate, parameters = _json_scalar_match(field, expected)
-    matched = db.execute(
-        "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? AND " + predicate,
-        (page_id, collection, *parameters),
-    ).fetchone()[0]
-    result: dict[str, Any] = {"matched": matched}
-    if matched:
-        return result
+class RecordExists(Exception):
+    """An insert named a record_id this collection already has."""
 
-    hint = f"no record has {field} = {_filter_value_text(expected)}"
-    suggestion = _suggest_filter_field(db, page_id, collection, field, expected, collection_fields)
-    if suggestion is not None:
-        hint += f"; did you mean {suggestion}?"
-    elif field not in collection_fields:
-        hint += f"; {field} is not in the {collection} collection schema"
-    result["hint"] = hint
-    return result
+
+class _RouteTaken(Exception):
+    """A concurrent create_page committed the same route first."""
+
+
+def block_model_backup(database: Path) -> Path:
+    """Where the v1-v3 migration saves the database with the old block layouts."""
+    return Path(str(database) + ".pre-block-model-v3.backup")
+
+
+def _drop_block_model(db: sqlite3.Connection, database: Path) -> None:
+    """Migrate v1-v3 to v4: back up the database once, then drop the block layout model."""
+    backup = block_model_backup(database)
+    if not backup.exists():
+        # a unique name per process, so two first opens cannot collide on one temporary file
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{backup.name}.", suffix=".tmp", dir=backup.parent
+        )
+        os.close(fd)
+        created = False
+        try:
+            destination = sqlite3.connect(temporary)
+            try:
+                db.backup(destination)
+            finally:
+                destination.close()
+            # link, never replace: a racing first open may already have migrated, and its
+            # copy would overwrite the real v3 backup with a v4 one
+            os.link(temporary, backup)
+            created = True
+        except FileExistsError:
+            pass
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        if created:
+            directory = os.open(backup.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+            print(f"Achilles database backup: {backup}")
+    db.execute("BEGIN IMMEDIATE")
+    if db.execute("PRAGMA user_version").fetchone()[0] != 4:
+        if "active_layout_version" in {row[1] for row in db.execute("PRAGMA table_info(page)")}:
+            db.execute("ALTER TABLE page DROP COLUMN active_layout_version")
+        db.execute("DROP TABLE IF EXISTS layout_version")
+        db.execute("PRAGMA user_version = 4")
+    db.commit()
 
 
 class PageStore:
     def __init__(self, root: Path):
         self.root = root
+        self._failed_rebuilds: dict[tuple[str, str], float] = {}
         for directory in (root, root / "pages", root / "bundles", root / "credentials"):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             directory.chmod(0o700)
         self._database = root / "achilles.sqlite3"
+        self.block_model_backup = block_model_backup(self._database)
         db = self._connect()
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2, 3):
+        if version not in (0, 1, 2, 3, 4):
             raise RuntimeError(f"unsupported Achilles database version: {version}")
+        if version in (1, 2, 3):
+            _drop_block_model(db, self._database)
         db.executescript("""
         CREATE TABLE IF NOT EXISTS page (
           id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
-          zeta_session_id TEXT, active_layout_version INTEGER,
+          zeta_session_id TEXT, active_code_revision INTEGER,
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT,
           created_by_page_id TEXT REFERENCES page(id)
         );
-        CREATE TABLE IF NOT EXISTS layout_version (
+        CREATE TABLE IF NOT EXISTS code_revision (
           page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
-          digest TEXT NOT NULL, document TEXT NOT NULL, created_at TEXT NOT NULL,
+          source TEXT NOT NULL, dependencies TEXT NOT NULL,
+          resolved_dependencies TEXT NOT NULL DEFAULT '{}', lockfile TEXT NOT NULL DEFAULT '',
+          build_report TEXT NOT NULL DEFAULT '{}',
+          digest TEXT, artifact_size INTEGER, diagnostics TEXT, runtime_error TEXT,
+          created_at TEXT NOT NULL,
           PRIMARY KEY(page_id, version)
         );
         CREATE TABLE IF NOT EXISTS audit (
@@ -669,17 +464,17 @@ class PageStore:
         if "credential_hash" not in columns:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
+        ensure_column(db, "page", "active_code_revision", "INTEGER")
+        ensure_column(db, "code_revision", "resolved_dependencies", "TEXT NOT NULL DEFAULT '{}'")
+        ensure_column(db, "code_revision", "lockfile", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(db, "code_revision", "build_report", "TEXT NOT NULL DEFAULT '{}'")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(db, "chat", "purpose", "TEXT NOT NULL DEFAULT 'chat'")
         ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
-        # default 1: rows from before this column, or written by older code, count as sent and
-        # stay listed; only register_chat/save_session insert a new chat as 0 until its first send.
         ensure_column(db, "chat", "message_sent", "INTEGER NOT NULL DEFAULT 1")
         # the compare-and-set key of last_state: every state write adds 1 (updated_at moves only
         # on a user send, so it cannot tell two writes of the same state apart)
         ensure_column(db, "chat", "state_version", "INTEGER NOT NULL DEFAULT 0")
-        # the first message's title, kept apart from `title` so clearing a rename falls back to it;
-        # an older chat's automatic title is its best first-message title.
         ensure_column(
             db,
             "chat",
@@ -687,7 +482,6 @@ class PageStore:
             "TEXT",
             "UPDATE chat SET first_title=title WHERE NOT titled_by_user",
         )
-        # who wrote a record and which one; older rows and older code leave both NULL.
         ensure_column(db, "audit", "actor", "TEXT")
         ensure_column(db, "audit", "record_id", "TEXT")
         stamp = now()
@@ -696,11 +490,9 @@ class PageStore:
             (stamp, stamp),
         )
         db.execute(
-            "INSERT OR IGNORE INTO chat(session_id,page_id,created_at,updated_at) "
-            "SELECT zeta_session_id,id,created_at,updated_at FROM page "
-            "WHERE zeta_session_id IS NOT NULL"
+            "INSERT OR IGNORE INTO chat(session_id,page_id,created_at,updated_at) SELECT zeta_session_id,id,created_at,updated_at FROM page WHERE zeta_session_id IS NOT NULL"  # noqa: E501
         )
-        db.execute("PRAGMA user_version = 3")
+        db.execute("PRAGMA user_version = 4")
         db.commit()
         db.close()
         self._chmod_db()
@@ -738,23 +530,6 @@ class PageStore:
             if path.exists():
                 path.chmod(0o600)
 
-    def _atomic_private_write(self, path: Path, content: bytes) -> None:
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(content)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, path)
-        except BaseException:
-            try:
-                os.unlink(temporary)
-            except FileNotFoundError:
-                pass
-            raise
-
     def ensure_credential(self, page_id: str) -> str:
         with self.transaction() as db:
             row = db.execute("SELECT credential_hash FROM page WHERE id=?", (page_id,)).fetchone()
@@ -766,7 +541,7 @@ class PageStore:
             token = secrets.token_urlsafe(32)
             digest = hashlib.sha256(token.encode()).hexdigest()
             db.execute("UPDATE page SET credential_hash=? WHERE id=?", (digest, page_id))
-            self._atomic_private_write(path, token.encode())
+            atomic_private_write(path, token.encode())
             return token
 
     def authenticate(self, token: str) -> sqlite3.Row | None:
@@ -779,49 +554,6 @@ class PageStore:
     def page(self, key: str) -> sqlite3.Row | None:
         with self._connect() as db:
             return db.execute("SELECT * FROM page WHERE id=? OR route=?", (key, key)).fetchone()
-
-    @staticmethod
-    def _active_layout(
-        db: sqlite3.Connection, page_id: str
-    ) -> tuple[int, str | None, dict[str, Any]] | None:
-        row = db.execute(
-            "SELECT COALESCE(p.active_layout_version, 1),lv.digest,lv.document FROM page p "
-            "LEFT JOIN layout_version lv ON lv.page_id=p.id "
-            "AND lv.version=COALESCE(p.active_layout_version, 1) WHERE p.id=?",
-            (page_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        document = json.loads(row[2]) if row[2] else {"blocks": []}
-        return row[0], row[1], document
-
-    @staticmethod
-    def _computed_layout(
-        db: sqlite3.Connection, page_id: str, document: dict[str, Any]
-    ) -> dict[str, Any]:
-        for block in document.get("blocks", []):
-            if block.get("type") != "metric" or block.get("count") is not True:
-                continue
-            where = block.get("where")
-            if where is None:
-                count = db.execute(
-                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=?",
-                    (page_id, block["collection"]),
-                ).fetchone()[0]
-            else:
-                predicate, parameters = _json_scalar_match(where["field"], where["equals"])
-                count = db.execute(
-                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? AND "
-                    + predicate,
-                    (page_id, block["collection"], *parameters),
-                ).fetchone()[0]
-            block["value"] = count
-        return document
-
-    def layout(self, page_id: str) -> dict[str, Any]:
-        with self._connect() as db:
-            active = self._active_layout(db, page_id)
-            return self._computed_layout(db, page_id, active[2]) if active else {"blocks": []}
 
     @staticmethod
     def _page_tools(db: sqlite3.Connection, page_id: str) -> list[dict[str, Any]]:
@@ -837,26 +569,71 @@ class PageStore:
             for row in rows
         ]
 
-    @staticmethod
-    def _inspect_projection(
-        page: Any,
-        active: tuple[int, str | None, dict[str, Any]],
-        metric_values: list[dict[str, Any]],
-        detail_filter_matches: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        collections: dict[str, int],
-        layout_versions: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        version, digest, document = active
+    def _inspect_page(self, db: sqlite3.Connection, page_id: str) -> dict[str, Any]:
+        page = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
+        if page is None:
+            raise KeyError(page_id)
+        counts = db.execute(
+            "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
+            (page_id,),
+        ).fetchall()
+        tools = self._page_tools(db, page_id)
+        active = (
+            db.execute(
+                "SELECT * FROM code_revision WHERE page_id=? AND version=?",
+                (page_id, page["active_code_revision"]),
+            ).fetchone()
+            if page["active_code_revision"] is not None
+            else None
+        )
+        revisions = db.execute(
+            "SELECT version,created_at,digest,diagnostics,runtime_error FROM code_revision "
+            "WHERE page_id=? ORDER BY version DESC LIMIT 100",
+            (page_id,),
+        ).fetchall()
+        newest = self._newest_code(db, page_id)
+        candidate = (
+            None
+            if newest is None or newest["diagnostics"] is None
+            else {
+                "revision": newest["version"],
+                "files": _file_sizes(newest),
+                "diagnostics": newest["diagnostics"][:_CANDIDATE_DIAGNOSTICS_CHARS],
+            }
+        )
+        code = (
+            None
+            if active is None
+            else {
+                "revision": active["version"],
+                "files": _file_sizes(active),
+                "source": active["source"],
+                "dependencies": json.loads(active["dependencies"]),
+                "resolved_dependencies": json.loads(active["resolved_dependencies"]),
+                "lockfile": active["lockfile"],
+                **json.loads(active["build_report"]),
+                "bundle_size": active["artifact_size"],
+                "digest": active["digest"],
+                "runtime_error": active["runtime_error"],
+                "revisions": [
+                    {
+                        "version": row[0],
+                        "created_at": row[1],
+                        "digest": row[2],
+                        "failed": row[3] is not None and not row[3].startswith(STALE_BUILD),
+                        "stale": row[3] is not None and row[3].startswith(STALE_BUILD),
+                        "runtime_error": row[4],
+                    }
+                    for row in revisions
+                ],
+            }
+        )
         return {
             "route": page["route"],
             "title": page["title"],
             "create_mode": bool(page["create_mode"]),
-            "layout": document,
-            "layout_version": version,
-            "layout_digest": digest,
-            "metric_values": metric_values,
-            "detail_filter_matches": detail_filter_matches,
+            "code": code,
+            "candidate": candidate,
             "tools": [
                 {
                     "name": tool["name"],
@@ -866,108 +643,16 @@ class PageStore:
                 }
                 for tool in tools
             ],
-            "collections": collections,
-            "layout_versions": layout_versions,
+            "collections": {collection: count for collection, count in counts},
         }
-
-    @staticmethod
-    def _detail_filter_matches(
-        db: sqlite3.Connection,
-        page_id: str,
-        layout: dict[str, Any],
-        collection_fields: dict[str, set[str]],
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                "block": index,
-                **detail_filter_result(
-                    db,
-                    page_id,
-                    block["collection"],
-                    block["filter"],
-                    collection_fields.get(block["collection"], set()),
-                ),
-            }
-            for index, block in enumerate(layout.get("blocks", []))
-            if block.get("type") == "detail" and "filter" in block
-        ]
-
-    def _inspect_page(
-        self,
-        db: sqlite3.Connection,
-        page_id: str,
-        active: tuple[int, str | None, dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        row = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
-        if row is None:
-            raise KeyError(page_id)
-        if active is None:
-            active = self._active_layout(db, page_id)
-        assert active is not None
-        version, digest, document = active
-        computed = self._computed_layout(
-            db,
-            page_id,
-            {"blocks": [dict(block) for block in document.get("blocks", [])]},
-        )
-        metric_values = [
-            {"block": index, "value": block["value"]}
-            for index, block in enumerate(computed["blocks"])
-            if block.get("type") == "metric" and block.get("count") is True
-        ]
-        counts = db.execute(
-            "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
-            (page_id,),
-        ).fetchall()
-        tools = self._page_tools(db, page_id)
-        detail_filter_matches = self._detail_filter_matches(
-            db, page_id, document, _collection_fields(tools)
-        )
-        history = db.execute(
-            "SELECT version, created_at, document FROM layout_version WHERE page_id=? "
-            "ORDER BY version DESC LIMIT ?",
-            (page_id, LAYOUT_HISTORY_LIMIT),
-        ).fetchall()
-        layout_versions = [
-            {
-                "version": row[0],
-                "created_at": row[1],
-                "block_types": [block["type"] for block in json.loads(row[2])["blocks"]],
-            }
-            for row in history
-        ]
-        return self._inspect_projection(
-            row,
-            (version, digest, document),
-            metric_values,
-            detail_filter_matches,
-            tools,
-            {collection: count for collection, count in counts},
-            layout_versions,
-        )
 
     def inspect_page(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
             return self._inspect_page(db, page_id)
 
     def versions(self, page_id: str) -> dict[str, Any]:
-        """The page's layout and tool versions, newest first, for the user's history list."""
+        """The page's code and tool versions, newest first, for the user's history list."""
         with self._connect() as db:
-            # shortcut: the newest 100 layouts and 100 per tool; page the list if a page outgrows it
-            layouts = db.execute(
-                "SELECT lv.version, lv.created_at, lv.document, "
-                "lv.version=COALESCE(p.active_layout_version, 1), "
-                "(SELECT a.action FROM audit a WHERE a.page_id=lv.page_id "
-                "AND a.version_digest=lv.digest AND a.created_at=lv.created_at "
-                "AND a.action IN ('create_page','update_layout','restore_layout') LIMIT 1), "
-                # a restore copies the document, so its source is the newest earlier version
-                # with the same digest (any equal version holds the same layout)
-                "(SELECT MAX(o.version) FROM layout_version o WHERE o.page_id=lv.page_id "
-                "AND o.digest=lv.digest AND o.version<lv.version) "
-                "FROM layout_version lv JOIN page p ON p.id=lv.page_id WHERE lv.page_id=? "
-                "ORDER BY lv.version DESC LIMIT 100",
-                (page_id,),
-            ).fetchall()
             tools = db.execute(
                 "SELECT t.name, v.version, v.created_at, v.version=pt.active_version, "
                 "CASE WHEN EXISTS(SELECT 1 FROM audit a WHERE a.action='restore_tool' "
@@ -976,24 +661,118 @@ class PageStore:
                 "AND o.digest=v.digest AND o.version<v.version) END "
                 "FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
                 "JOIN tool_version v ON v.tool_id=t.id WHERE pt.page_id=? "
-                "AND (v.version=pt.active_version "
-                "OR v.version > (SELECT MAX(version) FROM tool_version WHERE tool_id=t.id) - 100) "
+                "AND (v.version=pt.active_version OR v.version > "
+                "(SELECT MAX(version) FROM tool_version WHERE tool_id=t.id) - 100) "
                 "ORDER BY t.name, v.version DESC",
                 (page_id,),
             ).fetchall()
+            code = db.execute(
+                "SELECT c.version,c.created_at,c.version=p.active_code_revision,c.diagnostics,"
+                "CASE WHEN EXISTS(SELECT 1 FROM audit a WHERE a.action='restore_code' "
+                "AND a.version_digest=c.digest AND a.created_at=c.created_at) "
+                "THEN (SELECT MAX(o.version) FROM code_revision o WHERE o.page_id=c.page_id "
+                "AND o.digest=c.digest AND o.version<c.version) END "
+                "FROM code_revision c JOIN page p ON p.id=c.page_id WHERE c.page_id=? "
+                "ORDER BY c.version DESC LIMIT 100",
+                (page_id,),
+            ).fetchall()
         return {
-            "layout": [_layout_version_row(row) for row in layouts],
+            "code": [
+                {
+                    "version": r[0],
+                    "created_at": r[1],
+                    "active": bool(r[2]),
+                    "failed": r[3] is not None and not r[3].startswith(STALE_BUILD),
+                    "stale": r[3] is not None and r[3].startswith(STALE_BUILD),
+                    "restored_from": r[4],
+                }
+                for r in code
+            ],
             "tools": [
                 {
-                    "name": row[0],
-                    "version": row[1],
-                    "created_at": row[2],
-                    "active": bool(row[3]),
-                    "restored_from": row[4],
+                    "name": r[0],
+                    "version": r[1],
+                    "created_at": r[2],
+                    "active": bool(r[3]),
+                    "restored_from": r[4],
                 }
-                for row in tools
+                for r in tools
             ],
         }
+
+    def insert_record(
+        self, page_id: str, collection: str, document: dict[str, Any]
+    ) -> dict[str, Any]:
+        record_id = str(document.get("record_id") or secrets.token_hex(12))
+        stamp = now()
+        with self.transaction() as db:
+            if db.execute(
+                "SELECT 1 FROM page_record WHERE page_id=? AND collection=? AND record_id=?",
+                (page_id, collection, record_id),
+            ).fetchone():
+                raise RecordExists(record_id)
+            db.execute(
+                (
+                    "INSERT INTO page_record(page_id,collection,record_id,version,revision,"
+                    "document,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?)"
+                ),
+                (
+                    page_id,
+                    collection,
+                    record_id,
+                    1,
+                    1,
+                    json.dumps(document, sort_keys=True),
+                    stamp,
+                    stamp,
+                ),
+            )
+            db.execute(
+                "INSERT INTO audit(page_id,action,created_at,actor,record_id) VALUES(?,?,?,?,?)",
+                (page_id, "insert_record", stamp, "page", record_id),
+            )
+        return {**document, "record_id": record_id, "revision": 1}
+
+    def update_record(
+        self, page_id: str, collection: str, record_id: str, fields: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Merge fields into one of this page's records; None when it has no such record."""
+        fields = {k: v for k, v in fields.items() if k not in {"record_id", "revision"}}
+        with self.transaction() as db:
+            found = db.execute(
+                "SELECT document, revision FROM page_record "
+                "WHERE page_id=? AND collection=? AND record_id=?",
+                (page_id, collection, record_id),
+            ).fetchone()
+            if found is None:
+                return None
+            document = {**json.loads(found[0]), **fields}
+            stamp = now()
+            db.execute(
+                "UPDATE page_record SET revision=revision+1, document=?, updated_at=? "
+                "WHERE page_id=? AND collection=? AND record_id=?",
+                (json.dumps(document, sort_keys=True), stamp, page_id, collection, record_id),
+            )
+            db.execute(
+                "INSERT INTO audit(page_id,action,created_at,actor,record_id) VALUES(?,?,?,?,?)",
+                (page_id, "update_record", stamp, "page", record_id),
+            )
+        return {**document, "record_id": record_id, "revision": found[1] + 1}
+
+    def delete_record(self, page_id: str, collection: str, record_id: str) -> bool:
+        with self.transaction() as db:
+            deleted = db.execute(
+                "DELETE FROM page_record WHERE page_id=? AND collection=? AND record_id=?",
+                (page_id, collection, record_id),
+            ).rowcount
+            if deleted:
+                db.execute(
+                    "INSERT INTO audit(page_id,action,created_at,actor,record_id) "
+                    "VALUES(?,?,?,?,?)",
+                    (page_id, "delete_record", now(), "page", record_id),
+                )
+        return bool(deleted)
 
     def records(
         self, page_id: str, collection: str, limit: int = 100
@@ -1250,123 +1029,89 @@ class PageStore:
         self,
         route: str,
         title: str,
-        layout: Any,
+        package: Any = None,
         principal_id: str = "home",
         tools: Any = None,
-    ) -> tuple[sqlite3.Row, str, bool, list[dict[str, Any]], str | None]:
+    ) -> tuple[sqlite3.Row, str, bool, str | None]:
+        package = package or {"source": _MINIMAL_PAGE_SOURCE, "dependencies": {}}
         bundles = [] if tools is None else tools
-        value = {"route": route, "title": title, "layout": layout, "tools": bundles}
-        validate_schema(value, CREATE_PAGE_SCHEMA)
+        validate_schema(
+            {"route": route, "title": title, "package": package, "tools": bundles},
+            CREATE_PAGE_SCHEMA,
+        )
         bundles = [
             validate_bundle(bundle, f"/tools/{index}", reject_conflicting_output=True)
             for index, bundle in enumerate(bundles)
         ]
-        fields = _collection_fields(bundles)
-        validate_layout(
-            layout,
-            {bundle["name"] for bundle in bundles},
-            {bundle["implementation"]["collection"] for bundle in bundles},
-            "/layout",
-            fields,
-            tool_fields=_tool_fields(bundles),
-        )
-        encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
-        digest = hashlib.sha256(encoded.encode()).hexdigest()
-        created_paths: set[Path] = set()
-        page_id: str | None = None
+        with self._connect() as db:
+            principal = db.execute(
+                "SELECT create_mode FROM page WHERE id=?", (principal_id,)
+            ).fetchone()
+            if principal is None or not principal[0]:
+                raise PermissionError("forbidden: create mode is off")
+            existing = db.execute("SELECT * FROM page WHERE route=?", (route,)).fetchone()
+            if existing is not None:
+                active = db.execute(
+                    "SELECT source,dependencies,digest FROM code_revision WHERE page_id=? AND version=?",  # noqa: E501
+                    (existing["id"], existing["active_code_revision"]),
+                ).fetchone()
+                existing_tools = db.execute(
+                    "SELECT v.bundle FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
+                    "JOIN tool_version v ON v.tool_id=t.id AND v.version=pt.active_version "
+                    "WHERE pt.page_id=? ORDER BY t.name",
+                    (existing["id"],),
+                ).fetchall()
+                requested_tools = [
+                    canonical_bundle(bundle)
+                    for bundle in sorted(bundles, key=lambda item: item["name"])
+                ]
+                if (
+                    existing["title"] == title
+                    and active is not None
+                    and active["source"] == package["source"]
+                    and json.loads(active["dependencies"])
+                    == effective_dependencies(package["dependencies"])
+                    and [row[0] for row in existing_tools] == requested_tools
+                ):
+                    return existing, active["digest"], True, _missing_update_note(bundles)
+                raise ValidationError("/route", "unused route or equivalent request", "conflict")
+        page_id = secrets.token_hex(12)
         try:
+            built = build_page(self.root, page_id, package["source"], package["dependencies"])
+        except PageBuildError as exc:
+            raise ValidationError(
+                "/package/source", "a valid build", exc.code, exc.diagnostics
+            ) from exc
+        stamp = now()
+        token = secrets.token_urlsafe(32)
+        created_paths: set[Path] = set()
+        try:
+            workspace = self.root / "pages" / page_id / "workspace"
+            workspace.mkdir(mode=0o700, parents=True)
+            workspace.chmod(0o700)
+            created_paths.add(workspace.parent)
+            credential = self.root / "credentials" / page_id
+            created_paths.add(credential)
+            atomic_private_write(credential, token.encode())
             with self.transaction() as db:
                 principal = db.execute(
                     "SELECT create_mode FROM page WHERE id=?", (principal_id,)
                 ).fetchone()
                 if principal is None or not principal[0]:
                     raise PermissionError("forbidden: create mode is off")
-                existing = db.execute("SELECT * FROM page WHERE route=?", (route,)).fetchone()
-                if existing is not None:
-                    existing_layout = db.execute(
-                        "SELECT document FROM layout_version WHERE page_id=? "
-                        "ORDER BY version DESC LIMIT 1",
-                        (existing["id"],),
-                    ).fetchone()
-                    existing_tools = db.execute(
-                        "SELECT v.bundle FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
-                        "JOIN tool_version v ON v.tool_id=t.id AND v.version=pt.active_version "
-                        "WHERE pt.page_id=? ORDER BY t.name",
-                        (existing["id"],),
-                    ).fetchall()
-                    requested_tools = [
-                        canonical_bundle(bundle)
-                        for bundle in sorted(bundles, key=lambda item: item["name"])
-                    ]
-                    if (
-                        existing["title"] == title
-                        and existing_layout is not None
-                        and existing_layout[0] == encoded
-                        and [row[0] for row in existing_tools] == requested_tools
-                    ):
-                        summary = self._inspect_page(db, existing["id"])["detail_filter_matches"]
-                        return existing, digest, True, summary, _missing_update_note(bundles)
-                    raise ValidationError(
-                        "/route", "unused route or equivalent request", "conflict"
-                    )
-                detail_summary = self._detail_filter_matches(db, "", layout, fields)
-                require_inspectable(
-                    self._inspect_projection(
-                        {"route": route, "title": title, "create_mode": False},
-                        (1, digest, layout),
-                        [
-                            {"block": index, "value": 0}
-                            for index, block in enumerate(layout["blocks"])
-                            if block.get("type") == "metric" and block.get("count") is True
-                        ],
-                        detail_summary,
-                        [
-                            {**bundle, "version": 1}
-                            for bundle in sorted(bundles, key=lambda item: item["name"])
-                        ],
-                        {},
-                        [],
-                    )
-                )
+                if db.execute("SELECT 1 FROM page WHERE route=?", (route,)).fetchone():
+                    raise _RouteTaken
+                # bundle files are shared by digest and never removed on failure: once the lock
+                # is released, another committed call may own the same file
+                for bundle in bundles:
+                    path = self.root / "bundles" / f"{bundle_digest(bundle)}.json"
+                    atomic_private_write(path, (canonical_bundle(bundle) + "\n").encode())
                 hook = getattr(self, "before_create_commit", None)
                 if hook is not None:
                     hook()
-                principal = db.execute(
-                    "SELECT create_mode FROM page WHERE id=?", (principal_id,)
-                ).fetchone()
-                if principal is None or not principal[0]:
-                    raise PermissionError("forbidden: create mode is off")
-                page_id = secrets.token_hex(12)
-                workspace = self.root / "pages" / page_id / "workspace"
-                workspace.mkdir(mode=0o700, parents=True)
-                workspace.chmod(0o700)
-                created_paths.add(workspace.parent)
-                files = [(self.root / "bundles" / f"{digest}.json", (encoded + "\n").encode())]
-                files.extend(
-                    (
-                        self.root / "bundles" / f"{bundle_digest(bundle)}.json",
-                        (canonical_bundle(bundle) + "\n").encode(),
-                    )
-                    for bundle in bundles
-                )
-                for path, content in files:
-                    existed = path.exists()
-                    try:
-                        self._atomic_private_write(path, content)
-                    finally:
-                        if not existed and path.exists():
-                            created_paths.add(path)
-                token = secrets.token_urlsafe(32)
-                credential = self.root / "credentials" / page_id
-                try:
-                    self._atomic_private_write(credential, token.encode())
-                finally:
-                    if credential.exists():
-                        created_paths.add(credential)
-                stamp = now()
                 db.execute(
-                    "INSERT INTO page(id,route,title,active_layout_version,created_at,"
-                    "updated_at,credential_hash,created_by_page_id) VALUES(?,?,?,?,?,?,?,?)",
+                    "INSERT INTO page(id,route,title,active_code_revision,created_at,updated_at,credential_hash,created_by_page_id) "  # noqa: E501
+                    "VALUES(?,?,?,?,?,?,?,?)",
                     (
                         page_id,
                         route,
@@ -1379,42 +1124,61 @@ class PageStore:
                     ),
                 )
                 db.execute(
-                    "INSERT INTO layout_version VALUES(?,?,?,?,?)",
-                    (page_id, 1, digest, encoded, stamp),
+                    "INSERT INTO code_revision(page_id,version,source,dependencies,resolved_dependencies,lockfile,build_report,digest,artifact_size,diagnostics,runtime_error,created_at) "  # noqa: E501
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        page_id,
+                        1,
+                        package["source"],
+                        json.dumps(built["dependencies"], sort_keys=True),
+                        json.dumps(built["resolved_dependencies"], sort_keys=True),
+                        built["lockfile"],
+                        _build_report(built),
+                        built["digest"],
+                        built["size"],
+                        None,
+                        None,
+                        stamp,
+                    ),
                 )
                 db.execute(
                     "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
-                    (page_id, "create_page", digest, stamp),
+                    (page_id, "create_page", built["digest"], stamp),
                 )
-                note = _missing_update_note(bundles)
                 for bundle in bundles:
                     tool_id = secrets.token_hex(12)
-                    tool_digest = bundle_digest(bundle)
+                    digest = bundle_digest(bundle)
                     db.execute(
                         "INSERT INTO tool VALUES(?,?,?,?)",
                         (tool_id, page_id, bundle["name"], stamp),
                     )
                     db.execute(
                         "INSERT INTO tool_version VALUES(?,?,?,?,?)",
-                        (tool_id, 1, tool_digest, canonical_bundle(bundle), stamp),
+                        (tool_id, 1, digest, canonical_bundle(bundle), stamp),
                     )
                     db.execute(
                         "INSERT INTO page_tool VALUES(?,?,?,?)", (page_id, tool_id, 1, stamp)
                     )
                     db.execute(
-                        "INSERT INTO audit(page_id,action,version_digest,created_at) "
-                        "VALUES(?,?,?,?)",
-                        (page_id, "create_tool", tool_digest, stamp),
+                        "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",  # noqa: E501
+                        (page_id, "create_tool", digest, stamp),
                     )
+        except _RouteTaken:
+            self._cleanup_create_paths(created_paths)
+            # another call took the route while this one built: answer as that page now decides
+            return self.create_page(route, title, package, principal_id, tools)
         except (ValidationError, PermissionError):
             self._cleanup_create_paths(created_paths)
             raise
         except Exception as exc:
             self._cleanup_create_paths(created_paths)
             raise ValidationError("", "atomic page creation", "create_failed") from exc
-        row = self.page(page_id or "")
+        except BaseException:
+            self._cleanup_create_paths(created_paths)
+            raise
+        row = self.page(page_id)
         assert row is not None
-        return row, digest, False, detail_summary, note
+        return row, built["digest"], False, _missing_update_note(bundles)
 
     @staticmethod
     def _cleanup_create_paths(paths: set[Path]) -> None:
@@ -1423,93 +1187,6 @@ class PageStore:
                 shutil.rmtree(path, ignore_errors=True)
             else:
                 path.unlink(missing_ok=True)
-
-    def update_layout(
-        self, page_id: str, layout: Any, expected_version: int
-    ) -> tuple[int, str, list[dict[str, Any]]]:
-        validate_schema(
-            {"layout": layout, "expected_version": expected_version}, UPDATE_LAYOUT_SCHEMA
-        )
-        return self._append_layout(page_id, layout, expected_version, "update_layout")
-
-    def restore_layout(
-        self, page_id: str, version: Any, expected_version: Any
-    ) -> tuple[int, str, list[dict[str, Any]]]:
-        """Append a copy of an old layout version; history is never rewritten."""
-        validate_schema(
-            {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
-        )
-        with self._connect() as db:
-            row = db.execute(
-                "SELECT document FROM layout_version WHERE page_id=? AND version=?",
-                (page_id, version),
-            ).fetchone()
-        if row is None:
-            raise ValidationError(
-                "/version",
-                "an existing layout version",
-                "not_found",
-                "Call inspect_page and pick a version from layout_versions.",
-            )
-        return self._append_layout(page_id, json.loads(row[0]), expected_version, "restore_layout")
-
-    def _append_layout(
-        self, page_id: str, layout: dict[str, Any], expected_version: int, action: str
-    ) -> tuple[int, str, list[dict[str, Any]]]:
-        encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
-        digest = hashlib.sha256(encoded.encode()).hexdigest()
-        with self.transaction() as db:
-            page = db.execute("SELECT create_mode FROM page WHERE id=?", (page_id,)).fetchone()
-            if page is None or not page["create_mode"]:
-                raise PermissionError("forbidden: create mode is off")
-            active = self._active_layout(db, page_id)
-            assert active is not None
-            require_inspectable(self._inspect_page(db, page_id, active))
-            active_version = active[0]
-            tools = db.execute(
-                "SELECT t.name, v.bundle FROM page_tool pt "
-                "JOIN tool t ON t.id=pt.tool_id JOIN tool_version v ON v.tool_id=t.id "
-                "AND v.version=pt.active_version WHERE pt.page_id=?",
-                (page_id,),
-            ).fetchall()
-            bundles = [validate_bundle(json.loads(tool["bundle"])) for tool in tools]
-            fields = _collection_fields(bundles)
-            validate_layout(
-                layout,
-                {tool["name"] for tool in tools},
-                {bundle["implementation"]["collection"] for bundle in bundles},
-                "/layout",
-                fields,
-                lambda collection, field, value, collection_fields: _suggest_filter_field(
-                    db, page_id, collection, field, value, collection_fields
-                ),
-                _tool_fields(bundles),
-            )
-            if expected_version != active_version:
-                raise ValidationError(
-                    "/expected_version",
-                    "current active layout version",
-                    "conflict",
-                    "Call inspect_page, set expected_version to layout.version, and retry.",
-                )
-            version = active_version + 1
-            proposed = self._inspect_page(db, page_id, (version, digest, layout))
-            require_inspectable(proposed)
-            detail_summary = proposed["detail_filter_matches"]
-            stamp = now()
-            db.execute(
-                "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=?",
-                (version, stamp, page_id),
-            )
-            db.execute(
-                "INSERT INTO layout_version VALUES(?,?,?,?,?)",
-                (page_id, version, digest, encoded, stamp),
-            )
-            db.execute(
-                "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
-                (page_id, action, digest, stamp),
-            )
-        return version, digest, detail_summary
 
     def create_tool(
         self, page_id: str, bundle: Any, validation_prefix: str = "", target: str | None = None
@@ -1561,7 +1238,7 @@ class PageStore:
                         "SELECT COALESCE(MAX(version), 0) + 1 FROM tool_version WHERE tool_id=?",
                         (tool_id,),
                     ).fetchone()[0]
-                self._atomic_private_write(
+                atomic_private_write(
                     self.root / "bundles" / f"{digest}.json", (encoded + "\n").encode()
                 )
                 db.execute(
@@ -1599,6 +1276,9 @@ class PageStore:
             {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
         )
         with self.transaction() as db:
+            page = db.execute("SELECT create_mode FROM page WHERE id=?", (page_id,)).fetchone()
+            if page is None or not page[0]:
+                raise PermissionError("forbidden: create mode is off")
             row = db.execute(
                 """SELECT pt.tool_id, pt.active_version, v.digest, v.bundle,
                 (SELECT MAX(version) FROM tool_version WHERE tool_id=pt.tool_id)
@@ -1637,6 +1317,268 @@ class PageStore:
                 (page_id, "restore_tool", row["digest"], stamp),
             )
         return {"name": name, "version": restored, "restored_from": version}
+
+    def write_page(
+        self,
+        page_id: str,
+        source: str,
+        dependencies: dict[str, str],
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        page = self.page(page_id)
+        if page is None:
+            raise ValidationError("/page", "an existing page", "not_found")
+        current = page["active_code_revision"] or 0
+        if expected_revision is not None and expected_revision != current:
+            raise ValidationError("/expected_revision", "current code revision", "conflict")
+        stamp = now()
+        error_code = "compile_error"
+        try:
+            result = build_page(self.root, page_id, source, dependencies)
+            diagnostics = None
+            digest = result["digest"]
+            size = result["size"]
+        except PageBuildError as exc:
+            result = {
+                "dependencies": dependencies,
+                "resolved_dependencies": {},
+                "lockfile": "",
+            }
+            diagnostics = exc.diagnostics
+            error_code = exc.code
+            digest = None
+            size = None
+        with self.transaction() as db:
+            active = db.execute(
+                "SELECT COALESCE(active_code_revision, 0) FROM page WHERE id=?", (page_id,)
+            ).fetchone()[0]
+            stale = active != current
+            if stale:
+                diagnostics = f"{STALE_BUILD} {current}, but revision {active} is now active"
+                error_code = "conflict"
+                digest = None
+                size = None
+            version = db.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM code_revision WHERE page_id=?",
+                (page_id,),
+            ).fetchone()[0]
+            db.execute(
+                (
+                    "INSERT INTO code_revision(page_id,version,source,dependencies,"
+                    "resolved_dependencies,lockfile,build_report,digest,artifact_size,"
+                    "diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
+                ),
+                (
+                    page_id,
+                    version,
+                    source,
+                    json.dumps(result.get("dependencies", dependencies), sort_keys=True),
+                    json.dumps(result.get("resolved_dependencies", {}), sort_keys=True),
+                    result.get("lockfile", ""),
+                    _build_report(result),
+                    digest,
+                    size,
+                    diagnostics,
+                    None,
+                    stamp,
+                ),
+            )
+            if diagnostics is None:
+                db.execute(
+                    "UPDATE page SET active_code_revision=?,updated_at=? WHERE id=?",
+                    (version, stamp, page_id),
+                )
+            db.execute(
+                "INSERT INTO audit(page_id,action,version_digest,created_at,actor) "
+                "VALUES(?,?,?,?,?)",
+                (page_id, "write_page", digest, stamp, "page"),
+            )
+        if diagnostics:
+            raise ValidationError(
+                "/source", "a current valid build", error_code, diagnostics, {"revision": version}
+            )
+        return {
+            "page_id": page_id,
+            "revision": version,
+            "digest": digest,
+            "size": size,
+            "dependencies": result["dependencies"],
+            "resolved_dependencies": result["resolved_dependencies"],
+            "lockfile": result["lockfile"],
+        }
+
+    @staticmethod
+    def _newest_code(db: sqlite3.Connection, page_id: str) -> sqlite3.Row | None:
+        """The newest code a page's chat works on: a failed build too, so it can be fixed; a
+        skipped stale build is not, because another write replaced it."""
+        return db.execute(
+            "SELECT * FROM code_revision WHERE page_id=? AND "
+            "(diagnostics IS NULL OR diagnostics NOT LIKE ?) ORDER BY version DESC LIMIT 1",
+            (page_id, STALE_BUILD + "%"),
+        ).fetchone()
+
+    def read_page_file(
+        self, page_id: str, path: str, offset: int = 0, limit: int = 500
+    ) -> dict[str, Any]:
+        with self._connect() as db:
+            row = self._newest_code(db, page_id)
+        if row is None:
+            raise ValidationError("/path", "a page with code", "not_found", _NO_CODE_HINT)
+        # shortcut: chunks count lines, so one huge line is returned whole; count bytes if needed
+        lines = _page_files(row)[path].splitlines(keepends=True)
+        end = min(offset + limit, len(lines))
+        return {
+            "path": path,
+            "revision": row["version"],
+            "failed": row["diagnostics"] is not None,
+            "content": "".join(lines[offset:end]),
+            "offset": offset,
+            "total_lines": len(lines),
+            "next_offset": end if end < len(lines) else None,
+        }
+
+    def edit_page(
+        self, page_id: str, path: str, edits: list[dict[str, str]], expected_revision: int
+    ) -> dict[str, Any]:
+        """Replace each old_string exactly once in one page file, then build it like write_page;
+        nothing is written unless every edit matches."""
+        with self._connect() as db:
+            # active first: a write committing between the reads then fails as a conflict
+            active = db.execute(
+                "SELECT COALESCE(active_code_revision, 0) FROM page WHERE id=?", (page_id,)
+            ).fetchone()
+            row = self._newest_code(db, page_id)
+        if row is None:
+            raise ValidationError("/path", "a page with code", "not_found", _NO_CODE_HINT)
+        if row["version"] != expected_revision:
+            raise ValidationError(
+                "/expected_revision",
+                "the revision read_page_file returned",
+                "conflict",
+                "the page changed; read the file again and redo the edit.",
+                {"revision": row["version"]},
+            )
+        files = _page_files(row)
+        text = files[path]
+        for index, edit in enumerate(edits):
+            count = text.count(edit["old_string"])
+            if count != 1:
+                raise ValidationError(
+                    f"/edits/{index}/old_string",
+                    "text that occurs exactly once in the file",
+                    "edit_error",
+                    f"found {count} matches; nothing was changed. "
+                    + (
+                        "read the file and copy the text exactly."
+                        if count == 0
+                        else "include more surrounding text so it matches once."
+                    ),
+                )
+            text = text.replace(edit["old_string"], edit["new_string"], 1)
+        files[path] = text
+        try:
+            package = json.loads(files["package.json"])
+            dependencies = package["dependencies"]
+            validate_schema(dependencies, PAGE_PACKAGE_SCHEMA["properties"]["dependencies"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValidationError(
+                "/edits", "package.json with a dependencies map of strings", "edit_error"
+            ) from exc
+        return self.write_page(page_id, files["src/Page.tsx"], dependencies, active[0])
+
+    def restore_code(self, page_id: str, version: Any, expected_version: Any) -> dict[str, Any]:
+        """Append a copy of an old code revision; history is never rewritten."""
+        validate_schema(
+            {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
+        )
+        with self.transaction() as db:
+            page = db.execute(
+                "SELECT id,create_mode,active_code_revision FROM page WHERE id=?", (page_id,)
+            ).fetchone()
+            if page is None or not edits_own_page(page):
+                raise PermissionError("forbidden: create mode is off")
+            if page["active_code_revision"] != expected_version:
+                raise ValidationError("/expected_version", "current code revision", "conflict")
+            source = db.execute(
+                "SELECT * FROM code_revision WHERE page_id=? AND version=?", (page_id, version)
+            ).fetchone()
+            if source is None or source["digest"] is None:
+                raise ValidationError("/version", "a successful code revision", "not_found")
+            new_version = db.execute(
+                "SELECT COALESCE(MAX(version),0)+1 FROM code_revision WHERE page_id=?", (page_id,)
+            ).fetchone()[0]
+            stamp = now()
+            db.execute(
+                "INSERT INTO code_revision(page_id,version,source,dependencies,resolved_dependencies,lockfile,build_report,digest,artifact_size,diagnostics,runtime_error,created_at) "  # noqa: E501
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    page_id,
+                    new_version,
+                    source["source"],
+                    source["dependencies"],
+                    source["resolved_dependencies"],
+                    source["lockfile"],
+                    source["build_report"],
+                    source["digest"],
+                    source["artifact_size"],
+                    None,
+                    None,
+                    stamp,
+                ),
+            )
+            db.execute(
+                "UPDATE page SET active_code_revision=?,updated_at=? WHERE id=?",
+                (new_version, stamp, page_id),
+            )
+            db.execute(
+                "INSERT INTO audit(page_id,action,version_digest,created_at,actor) VALUES(?,?,?,?,?)",  # noqa: E501
+                (page_id, "restore_code", source["digest"], stamp, "page"),
+            )
+        return {"revision": new_version, "restored_from": version, "digest": source["digest"]}
+
+    def page_code(self, page_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT active_code_revision FROM page WHERE id=?", (page_id,)
+            ).fetchone()
+            if row is None or row[0] is None:
+                return None
+            code = db.execute(
+                "SELECT * FROM code_revision WHERE page_id=? AND version=?", (page_id, row[0])
+            ).fetchone()
+        return dict(code) if code else None
+
+    def rebuild_artifact(self, page_id: str) -> None:
+        """Rebuild the active revision's missing bundle from its saved source and lockfile."""
+        code = self.page_code(page_id)
+        if code is None or (self.root / "bundles" / f"{code['digest']}.js").is_file():
+            return
+        # a frame GET must not hold a worker thread on a running or recently failed rebuild
+        failed = (page_id, code["digest"])
+        failed_at = self._failed_rebuilds.get(failed)
+        if failed_at is not None and time.monotonic() - failed_at < REBUILD_RETRY_SECONDS:
+            raise PageBuildError("the last rebuild of this revision failed; try again later")
+        try:
+            built = build_page(
+                self.root,
+                page_id,
+                code["source"],
+                json.loads(code["dependencies"]),
+                code["lockfile"] or None,
+                wait=False,
+            )
+            if built["digest"] != code["digest"]:
+                raise PageBuildError("the rebuilt artifact differs from the saved revision")
+        except PageBuildError:
+            self._failed_rebuilds[failed] = time.monotonic()
+            raise
+
+    def set_runtime_error(self, page_id: str, revision: int, error: str) -> None:
+        with self.transaction() as db:
+            db.execute(
+                "UPDATE code_revision SET runtime_error=? WHERE page_id=? AND version=?",
+                (error[:4000], page_id, revision),
+            )
 
     def tool_bundle(self, page_id: str, name: str) -> dict[str, Any] | None:
         with self._connect() as db:

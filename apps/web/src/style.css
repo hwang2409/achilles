@@ -22,7 +22,7 @@ button, input, textarea, select { color: inherit; font: inherit; }
 code { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 /* code faces are spaced for code: the UI tracking never reaches them */
 :where(code, pre, kbd, samp, [data-part="tool"], [data-part="approval"], [data-part="delivery-note"], [data-part="run-end-marker"]) { letter-spacing: normal; }
-.sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+.sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 button, input, textarea, select { border-radius: var(--g1-radius-control); }
 :where(button, .ui-button, .ui-icon-button) { min-height: var(--g1-control-height); padding-inline: var(--g1-space-2); background: transparent; border: 1px solid transparent; border-radius: var(--g1-radius-control); color: inherit; cursor: pointer; }
 :where(.ui-icon-button) { display: inline-grid; place-items: center; min-width: var(--g1-icon-height); min-height: var(--g1-icon-height); padding: 0; }
@@ -90,7 +90,7 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 /* narrow: all text first, then the button, so the banner stays compact */
 /* a phone keeps the button beside the text, so the banner stays about three lines tall */
 @media (max-width: 600px) { .observer-banner { gap: 6px 12px; padding-block: 8px; } .observer-banner button { min-height: 44px; } }
-.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, var(--g1-type-chat)) / var(--g1-leading-chat) var(--achilles-ui-font, var(--g1-font-ui)); }
+.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state { font: var(--achilles-ui-size, var(--g1-type-chat)) / var(--g1-leading-chat) var(--achilles-ui-font, var(--g1-font-ui)); }
 .page-view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 @media (width >= 1280px) {
   .page-view.docked { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: minmax(0, 1fr); }
@@ -153,14 +153,7 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .kept-message { margin: 0; max-width: min(60ch, 100%); }
 .kept-message figcaption { color: var(--fulcrum-muted); }
 .kept-message blockquote { margin: 4px 0 0; padding: 8px 12px; max-height: 12em; overflow-y: auto; border-left: 2px solid var(--fulcrum-border); white-space: pre-wrap; overflow-wrap: anywhere; }
-.required-mark { color: var(--fulcrum-warn); }
-.field-error { margin: 0; color: var(--fulcrum-danger); overflow-wrap: anywhere; }
-.record-form-actions p[role="alert"] { color: var(--fulcrum-danger); }
-.record-form-actions .primary { min-height: 36px; padding: 6px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); }
-.record-form-actions button:not(.primary) { min-height: 36px; padding: 6px 12px; }
-.record-form-actions button:disabled, .record-form-actions button[aria-disabled="true"] { opacity: .6; cursor: default; }
 @media (max-width: 760px), (max-height: 500px) {
-  .record-form-actions button { min-height: 40px; }
   [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
   [data-part="approval"] button { min-height: 40px; }
   .connection-banner { align-items: flex-start; padding: 8px 12px; }

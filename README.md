@@ -10,23 +10,23 @@ cd achilles
 make dev
 ```
 
-prerequisites: `make`, `uv`, `bun`, and `git`, plus a provider and model in the zeta home. `make dev` prepares its pinned zeta checkout; set `ACHILLES_USE_PATH_ZETA=1` only when you want to use `zeta` on `PATH`. providers that use an account must be logged in; local ollama does not need credentials.
+prerequisites: `make`, `uv`, `bun`, `git`, docker (page builds), and playwright chromium (`render_page`; install with `cd apps/web && bun node_modules/playwright/cli.js install chromium`), plus a provider and model in the zeta home. `make dev` prepares its pinned zeta checkout; set `ACHILLES_USE_PATH_ZETA=1` only when you want to use `zeta` on `PATH`. providers that use an account must be logged in; local ollama does not need credentials.
 
 `make dev` installs dependencies, prepares pinned zeta in `.cache/zeta` with its own virtual environment, builds pinned fulcrum packages and the web app when needed, configures achilles in `$ZETA_HOME/mcp.json`, starts or reuses its own zeta serve under the achilles data directory, starts achilles in yolo mode, and opens the app. to use zeta from `PATH` instead, set `ACHILLES_USE_PATH_ZETA=1`; an older path zeta is rejected without changing it.
 
 set `ACHILLES_APPROVAL=ask` to require approval for tool calls.
 
-create-mode pages can use `inspect_page` for themselves and pages they created with `create_page`; older pages can inspect only themselves.
+a page's own chat can edit that page without create mode; create mode is needed only to create pages and tools. create-mode pages can use `inspect_page` for themselves and pages they created with `create_page`; older pages can inspect only themselves.
 
-## metric blocks
+## pages
 
-use `{"type":"metric","label":"books","collection":"books","count":true}` to count every record in a collection. add `"where":{"field":"status","equals":"reading"}` to count exact JSON scalar matches. equality keeps JSON types separate, except integer and decimal forms of the same number are equal. `"equals":null` counts records where the field is missing or is explicitly JSON null.
+pages are React/TypeScript packages compiled by achilles. `create_page` accepts source and npm dependencies, or creates a minimal React shell when the package is omitted. `write_page` appends a compiled revision, and `restore_version` restores code or a data tool by appending another revision so history is never rewritten.
 
 ## eval harness
 
 see [EVALS.md](EVALS.md) for how to run one task or the suite, read the report, and add a task.
 
-run the scripted harness with `make eval TASK=harness-smoke`. the current suite covers `agent-data-access`, `create-and-use-tool-same-chat`, `harness-smoke`, `judge-page-and-annotate`, and `second-chat-tools`. use `N=2` for repeats and `MODEL=provider/model` to override the settings-resolved model. `make eval-stack` starts a retained private stack for a ux test; it prints the local achilles url, model, tool policy, and retained state path. the stack uses `--tools 'achilles__*,mcp_discover'` and never forwards api-key environment variables.
+run one scripted task with `make eval TASK=record-crud`. the suite covers page data, concurrent edits, approvals, reconnects, restarts, and multi-chat behavior. use `N=2` for repeats and `MODEL=provider/model` to override the settings-resolved model. `make eval-stack` starts a retained private stack for a ux test; it prints the local achilles url, model, tool policy, and retained state path. the stack uses `--tools 'achilles__*,mcp_discover'` and never forwards api-key environment variables.
 
 use `make stop` to stop only processes started by `make dev`.
 

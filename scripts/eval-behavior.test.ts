@@ -76,7 +76,6 @@ test("the scripted eval repairs missing target web assets before zeta starts", a
     await writeFile(join(target, "scripts", "test-web-build.ts"), 'await Bun.write(new URL("../apps/web/dist/index.html", import.meta.url), "<!doctype html><body>smoke</body>");\n');
     const task = JSON.parse(await readFile(join(target, "evals", "tasks", "harness-smoke.json"), "utf8"));
     task.id = "preflight-build";
-    task.checks = [{ id: "page", type: "page_exists", page: "smoke" }];
     await writeFile(join(target, "evals", "tasks", "preflight-build.json"), JSON.stringify(task));
     const marker = join(parent, "zeta-started-after-build");
     await installUvWrapper(target, `case " $* " in *" zeta "*" serve "*) if test -f ${JSON.stringify(join(target, "apps/web/dist/index.html"))}; then printf built; else printf missing; fi > ${JSON.stringify(marker)};; esac`);
@@ -107,7 +106,7 @@ if (await mkdir(builds + "/first").then(() => true, () => false)) { await waitFo
 else { await writeFile(builds + "/second-started", ""); await waitFor(dist + "index.html"); await rm(dist, { recursive: true, force: true }); await writeFile(builds + "/second-emptied", ""); await Bun.sleep(2_000); await write(); }
 `);
     const task = JSON.parse(await readFile(join(target, "evals", "tasks", "harness-smoke.json"), "utf8"));
-    task.id = "shared-build"; task.checks = [{ id: "page", type: "page_exists", page: "smoke" }];
+    task.id = "shared-build";
     await writeFile(join(target, "evals", "tasks", "shared-build.json"), JSON.stringify(task));
 
     const results = await Promise.all(["a", "b"].map(name => runEval(target, "shared-build", { REPORT_DIR: join(parent, `report-${name}`) })));

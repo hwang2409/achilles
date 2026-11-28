@@ -1,0 +1,36 @@
+{
+  "good": {
+    "pages": [
+      {"id": "home", "alias": "home"},
+      {"id": "reading", "alias": "reading", "route": "/reading-list"}
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {"page_id": "reading", "route": "/reading-list"}
+      }
+    ],
+    "browser": [
+      {"page_id": "reading", "text": "Synthetic Reading List\nBook One"}
+    ]
+  },
+  "bad": {
+    "pages": [
+      {"id": "home", "alias": "home"},
+      {"id": "reading", "alias": "reading", "route": "/reading-list"}
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {"page_id": "reading", "route": "/reading-list"}
+      }
+    ],
+    "browser": [
+      {"page_id": "reading", "text": "this page has no compiled revision"}
+    ]
+  }
+}

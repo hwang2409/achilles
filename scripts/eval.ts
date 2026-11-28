@@ -6,7 +6,6 @@ import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol 
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
 import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, CANARY_FILENAME, type EvalSnapshot, type EvalTask, type PagePlan, type ProviderError, type TaskSetup, type TaskStep } from "./eval-grade";
 import { createGateWait } from "./gate-diagnostics";
-import { formFields } from "../apps/web/src/page/formSchema";
 import { historyDir, lastRun, loadBaseReport, makeReport, reportJson, reportMarkdown, reportSummary, type BaseReport, type FinalAnswers } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 import { createBrowserDriver, stepFinished, type BrowserDriver } from "./eval-browser";
@@ -55,7 +54,14 @@ async function collectSensitiveFiles(root: string, hidden: string[]) {
   try { const row = JSON.parse(await readFile(join(root, "zeta-home/run/serve.ws.json"), "utf8")); for (const key of ["token", "controller_token", "observer_token"]) if (typeof row[key] === "string") hidden.push(row[key], `zeta.bearer.${row[key]}`); } catch {}
 }
 async function sanitizeAndScanRoot(root: string, hidden: string[]) {
-  await collectSensitiveFiles(root, hidden); await rm(join(root, "achilles-home/credentials"), { recursive: true, force: true }); await rm(join(root, "zeta-home/run"), { recursive: true, force: true }); await scanArtifactTree(root, hidden);
+  await collectSensitiveFiles(root, hidden);
+  await Promise.all([
+    rm(join(root, "achilles-home/credentials"), { recursive: true, force: true }),
+    rm(join(root, "achilles-home/build-cache"), { recursive: true, force: true }),
+    rm(join(root, "achilles-home/package-cache"), { recursive: true, force: true }),
+    rm(join(root, "zeta-home/run"), { recursive: true, force: true }),
+  ]);
+  await scanArtifactTree(root, hidden);
 }
 export async function loadTask(id: string, dir = new URL("../evals/tasks/", import.meta.url).pathname) {
   const task = validateTask(JSON.parse(await readFile(join(dir, `${id}.json`), "utf8")));
@@ -80,7 +86,7 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
 
 const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
 async function preflightBrowser(tasks: EvalTask[]) {
-  if (!tasks.some(task => task.checks.some(check => ["browser_text", "form_submit"].includes(check.type)) || task.steps.some(step => step.kind === "browser_prompt"))) return;
+  if (!tasks.some(task => task.checks.some(check => check.type === "browser_text") || task.steps.some(step => step.kind === "browser_prompt"))) return;
   try { const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true }); await browser.close(); }
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
@@ -100,9 +106,6 @@ if "tools" in inspect.signature(PageStore.create_page).parameters:
     names.append("create_page_with_tools")
 if "page" in getattr(tools, "CREATE_TOOL_SCHEMA", {}).get("properties", {}):
     names.append("create_tool_on_created_page")
-from achilles import pages
-if any(block.get("properties", {}).get("type", {}).get("const") == "list" and "filter" in block["properties"] for block in getattr(pages, "_LAYOUT_BLOCK_SCHEMA", {}).get("oneOf", [])):
-    names.append("list_filter")
 print(json.dumps(names))`;
 export async function productCapabilities(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", CAPABILITIES_SCRIPT], stack.achillesDir);
@@ -110,48 +113,34 @@ export async function productCapabilities(stack: EvalStack) {
   return new Set(JSON.parse(process.stdout) as string[]);
 }
 export const SETUP_SCRIPT = `
-import hashlib, json, sys
+import json, sys
 from pathlib import Path
 from achilles.pages import PageStore, now
 root, page_id, raw = sys.argv[1:]
 setup = json.loads(raw); store = PageStore(Path(root)); store.set_create_mode(page_id, True)
 for item in setup.get("tools", []): store.create_tool(page_id, item)
 with store.transaction() as db:
-    if "initial_layout" in setup:
-        document = json.dumps(setup["initial_layout"], sort_keys=True, separators=(",", ":"))
-        digest = hashlib.sha256(document.encode()).hexdigest()
-        stamp = now()
-        updated = db.execute("UPDATE page SET active_layout_version=1, updated_at=? WHERE id=?", (stamp, page_id))
-        if updated.rowcount != 1: raise RuntimeError(f"setup page {page_id} is missing")
-        db.execute("INSERT INTO layout_version VALUES(?,?,?,?,?) ON CONFLICT(page_id,version) DO UPDATE SET digest=excluded.digest,document=excluded.document,created_at=excluded.created_at", (page_id,1,digest,document,stamp))
     for item in setup.get("records", []):
         stamp = now(); data = item["data"]
         db.execute("INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (page_id,item["collection"],item["id"],1,json.dumps(data,sort_keys=True),stamp,stamp))
-# the stored document, not the computed view: count metrics render as values in store.layout
-with store.transaction() as db:
-    row = db.execute("SELECT lv.document FROM layout_version lv JOIN page p ON p.id=lv.page_id AND lv.version=p.active_layout_version WHERE p.id=?", (page_id,)).fetchone()
-layout = json.loads(row[0]) if row else {"blocks": []}
-if hasattr(store, "inspect_page"):
-    summary = store.inspect_page(page_id)
-else:
-    page = store.page(page_id); summary = {"layout": {"version": page["active_layout_version"] or 1}}
+summary = store.inspect_page(page_id)
 tools = store.page_tools(page_id)
 summary["tools"] = [{"name": tool["name"], "operations": [tool["implementation"]["operation"]], "collection": tool["implementation"]["collection"], "input_schema": tool["input_schema"], "data_schema": tool["implementation"]["data_schema"]} for tool in tools]
 collections = {item["collection"] for item in setup.get("records", [])}
-print(json.dumps({"inspect": summary, "layout": layout, "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
+print(json.dumps({"inspect": summary, "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
 `;
 export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
   const failures = declaredSeedMismatches(setup, actual);
   if (failures.length) throw new Error(`task setup verification failed: ${failures.join(", ")}`);
 }
-// A fixture page with a route is a second, pre-existing page: created as home would create it, with one text block.
+// A fixture page with a route is a second, pre-existing page with the minimal React shell.
 const FIXTURE_PAGE_SCRIPT = `
 import json, sys
 from pathlib import Path
 from achilles.pages import PageStore
 root, route = sys.argv[1:]
 store = PageStore(Path(root)); store.set_create_mode("home", True)
-row = store.create_page(route, route[1:], {"blocks": [{"type": "text", "text": route[1:]}]})[0]
+row = store.create_page(route, route[1:])[0]
 store.set_create_mode("home", False)
 print(json.dumps({"id": row["id"]}))
 `;
@@ -169,7 +158,7 @@ export async function preparePage(stack: EvalStack, task: EvalTask, signal: Abor
   }
   const plan = task.page_plan.find(page => page.source !== "created" && !page.route);
   if (task.setup) {
-    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema, tool.data_schema)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
+    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema, tool.data_schema)), records: task.setup.records };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
     verifySetup(task.setup, JSON.parse(process.stdout));
@@ -187,7 +176,8 @@ async function observerToken(stack: EvalStack, hidden: string[]) {
 async function pageBinding(stack: EvalStack, pageId: string, hidden: string[], signal: AbortSignal) {
   const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}`, {}, signal); if (!response.ok) throw new Error(`page ${pageId} is unavailable`);
   const page = await response.json() as { id: string; workspace: string };
-  const credentialResponse = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${page.id}/credential`, {}, signal); if (!credentialResponse.ok) throw new Error(`page credential failed (${credentialResponse.status})`);
+  const headers = await shellRequestHeaders(stack.achillesOrigin, signal);
+  const credentialResponse = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${page.id}/credential`, { headers }, signal); if (!credentialResponse.ok) throw new Error(`page credential failed (${credentialResponse.status})`);
   const credential = (await credentialResponse.json() as { credential: string }).credential; hidden.push(credential, `Bearer ${credential}`); return { page, credential };
 }
 
@@ -263,8 +253,8 @@ async function waitForTerminal(protocol: () => EvalProtocol, sessionId: string, 
 const SNAPSHOT_SCRIPT = `import json,sqlite3,sys
 c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row
 def q(s): return [dict(r) for r in c.execute(s)]
-out={"pages":q("select id,route,title,active_layout_version from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"layouts":q("select page_id,version,document from layout_version"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id")}
-for k in ("records","layouts"):
+out={"pages":q("select id,route,title,active_code_revision from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id")}
+for k in ("records",):
  for r in out[k]: r["data" if k=="records" else "document"]=json.loads(r["data" if k=="records" else "document"])
 for r in out["tool_versions"]:
  b=json.loads(r.pop("bundle")); r["operation"]=b["implementation"]["operation"]; r["collection"]=b["implementation"]["collection"]; r["input_schema"]=b["input_schema"]; r["data_schema"]=b["implementation"]["data_schema"]
@@ -339,30 +329,18 @@ export function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: R
     const owner = toolOwners.get(String(call.tool));
     if (call.success === true && owner) ids.push(String(call.page_id), owner);
   }
-  for (const type of ["pages", "tools", "assignments", "records", "layouts"] as const) {
+  for (const type of ["pages", "tools", "assignments", "records"] as const) {
     const old = new Set((before[type] ?? []).map(row => rowKey(type, row)));
     for (const row of after[type] ?? []) if (!old.has(rowKey(type, row)) && row.page_id) ids.push(String(row.page_id));
     if (type === "pages") for (const row of after.pages ?? []) if (!old.has(rowKey(type, row)) && row.id) ids.push(String(row.id));
   }
   return ids;
 }
-function listCollections(snapshot: EvalSnapshot, pageId: string) {
-  const layout = (snapshot.layouts ?? []).filter(row => row.page_id === pageId).sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0)).at(-1);
-  const blocks = (layout?.document as { blocks?: unknown[] } | undefined)?.blocks;
-  return Array.isArray(blocks) ? blocks.flatMap(block => block && typeof block === "object" && !Array.isArray(block) && (block as Record<string, unknown>).type === "list" && typeof (block as Record<string, unknown>).collection === "string" ? [(block as Record<string, unknown>).collection as string] : []) : [];
-}
-// Opens a page route and waits until its list blocks loaded their records and the chat connected.
+// Opens a page route and waits until the chat connected.
 async function openReadyPage(browser: any, stack: EvalStack, plan: PagePlan, pageId: string, snapshot: EvalSnapshot, signal: AbortSignal) {
   const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
   const page = await browser.newPage();
-  const remaining = listCollections(snapshot, pageId); const finished: Promise<unknown>[] = [];
-  const recordsSettled = remaining.length ? page.waitForResponse((response: any) => {
-    const path = new URL(response.url()).pathname; const index = remaining.findIndex(collection => path === `/api/pages/${pageId}/records/${collection}`);
-    if (index < 0) return false; remaining.splice(index, 1); finished.push(response.finished().then((error: unknown) => { if (error) throw error; })); return remaining.length === 0;
-  }, { timeout: 10_000 }) : undefined;
   await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "domcontentloaded", timeout: 15_000 });
-  if (recordsSettled) try { await recordsSettled; await page.waitForLoadState("networkidle", { timeout: 10_000 }); await Promise.all(finished); }
-  catch { signal.throwIfAborted(); throw new Error(`browser list records did not settle for page ${plan.alias}: ${remaining.join(", ") || "response body"}`); }
   signal.throwIfAborted();
   let abortReady: (() => void) | undefined;
   try {
@@ -382,75 +360,16 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
     for (const plan of task.page_plan.filter(page => task.checks.some(check => check.type === "browser_text" && check.page === page.alias))) {
       const pageId = pages.get(plan.alias); if (!pageId) continue;
       const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
-      output.push({ page_id: pageId, text: await page.locator("body").innerText({ timeout: 10_000 }) }); await page.close();
+      const frame = page.frameLocator("iframe");
+      for (const check of task.checks.filter(check => check.type === "browser_text" && check.page === plan.alias))
+        await frame.getByText(check.text!, { exact: false }).waitFor({ state: "visible", timeout: 10_000 });
+      const shell = await page.locator("body").innerText({ timeout: 10_000 });
+      const rendered = await frame.locator("body").innerText({ timeout: 10_000 });
+      output.push({ page_id: pageId, text: `${shell}\n${rendered}` }); await page.close();
     }
     return output;
   } finally { await browser.close(); }
 }
-// The insert form blocks of a page's active layout, in render order, with the active input schema of each tool.
-export function insertForms(snapshot: EvalSnapshot, pageId: string) {
-  const layout = (snapshot.layouts ?? []).filter(row => row.page_id === pageId).sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0)).at(-1);
-  const blocks = (layout?.document as { blocks?: unknown[] } | undefined)?.blocks ?? [];
-  const forms = blocks.filter((block): block is Record<string, unknown> => Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type === "form"));
-  return forms.flatMap((block, index) => {
-    const tool = (snapshot.tools ?? []).find(row => row.page_id === pageId && row.name === block.tool);
-    const active = (snapshot.assignments ?? []).find(row => row.page_id === pageId && row.tool_id === tool?.id)?.active_version;
-    const version = (snapshot.tool_versions ?? []).find(row => row.page_id === pageId && row.tool_id === tool?.id && row.version === active);
-    return version?.operation === "insert" ? [{ index, tool: String(block.tool), collection: String(version.collection), input_schema: version.input_schema, fields: Array.isArray(block.fields) ? block.fields.map(String) : undefined }] : [];
-  });
-}
-const recordKeys = (snapshot: EvalSnapshot, pageId: string, collection: string) => new Set((snapshot.records ?? []).filter(row => row.page_id === pageId && row.collection === collection).map(row => String(row.id)));
-// For each insert form on a form_submit page: fill the required inputs from the check's value map, submit, and count the new records in the DB.
-async function formSubmits(stack: EvalStack, task: EvalTask, pages: Map<string, string>, snapshot: EvalSnapshot, signal: AbortSignal) {
-  const checks = task.checks.filter(check => check.type === "form_submit"); if (!checks.length) return [];
-  signal.throwIfAborted(); const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true });
-  try {
-    const output: Array<Record<string, unknown>> = [];
-    for (const check of checks) {
-      const plan = task.page_plan.find(page => page.alias === check.page)!; const pageId = pages.get(plan.alias); if (!pageId) continue;
-      const forms = insertForms(snapshot, pageId); if (!forms.length) continue;
-      const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
-      const gateWait = createGateWait(() => [], () => page.locator("body").innerText({ timeout: 2_000 }).catch(() => "page text unavailable"));
-      const values = check.value as Record<string, string>;
-      for (const form of forms) {
-        signal.throwIfAborted();
-        const row: Record<string, unknown> = { page_id: pageId, tool: form.tool, collection: form.collection };
-        const section = page.locator("section.record-form").nth(form.index);
-        try {
-          await gateWait(() => section.locator('form, p[aria-disabled="true"], [role="alert"]').first().waitFor({ timeout: 10_000 }));
-          const mapped = formFields(form.input_schema, form.fields);
-          if (!await section.locator("form").count()) {
-            if ("unsupported" in mapped) row.unsupported = mapped.unsupported;
-            else row.error = `no form shown: ${await section.innerText({ timeout: 2_000 })}`;
-            output.push(row); continue;
-          }
-          if ("unsupported" in mapped) throw new Error(`the browser shows a form for unsupported field ${mapped.unsupported}`);
-          for (const field of mapped.fields.filter(field => field.required)) {
-            const input = section.locator(`[name="${field.name.replace(/["\\]/g, "\\$&")}"]`);
-            if (field.kind === "enum") await input.selectOption({ index: 1 });
-            else if (field.kind !== "boolean") {
-              const value = values[field.kind]; if (value === undefined) throw new Error(`the value map has no ${field.kind} value for required field ${field.name}`);
-              await input.fill(value);
-            }
-          }
-          const before = recordKeys(await databaseSnapshot(stack), pageId, form.collection);
-          const invoked = gateWait(() => page.waitForResponse((response: any) => response.request().method() === "POST" && new URL(response.url()).pathname === `/api/pages/${pageId}/tools/${encodeURIComponent(form.tool)}/invoke`, { timeout: 10_000 }));
-          await section.locator('button[type="submit"]').click();
-          const response = await invoked as { status(): number; json(): Promise<unknown> };
-          row.status = response.status();
-          if (response.status() >= 400) { row.error = `submit failed (${response.status()}): ${JSON.stringify(await response.json().catch(() => null))}`; output.push(row); continue; }
-          await gateWait(() => section.locator('.record-form-actions [role="status"]').waitFor({ timeout: 10_000 }));
-          const after = recordKeys(await databaseSnapshot(stack), pageId, form.collection);
-          row.new_records = [...after].filter(id => !before.has(id)).length;
-        } catch (error) { signal.throwIfAborted(); row.error = error instanceof Error ? error.message : String(error); }
-        output.push(row);
-      }
-      await page.close();
-    }
-    return output;
-  } finally { await browser.close(); }
-}
-
 // A step answers every approval request with one decision, or answers the n-th request for one tool from a list (later requests and other tools are approved).
 export function approvalDecision(rule: TaskStep["approval"], tool: unknown, next: () => number): "approve" | "deny" {
   if (rule === undefined || typeof rule === "string") return rule ?? "approve";
@@ -462,10 +381,18 @@ export function createDecisionQueue(onError: (error: unknown) => void) {
   let tail: Promise<void> = Promise.resolve();
   return (decide: () => Promise<void>, before?: () => Promise<void>) => { tail = tail.then(async () => { if (before) await before(); await decide(); }).catch(onError); return tail; };
 }
+async function shellRequestHeaders(origin: string, signal: AbortSignal): Promise<HeadersInit> {
+  const shell = await fetchDeadline(origin, {}, signal);
+  const token = (await shell.text()).match(/<meta name="achilles-shell" content="([^"]+)">/)?.[1];
+  if (!token) throw new Error("achilles shell secret is unavailable");
+  return { "X-Achilles-Shell": token };
+}
+
 async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal, armProviderError: (fault?: ProviderError) => void = () => undefined) {
   const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("task deadline exceeded")), TASK_TIMEOUT_MS); const signal = AbortSignal.any([outerSignal, timeout.signal]);
   const pages = await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
-  const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
+  const shellHeaders = await shellRequestHeaders(stack.achillesOrigin, signal);
+  const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, { headers: shellHeaders }, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   let discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const starts = new Map<string, Array<{ step: string; from: number }>>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
@@ -485,7 +412,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
       row.pre_history_ids = (await protocol.sessionHistory(session.id)).map((item: any) => item.id).filter(Boolean);
       row.records_before = ((await databaseSnapshot(stack)).records ?? []).filter(item => item.page_id === session.page_id).map(item => ({ collection: item.collection, id: item.id, data: item.data }));
       const old = protocol; Object.assign(row, await stack.restartZeta()); await old.close().catch(() => undefined);
-      const fresh = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!fresh.ok) throw new Error(`zeta discovery after restart failed (${fresh.status})`);
+      const fresh = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, { headers: shellHeaders }, signal); if (!fresh.ok) throw new Error(`zeta discovery after restart failed (${fresh.status})`);
       discovery = await fresh.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
       protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal });
       const resumed = await protocol.resume(session.id, session.binding!); row.resumed_session_id = String(resumed.session?.session_id ?? resumed.session_id ?? "");
@@ -553,7 +480,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     await browser?.close(); await protocol.close(signal);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
     const canary_hits = task.checks.some(check => check.type === "no_canary") ? await canaryHits(stack.root) : undefined;
-    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], delivery_faults: browser?.deliveryFaults ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers, canary_hits };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], delivery_faults: browser?.deliveryFaults ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers, canary_hits };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
@@ -601,12 +528,13 @@ function scriptedProvider() {
       else if (Bun.env.EVAL_INJECTION_OBEY === "1" && !wroteCanary) toolCalls = [{ function: { name: "bash", arguments: { command: `echo injected > ${CANARY_FILENAME}` } } }];
       else return new Response(`${JSON.stringify({ message: { content: "Your notes: Groceries, Dentist, Book club, Car service, House rules." }, done: true, done_reason: "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
     }
-    else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
+    else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review" } } }];
     else if (prompt.includes("add_note once")) {
       if (turn === 1) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "reconnect note" } } }];
       else if (prompt.includes("after reconnect") && turn === 3) toolCalls = [{ function: { name: "achilles__list_notes", arguments: {} } }];
     }
-    else if (prompt.includes("/eval-smoke") && turn === 1) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", layout: { blocks: [{ type: "text", text: "smoke" }] } } } }];
+    else if (prompt.includes("inspect this page") && turn === 1) toolCalls = [{ function: { name: "achilles__inspect_page", arguments: {} } }];
+    else if (prompt.includes("/eval-smoke") && !toolResults.some(message => message.tool_name === "achilles__create_page") && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<main>smoke</main>);', dependencies: {} } } } }];
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
     return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });

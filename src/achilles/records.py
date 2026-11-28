@@ -59,7 +59,7 @@ def _get(db, page_id, collection, arguments):
     return {**json.loads(found[1]), "record_id": found[0], "revision": found[2]}
 
 
-# a list filter may also match record_id (layout block filters cannot); say so, so the agent
+# a list filter may also match record_id; say so, so the agent
 # does not guess `id`
 _LIST_WHERE_SCHEMA = {
     **_EQUALITY_FILTER_SCHEMA,

@@ -1,8 +1,12 @@
 import json
 import os
+import re
+import shutil
+import signal
 import socket
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,6 +15,8 @@ import pytest
 import uvicorn
 from starlette.testclient import TestClient
 
+import achilles.mcp_server as mcp_server
+import achilles.render_page as render_page_module
 import achilles.web as web
 from achilles.mcp_server import _remove_connection
 from achilles.pages import PageStore
@@ -564,7 +570,7 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     assert home.stat().st_mode & 0o777 == 0o700
     assert (home / "achilles.sqlite3").stat().st_mode & 0o777 == 0o600
     with sqlite3.connect(home / "achilles.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
     for sidecar in (home / "achilles.sqlite3-wal", home / "achilles.sqlite3-shm"):
         if sidecar.exists():
             assert sidecar.stat().st_mode & 0o777 == 0o600
@@ -892,6 +898,22 @@ def test_chat_routes_require_same_origin() -> None:
     )
 
 
+def test_json_routes_reject_a_body_that_is_not_a_json_object(tmp_path) -> None:
+    token = PageStore(tmp_path / "achilles").ensure_credential("home")
+    client = TestClient(web.create_app(), client=("127.0.0.1", 1234), raise_server_exceptions=False)
+    headers = {"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"}
+    bearer = {**headers, "authorization": f"Bearer {token}"}
+    for method, path, sent in (
+        ("POST", "/api/pages/home/runtime-error", bearer),
+        ("PUT", "/api/pages/home/session", headers),
+        ("POST", "/api/pages/home/chats", headers),
+        ("PATCH", "/api/chats/session", headers),
+    ):
+        for body in (b"{not json", b"[1]"):
+            response = client.request(method, path, headers=sent, content=body)
+            assert response.status_code == 400, (path, body, response.status_code)
+
+
 def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
     store = PageStore(tmp_path / "achilles")
     store.set_create_mode("home", True)
@@ -910,9 +932,13 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
     store.create_tool("home", bundle)
     store.create_tool("home", bundle)
     store.set_create_mode("home", True)
-    other = store.create_page("/other", "other", {"blocks": [{"type": "text", "text": "x"}]})
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("other", "/other", "other", "2025-01-01", "2025-01-01"),
+        )
     home_token = store.ensure_credential("home")
-    other_token = store.ensure_credential(other[0]["id"])
+    other_token = store.ensure_credential("other")
     client = TestClient(web.create_app())
     path = "/api/pages/home/tools/annotate_trace/rollback"
     headers = {"authorization": f"Bearer {other_token}", "origin": "http://testserver"}
@@ -924,6 +950,67 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
     }
     assert client.post(path, headers=headers, json={"version": 1}).status_code == 403
     assert store.page_tools("home")[0]["version"] == 2
+
+
+def test_records_reject_a_missing_or_invalid_json_body(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = TestClient(web.create_app())
+    book = client.post("/api/pages/home/records/books", headers=own, json={"title": "dune"})
+    path = f"/api/pages/home/records/books/{book.json()['record_id']}"
+    for method, url in (("POST", "/api/pages/home/records/books"), ("PATCH", path)):
+        for content in (b"", b"{", b"[1]"):
+            response = client.request(method, url, headers=own, content=content)
+            assert response.status_code == 400, (method, content, response.text)
+            assert response.text == "body must be a JSON object"
+    assert client.get("/api/pages/home/records/books", headers=own).json() == [book.json()]
+
+
+def test_http_restores_follow_create_mode(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("other", "/other", "other", "2025-01-01", "2025-01-01"),
+        )
+        for page_id in ("home", "other"):
+            for version in (1, 2):
+                db.execute(
+                    "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+                    "created_at) VALUES(?,?,?,?,?,?)",
+                    (page_id, version, f"v{version}", "{}", f"d{version}", "2025-01-01"),
+                )
+            db.execute("UPDATE page SET active_code_revision=2 WHERE id=?", (page_id,))
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "annotate_trace",
+        "description": "annotate",
+        "input_schema": {"type": "object"},
+        "implementation": {
+            "operation": "insert",
+            "collection": "annotations",
+            "data_schema": {"type": "object"},
+        },
+    }
+    store.set_create_mode("home", True)
+    store.create_tool("home", bundle)
+    store.create_tool("home", bundle | {"description": "annotate v2"})
+    store.set_create_mode("home", False)
+    client = chat_client()
+
+    def post(page_id: str, path: str) -> int:
+        headers = {"authorization": f"Bearer {store.ensure_credential(page_id)}"}
+        body = {"version": 1, "expected_version": 2}
+        return client.post(f"/api/pages/{page_id}/{path}", headers=headers, json=body).status_code
+
+    # with create mode off, home may not restore code or tools; another page restores its code
+    assert post("home", "code/restore") == 403
+    assert post("home", "tools/annotate_trace/rollback") == 403
+    assert store.page("home")["active_code_revision"] == 2
+    assert store.page_tools("home")[0]["version"] == 2
+    assert post("other", "code/restore") == 200
+    assert store.page("other")["active_code_revision"] == 3
 
 
 def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
@@ -1128,18 +1215,70 @@ def test_discovery_allows_browser_same_origin(monkeypatch, tmp_path: Path) -> No
             }
         )
     )
+    static = tmp_path / "dist"
+    static.mkdir()
+    (static / "index.html").write_text("<html><body></body></html>")
+    monkeypatch.setattr(web, "_static_root", lambda: static)
     monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
-    response = TestClient(web.create_app(), client=("127.0.0.1", 1234)).get(
-        "/api/zeta/discovery",
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
         headers={
             "origin": "http://127.0.0.1:5190",
             "host": "127.0.0.1:5190",
             "sec-fetch-site": "same-origin",
         },
     )
+    shell = client.get("/")
+    assert shell.status_code == 200
+    token = re.search(r'<meta name="achilles-shell" content="([^"]+)">', shell.text)
+    assert token is not None
+    response = client.get("/api/zeta/discovery", headers={"x-achilles-shell": token.group(1)})
     assert response.status_code == 200
     assert response.json()["url"] == "ws://127.0.0.1:8765"
     assert response.json()["controller_token"] == "controller-secret"
+
+
+def test_forged_browser_headers_cannot_read_shell_secrets(monkeypatch, tmp_path: Path) -> None:
+    discovery = tmp_path / "discovery.json"
+    discovery.write_text(
+        json.dumps(
+            {
+                "port": 8765,
+                "controller_token": "controller-secret",
+                "observer_token": "observer-secret",
+                "pid": os.getpid(),
+                "origins": ["http://127.0.0.1:5190"],
+            }
+        )
+    )
+    monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={
+            "origin": "http://127.0.0.1:5190",
+            "host": "127.0.0.1:5190",
+            "sec-fetch-site": "same-origin",
+        },
+    )
+    discovery_response = client.get("/api/zeta/discovery")
+    credential_response = client.get("/api/pages/home/credential")
+    assert discovery_response.status_code == 403
+    assert credential_response.status_code == 403
+    assert "secret" not in discovery_response.text + credential_response.text
+
+
+def test_non_ascii_shell_secret_is_forbidden() -> None:
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={"origin": "http://127.0.0.1:5190", "host": "127.0.0.1:5190"},
+    )
+
+    response = client.get("/api/pages/home/credential", headers={"x-achilles-shell": b"\xe9"})
+
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize("port", [True, "8765", 0, 65536])
@@ -1197,7 +1336,7 @@ def test_stopped_zeta_names_the_command_for_this_achilles(
     assert response.json()["start"] == (start and start.format(path=path))
 
 
-def test_chat_list_shows_a_chat_only_after_its_first_message(tmp_path: Path) -> None:
+def test_chat_list_includes_a_chat_only_after_its_first_message(tmp_path: Path) -> None:
     client = chat_client()
     client.post("/api/pages/home/chats", json={"session_id": "sent"})
     first = client.patch("/api/chats/sent", json={"first_message": "  about birds  "}).json()
@@ -1290,53 +1429,7 @@ def test_chats_from_a_database_without_the_sent_marker_stay_listed(tmp_path: Pat
         "untitled": (True, None, None),
     }
     with sqlite3.connect(home / "achilles.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
-
-
-def test_layout_restore_is_page_bound_guarded_and_audited(tmp_path: Path) -> None:
-    store = PageStore(tmp_path / "achilles")
-    store.set_create_mode("home", True)
-    page = store.create_page("/notes", "notes", {"blocks": [{"type": "text", "text": "one"}]})
-    page_id = page[0]["id"]
-    store.set_create_mode(page_id, True)
-    store.update_layout(page_id, {"blocks": [{"type": "text", "text": "two"}]}, 1)
-    own = {"authorization": f"Bearer {store.ensure_credential(page_id)}"}
-    other = {"authorization": f"Bearer {store.ensure_credential('home')}"}
-    client = chat_client()
-    restore = f"/api/pages/{page_id}/layout/restore"
-
-    assert client.get(f"/api/pages/{page_id}/versions", headers=other).status_code == 403
-    refused = client.post(restore, headers=other, json={"version": 1, "expected_version": 2})
-    assert refused.status_code == 403
-    stale = client.post(restore, headers=own, json={"version": 1, "expected_version": 1})
-    assert stale.status_code == 409
-    assert stale.json()["error"]["code"] == "conflict"
-    assert store.layout(page_id)["blocks"][0]["text"] == "two"
-
-    restored = client.post(restore, headers=own, json={"version": 1, "expected_version": 2})
-    assert restored.json() == {"version": 3, "restored_from": 1}
-    assert store.layout(page_id)["blocks"][0]["text"] == "one"
-    history = client.get(f"/api/pages/{page_id}/versions", headers=own).json()
-    rows = [
-        (row["version"], row["active"], row["action"], row["restored_from"])
-        for row in history["layout"]
-    ]
-    assert rows == [
-        (3, True, "restore_layout", 1),
-        (2, False, "update_layout", None),
-        (1, False, "create_page", None),
-    ]
-    with store._connect() as db:
-        actions = [
-            row[0] for row in db.execute("SELECT action FROM audit WHERE page_id=?", (page_id,))
-        ]
-    assert actions[-1] == "restore_layout"
-
-    store.set_create_mode(page_id, False)
-    off = client.post(restore, headers=own, json={"version": 2, "expected_version": 3})
-    assert off.status_code == 403
-    assert off.json()["error"]["code"] == "forbidden"
-    assert store.layout(page_id)["blocks"][0]["text"] == "one"
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 def test_versions_lists_tool_versions_with_the_active_one(tmp_path: Path) -> None:
@@ -1372,3 +1465,260 @@ def test_versions_lists_tool_versions_with_the_active_one(tmp_path: Path) -> Non
         ("annotate_trace", 2, False, None),
         ("annotate_trace", 1, False, None),
     ]
+
+
+def test_compiled_frame_has_response_sandbox_and_anonymous_artifacts(tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    store = PageStore(root)
+    digest = "a" * 64
+    (root / "bundles" / f"{digest}.js").write_text("export default 1")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,digest,"
+            "artifact_size,diagnostics,runtime_error,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("home", 1, "source", "{}", digest, 16, None, None, "2025-01-01"),
+        )
+        db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+
+    with TestClient(web.create_app()) as client:
+        frame = client.get("/api/pages/home/frame")
+        artifact = client.get(f"/api/pages/home/artifact/{digest}", headers={"origin": "null"})
+        bootstrap = client.get(
+            "/api/pages/home/frame-bootstrap.js?revision=1", headers={"origin": "null"}
+        )
+
+    csp = frame.headers["content-security-policy"]
+    assert "sandbox allow-scripts allow-forms allow-downloads allow-modals" in csp
+    assert "style-src 'self' https: 'unsafe-inline'" in csp
+    assert "img-src 'self' https: data: blob:" in csp
+    assert "font-src 'self' https: data: blob:" in csp
+    assert "<script>" not in frame.text
+    assert "crossorigin='anonymous'" in frame.text
+    assert artifact.headers["access-control-allow-origin"] == "*"
+    assert bootstrap.headers["access-control-allow-origin"] == "*"
+    assert "window.achilles" in bootstrap.text
+
+
+def test_fresh_home_is_plain_chat_and_a_codeless_page_keeps_the_notice(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("old", "/old", "old block page", "2025-01-01", "2025-01-01"),
+        )
+
+    with TestClient(web.create_app()) as client:
+        home = client.get("/api/pages/home").json()
+        old = client.get("/api/pages/old").json()
+
+    assert home["code"] is None
+    assert home["unsupported_format"] is None
+    assert old["unsupported_format"] == web.EMPTY_PAGE
+
+
+def test_a_codeless_page_in_a_migrated_home_names_the_layout_backup(tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    root.mkdir()
+    fixture = Path(__file__).parent / "fixtures/old-block-achilles.sqlite3"
+    shutil.copy(fixture, root / "achilles.sqlite3")
+    store = PageStore(root)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("old", "/old", "old block page", "2025-01-01", "2025-01-01"),
+        )
+
+    with TestClient(web.create_app()) as client:
+        old = client.get("/api/pages/old").json()
+
+    backup = root / "achilles.sqlite3.pre-block-model-v3.backup"
+    assert old["unsupported_format"] == (
+        f"{web.EMPTY_PAGE} the old layout of this page is saved in {backup}"
+    )
+
+
+def test_page_bridge_updates_and_deletes_only_its_own_records(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("other", "/other", "other", "2025-01-01", "2025-01-01"),
+        )
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    other = {"authorization": f"Bearer {store.ensure_credential('other')}"}
+    client = TestClient(web.create_app())
+    book = client.post("/api/pages/home/records/books", headers=own, json={"title": "dune"})
+    theirs = client.post("/api/pages/other/records/books", headers=other, json={"title": "emma"})
+    path = f"/api/pages/home/records/books/{book.json()['record_id']}"
+
+    updated = client.patch(path, headers=own, json={"read": True})
+    assert updated.status_code == 200, updated.text
+    assert updated.json() == {**book.json(), "read": True, "revision": 2}
+    assert client.get("/api/pages/home/records/books", headers=own).json() == [updated.json()]
+
+    # another page's credential, or this page's credential on another page's record, is refused
+    assert client.patch(path, headers=other, json={"read": False}).status_code == 403
+    assert client.delete(path, headers=other).status_code == 403
+    their_id = theirs.json()["record_id"]
+    leaked = client.patch(f"/api/pages/home/records/books/{their_id}", headers=own, json={"x": 1})
+    assert leaked.status_code == 404
+    assert "emma" not in leaked.text
+    assert (
+        client.delete(f"/api/pages/home/records/books/{their_id}", headers=own).status_code == 404
+    )
+    assert client.get("/api/pages/other/records/books", headers=other).json() == [theirs.json()]
+
+    assert client.delete(path, headers=own).status_code == 200
+    assert client.get("/api/pages/home/records/books", headers=own).json() == []
+    assert client.delete(path, headers=own).status_code == 404
+
+
+def test_a_duplicate_record_id_insert_is_a_409(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = TestClient(web.create_app(), raise_server_exceptions=False)
+    url = "/api/pages/home/records/books"
+    assert client.post(url, headers=own, json={"record_id": "r1"}).status_code == 200
+    duplicate = client.post(url, headers=own, json={"record_id": "r1", "title": "again"})
+    assert duplicate.status_code == 409, duplicate.text
+    assert client.get(url, headers=own).json() == [{"record_id": "r1", "revision": 1}]
+
+
+def test_non_utf8_body_is_a_400_not_a_500(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    headers = {
+        "authorization": f"Bearer {store.ensure_credential('home')}",
+        "host": "127.0.0.1:5190",
+        "origin": "http://127.0.0.1:5190",
+        "content-type": "application/json",
+    }
+    client = TestClient(web.create_app(), client=("127.0.0.1", 1234), raise_server_exceptions=False)
+    for path in (
+        "/api/pages/home/records/notes",
+        "/api/pages/home/code/restore",
+        "/api/pages/home/tools/add_note/rollback",
+    ):
+        response = client.post(path, headers=headers, content=b'{"version": "\xff"}')
+        assert response.status_code == 400, path
+
+
+def _mcp(client, token: str):
+    """Opens one MCP session for the page that owns `token`; returns an rpc(method, params)."""
+    headers = {
+        "host": "127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+    params = {
+        "protocolVersion": "2025-03-26",
+        "capabilities": {},
+        "clientInfo": {"name": "test", "version": "1"},
+    }
+    body = {"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": params}
+    headers["mcp-session-id"] = client.post("/mcp/", headers=headers, json=body).headers[
+        "mcp-session-id"
+    ]
+
+    def rpc(method, params):
+        body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        return client.post("/mcp/", headers=headers, json=body).json()["result"]
+
+    return rpc
+
+
+def test_render_page_follows_the_edit_gate_and_own_page_rule(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        for page_id, creator in (("parent", None), ("child", "parent"), ("theirs", "parent")):
+            db.execute(
+                "INSERT INTO page(id,route,title,created_at,updated_at,created_by_page_id) "
+                "VALUES(?,?,?,?,?,?)",
+                (page_id, f"/{page_id}", page_id, "2025-01-01", "2025-01-01", creator),
+            )
+
+    def render(rpc, arguments):
+        return rpc("tools/call", {"name": "render_page", "arguments": arguments})
+
+    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+        home = _mcp(client, store.ensure_credential("home"))
+        parent = _mcp(client, store.ensure_credential("parent"))
+        listed = home("tools/list", {})["tools"]
+        off = render(home, {})
+        # a page's own chat may render its own page without create mode, but not a page it created
+        child_without_create = render(parent, {"page_id": "child"})
+        store.set_create_mode("home", True)
+        # in create mode, a page another page created stays off limits
+        theirs = render(home, {"page_id": "theirs"})
+        codeless = render(home, {})
+    assert "render_page" not in [tool["name"] for tool in listed]
+    assert off["isError"] and off["content"][0]["text"] == "forbidden: create mode is off"
+    for refused in (child_without_create, theirs):
+        assert refused["isError"] and "forbidden" in refused["content"][0]["text"], refused
+    assert codeless["isError"] and "no_code" in codeless["content"][0]["text"]
+
+
+def test_render_page_runs_two_at_once_and_a_third_is_busy(monkeypatch, tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    token = store.ensure_credential("home")
+    started, release = threading.Semaphore(0), threading.Event()
+
+    def blocked_render(origin, page_id, credential):
+        started.release()
+        release.wait(10)
+        return {"ready": True}
+
+    monkeypatch.setattr(PageStore, "page_code", lambda self, page_id: {"version": 1})
+    monkeypatch.setattr(mcp_server, "render_page", blocked_render)
+    monkeypatch.setattr(mcp_server, "RENDER_WAIT_SECONDS", 0.2, raising=False)
+    call = {"name": "render_page", "arguments": {}}
+    with (
+        TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client,
+        ThreadPoolExecutor(2) as pool,
+    ):
+        # one session runs its calls in order, so each render gets its own session
+        first, second, third = (_mcp(client, token) for _ in range(3))
+        try:
+            running = [pool.submit(rpc, "tools/call", call) for rpc in (first, second)]
+            assert started.acquire(timeout=10) and started.acquire(timeout=10)
+            busy = third("tools/call", call)
+        finally:
+            release.set()
+        done = [future.result(10) for future in running]
+        # both slots are free again once the renders end
+        after = third("tools/call", call)
+    assert busy["isError"] and "busy" in busy["content"][0]["text"], busy
+    assert [result.get("isError") for result in done] == [False, False]
+    assert not after.get("isError"), after
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "output", "error"),
+    [(1, "", "runner failed"), (0, "not json", "not JSON")],
+)
+def test_render_runner_failure_is_a_plain_error_and_kills_its_group(
+    monkeypatch, tmp_path: Path, exit_code: int, output: str, error: str
+) -> None:
+    pid_file = tmp_path / "runner.pid"
+    runner = tmp_path / "runner.sh"
+    # the runner leaves a detached child behind, like a chromium the runner never closed
+    runner.write_text(
+        f"echo $$ > {pid_file}; sleep 60 </dev/null >/dev/null 2>&1 & printf '{output}'; "
+        f"exit {exit_code}"
+    )
+    monkeypatch.setattr(render_page_module, "_RUNNER", runner)
+    monkeypatch.setattr(render_page_module.shutil, "which", lambda name: "/bin/sh")
+    with pytest.raises(render_page_module.RenderError, match=error):
+        render_page_module.render_page("http://127.0.0.1:1", "home", "token", timeout=5)
+    group = int(pid_file.read_text())
+    for _ in range(100):  # SIGKILL is delivered asynchronously
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.killpg(group, signal.SIGKILL)
+        pytest.fail(f"process group {group} still had a live process")

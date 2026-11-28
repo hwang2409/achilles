@@ -18,10 +18,10 @@ BUILTIN_TOOL_NAMES = (
     "inspect_page",
     "create_page",
     "create_tool",
-    "update_layout",
     "restore_version",
 )
-_RESERVED_NAMES = BUILTIN_TOOL_NAMES
+# the page-code tools are built in too; a page tool with their name would be unreachable
+_RESERVED_NAMES = (*BUILTIN_TOOL_NAMES, "write_page", "read_page_file", "edit_page", "render_page")
 
 _JSON_SCHEMA = {
     "type": "object",

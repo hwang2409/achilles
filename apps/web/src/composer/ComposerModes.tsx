@@ -6,7 +6,7 @@ export type ComposerMode = { on: boolean; toggle?: () => void; reason?: string; 
 /** The chat's modes and model, one row in the composer bar of both the plain and the vim composer. */
 export function ComposerModes({ create, approval, model }: { create?: ComposerMode; approval?: ComposerMode; model?: string | null }) {
   const switches: [ComposerMode | undefined, WriteSurfaceId, string, string, string][] = [
-    [create, WRITE_SURFACE.composerCreateMode, "create", "create mode on: this chat can change the page layout", "create mode off: this chat changes page data only"],
+    [create, WRITE_SURFACE.composerCreateMode, "create", "create mode on: this chat can also create pages and tools", "create mode off: this chat cannot create pages or tools, and the home chat cannot edit code"],
     [approval, WRITE_SURFACE.composerAutoApprove, "auto-approve", "tools run without asking", "ask before running tools"],
   ];
   return <div data-part="composer-modes">

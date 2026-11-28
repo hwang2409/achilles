@@ -20,15 +20,30 @@ test("read-only history loads but disables restore without a POST", async () => 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push(`${init?.method ?? "GET"} ${String(input)}`);
     return Response.json({
-      layout: [{ version: 1, created_at: "2026-01-01T00:00:00Z", block_types: ["text"], summary: "text", active: false, action: "create_page", restored_from: null }],
-      tools: [],
+      code: [{ version: 2, created_at: "2026-01-02T00:00:00Z", active: true, failed: false, stale: false }, { version: 1, created_at: "2026-01-01T00:00:00Z", active: false, failed: true, stale: false }],
+      tools: [{ name: "add_book", version: 1, created_at: "2026-01-01T00:00:00Z", active: false, restored_from: null }],
     });
   }) as typeof fetch;
   mounted = render(createElement(HistoryDialog, {
-    pageId: "p1", credential: "c", createMode: true, opener, onClose: () => {}, onChanged: () => {},
+    pageId: "p1", credential: "c", opener, onClose: () => {}, onChanged: () => {},
     canWrite: false, disabledReason: "this tab is read-only; take control to make changes",
   }));
   await waitFor(() => expect(mounted?.getByText("this tab is read-only; take control to make changes")).toBeTruthy());
-  expect((mounted?.getByRole("button", { name: "restore" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((mounted?.getByRole("button", { name: "restore v1" }) as HTMLButtonElement).disabled).toBe(true);
   expect(calls.filter((call) => call.startsWith("POST "))).toEqual([]);
+  expect(mounted?.getByText("build failed")).toBeTruthy();
+  expect(mounted?.getAllByText("current")).toHaveLength(1);
+});
+
+test("without create mode, tool restore is disabled with the reason shown and code restore stays", async () => {
+  globalThis.fetch = (async () => Response.json({
+    code: [{ version: 2, created_at: "2026-01-02T00:00:00Z", active: true, failed: false, stale: false }, { version: 1, created_at: "2026-01-01T00:00:00Z", active: false, failed: false, stale: false }],
+    tools: [{ name: "add_book", version: 2, created_at: "2026-01-02T00:00:00Z", active: true, restored_from: null }, { name: "add_book", version: 1, created_at: "2026-01-01T00:00:00Z", active: false, restored_from: null }],
+  })) as typeof fetch;
+  mounted = render(createElement(HistoryDialog, { pageId: "p1", credential: "c", opener, onClose: () => {}, onChanged: () => {}, canWrite: true, createMode: false }));
+  await waitFor(() => expect(mounted?.getByText("restoring a tool needs create mode")).toBeTruthy());
+  const [code, tool] = mounted!.getAllByRole("button", { name: "restore v1" }) as HTMLButtonElement[];
+  expect(code.disabled).toBe(false);
+  expect(tool.disabled).toBe(true);
+  expect(tool.title).toBe("restoring a tool needs create mode");
 });

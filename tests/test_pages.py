@@ -1,373 +1,26 @@
 import json
+import shutil
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from pathlib import Path
 
 import pytest
-from jsonschema import Draft202012Validator
 
-from achilles.pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, PageStore, validate_layout
-from achilles.records import call_record
+import achilles.pages as pages
+from achilles.pages import PageStore
 from achilles.tools import ValidationError
-from achilles.validation import error_document
-
-_BUNDLE = {
-    "format_version": 1,
-    "kind": "data_operation",
-    "name": "add_book",
-    "description": "add a book",
-    "input_schema": {
-        "type": "object",
-        "properties": {"title": {"type": "string"}},
-        "required": ["title"],
-        "additionalProperties": False,
-    },
-    "implementation": {
-        "operation": "insert",
-        "collection": "books",
-        "data_schema": {
-            "type": "object",
-            "properties": {"title": {"type": "string"}},
-            "required": ["title"],
-            "additionalProperties": False,
-        },
-    },
-}
 
 
-def _update_page(store: PageStore) -> str:
-    store.set_create_mode("home", True)
-    page, _, _, _, _ = store.create_page(
-        "/reading",
-        "reading",
-        {"blocks": [{"type": "list", "title": "books", "collection": "books"}]},
-        tools=[_BUNDLE],
-    )
-    store.set_create_mode(page["id"], True)
-    return page["id"]
-
-
-@pytest.mark.parametrize(
-    ("layout", "assigned_tools"),
-    [
-        ({"blocks": []}, set()),
-        ({"blocks": [{"type": "text", "text": "ok"}]}, set()),
-        ({"blocks": [{"type": "detail", "title": "x", "fields": ["id"]}]}, set()),
-        ({"blocks": [{"type": "metric", "label": "runs", "value": "3"}]}, set()),
-        (
-            {
-                "blocks": [
-                    {
-                        "type": "metric",
-                        "label": "reading",
-                        "collection": "books",
-                        "count": True,
-                        "where": {"field": "status", "equals": "reading"},
-                    }
-                ]
-            },
-            set(),
-        ),
-        ({"blocks": [{"type": "list", "title": "runs", "collection": "runs"}]}, set()),
-        ({"blocks": [{"type": "form", "title": "add", "tool": "add_run"}]}, {"add_run"}),
-    ],
-)
-def test_every_layout_variant_matches_catalog_schema(layout, assigned_tools):
-    validate_layout(layout, assigned_tools)
-    assert Draft202012Validator(LAYOUT_SCHEMA).is_valid(layout)
-
-
-@pytest.mark.parametrize(
-    "layout",
-    [
-        {"blocks": [{"type": "text", "text": "ok", "extra": True}]},
-        {"blocks": [{"type": "text", "text": 1}]},
-        {"blocks": [{"type": "unknown"}]},
-    ],
-)
-def test_invalid_layouts_fail_catalog_and_production(layout):
-    assert not Draft202012Validator(LAYOUT_SCHEMA).is_valid(layout)
-    with pytest.raises(ValidationError) as caught:
-        validate_layout(layout)
-    assert caught.value.code == "invalid_input"
-
-
-@pytest.mark.parametrize("equals", [None, True, 1, 1.5, "reading"])
-def test_computed_metric_schema_accepts_each_json_scalar(equals):
-    validate_layout(
-        {
-            "blocks": [
-                {
-                    "type": "metric",
-                    "label": "matching",
-                    "collection": "books",
-                    "count": True,
-                    "where": {"field": "status", "equals": equals},
-                }
-            ]
-        }
-    )
-
-
-@pytest.mark.parametrize(
-    ("metric", "bad_value"),
-    [
-        (
-            {
-                "type": "metric",
-                "label": "bad field",
-                "collection": "books",
-                "count": True,
-                "where": {"field": 'status") OR 1=1 --', "equals": "reading"},
-            },
-            'status") OR 1=1 --',
-        ),
-        (
-            {
-                "type": "metric",
-                "label": "bad equals",
-                "collection": "books",
-                "count": True,
-                "where": {"field": "status", "equals": {"nested": True}},
-            },
-            {"nested": True},
-        ),
-        (
-            {
-                "type": "metric",
-                "label": "extra",
-                "collection": "books",
-                "count": True,
-                "extra": "secret",
-            },
-            "secret",
-        ),
-    ],
-)
-def test_computed_metric_schema_rejects_unsafe_input_without_echo(metric, bad_value):
-    layout = {"blocks": [metric]}
-    assert not Draft202012Validator(LAYOUT_SCHEMA).is_valid(layout)
-    with pytest.raises(ValidationError) as caught:
-        validate_layout(layout)
-    error = error_document(caught.value)
-    assert set(error) == {"code", "path", "expected"}
-    assert json.dumps(bad_value) not in json.dumps(error)
-
-
-def test_computed_metrics_count_records_at_read_time(tmp_path):
-    store = PageStore(tmp_path)
-    store.set_create_mode("home", True)
-    layout = {
-        "blocks": [
-            {"type": "metric", "label": "all", "collection": "books", "count": True},
-            {
-                "type": "metric",
-                "label": "reading",
-                "collection": "books",
-                "count": True,
-                "where": {"field": "status", "equals": "reading"},
-            },
-            {"type": "metric", "label": "missing", "collection": "other", "count": True},
-        ]
-    }
-    schema = {
-        "type": "object",
-        "properties": {"status": {"type": "string"}},
-        "additionalProperties": False,
-    }
-    metric_bundle = {
-        **_BUNDLE,
-        "input_schema": schema,
-        "implementation": {**_BUNDLE["implementation"], "data_schema": schema},
-    }
-    page, _, _, _, _ = store.create_page("/metrics", "metrics", layout, tools=[metric_bundle])
-    store.set_create_mode(page["id"], True)
-    assert store.update_layout(page["id"], layout, 1)[0] == 2
+def _revisions(store: PageStore) -> list[dict]:
     with store.transaction() as db:
-        for index, document in enumerate(
-            ({"status": "reading"}, {"status": "done"}, {"status": "reading"})
-        ):
-            db.execute(
-                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
-                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (page["id"], "books", str(index), 1, json.dumps(document), "now", "now"),
-            )
-
-    blocks = store.layout(page["id"])["blocks"]
-    assert [block["value"] for block in blocks] == [3, 2, 0]
-    inspected = store.inspect_page(page["id"])
-    assert inspected["metric_values"] == [
-        {"block": 0, "value": 3},
-        {"block": 1, "value": 2},
-        {"block": 2, "value": 0},
+        rows = db.execute(
+            "SELECT digest, diagnostics, resolved_dependencies, lockfile FROM code_revision "
+            "WHERE page_id='home' ORDER BY version DESC"
+        ).fetchall()
+    return [
+        dict(row) | {"resolved_dependencies": json.loads(row["resolved_dependencies"])}
+        for row in rows
     ]
-
-
-def test_inspected_computed_metric_layout_round_trips_to_update(tmp_path):
-    store = PageStore(tmp_path)
-    store.set_create_mode("home", True)
-    layout = {
-        "blocks": [{"type": "metric", "label": "books", "collection": "books", "count": True}]
-    }
-    page, _, _, _, _ = store.create_page("/metrics", "metrics", layout)
-    store.set_create_mode(page["id"], True)
-
-    inspected = store.inspect_page(page["id"])
-    assert inspected["layout"] == layout
-    assert store.update_layout(page["id"], inspected["layout"], inspected["layout_version"])[0] == 2
-
-
-def test_computed_metric_equals_preserves_json_scalar_types(tmp_path):
-    store = PageStore(tmp_path)
-    store.set_create_mode("home", True)
-    equals_values = [True, False, "1", 1, None]
-    layout = {
-        "blocks": [
-            {
-                "type": "metric",
-                "label": str(value),
-                "collection": "items",
-                "count": True,
-                "where": {"field": "value", "equals": value},
-            }
-            for value in equals_values
-        ]
-    }
-    schema = {
-        "type": "object",
-        "properties": {"value": {}},
-        "additionalProperties": False,
-    }
-    metric_bundle = {
-        **_BUNDLE,
-        "input_schema": schema,
-        "implementation": {
-            **_BUNDLE["implementation"],
-            "collection": "items",
-            "data_schema": schema,
-        },
-    }
-    page, _, _, _, _ = store.create_page("/metrics", "metrics", layout, tools=[metric_bundle])
-    with store.transaction() as db:
-        for index, document in enumerate(
-            (
-                {},
-                {"value": None},
-                {"value": True},
-                {"value": 1},
-                {"value": 1.0},
-                {"value": "true"},
-                {"value": False},
-                {"value": 0},
-                {"value": ""},
-                {"value": "1"},
-            )
-        ):
-            db.execute(
-                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
-                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (page["id"], "items", str(index), 1, json.dumps(document), "now", "now"),
-            )
-
-    assert [block["value"] for block in store.layout(page["id"])["blocks"]] == [
-        1,
-        1,
-        1,
-        2,
-        2,
-    ]
-
-
-@pytest.mark.parametrize(
-    "route, allowed",
-    [
-        (f"/{segment}{suffix}", False)
-        for segment in (
-            "chats",
-            "pages",
-            "agents",
-            "sessions",
-            "projects",
-            "telemetry",
-            "skills",
-            "agent-profiles",
-            "settings",
-            "accounts",
-            "mcp",
-            "create",
-            "api",
-            "assets",
-        )
-        for suffix in ("", "/report")
-    ]
-    + [("/settingsx", True), ("/create-list", True), ("/my/settings", True)],
-)
-def test_create_page_schema_rejects_reserved_route_through_store(tmp_path, route, allowed):
-    value = {"route": route, "title": "report", "layout": {"blocks": []}}
-    store = PageStore(tmp_path)
-    store.set_create_mode("home", True)
-    if allowed:
-        page, *_ = store.create_page(**value)
-        assert page["route"] == route
-    else:
-        with pytest.raises(ValidationError) as caught:
-            store.create_page(**value)
-        assert caught.value.path == "/route"
-        assert caught.value.expected.startswith("pattern ")
-    assert Draft202012Validator(CREATE_PAGE_SCHEMA).is_valid(value) == allowed
-
-
-def test_layout_rejects_unknown_tool_reference() -> None:
-    with pytest.raises(ValidationError) as caught:
-        validate_layout({"blocks": [{"type": "form", "title": "x", "tool": "other"}]})
-    assert caught.value.path == "/blocks/0/tool"
-    assert caught.value.expected == "assigned tool name"
-
-
-def test_create_page_commits_layout_and_audit(tmp_path) -> None:
-    store = PageStore(tmp_path)
-    store.set_create_mode("home", True)
-    page, digest, existing, _, _ = store.create_page(
-        "/reports", "reports", {"blocks": [{"type": "text", "text": "hello"}]}
-    )
-    assert page["route"] == "/reports"
-    with store.transaction() as db:
-        assert db.execute("SELECT digest FROM layout_version").fetchone()[0] == digest
-        assert db.execute("SELECT action FROM audit").fetchone()[0] == "create_page"
-    assert (tmp_path / "bundles" / f"{digest}.json").exists()
-
-
-def test_existing_page_session_is_copied_to_chat_once(tmp_path) -> None:
-    database = tmp_path / "achilles.sqlite3"
-    with sqlite3.connect(database) as db:
-        db.execute(
-            "CREATE TABLE page (id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, "
-            "title TEXT NOT NULL, zeta_session_id TEXT, active_layout_version INTEGER, "
-            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
-            "create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT)"
-        )
-        db.execute(
-            "INSERT INTO page VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                "existing",
-                "/existing",
-                "existing",
-                "session-old",
-                None,
-                "created",
-                "updated",
-                0,
-                None,
-            ),
-        )
-        db.execute("PRAGMA user_version = 3")
-    PageStore(tmp_path)
-    PageStore(tmp_path)
-    with sqlite3.connect(database) as db:
-        assert db.execute(
-            "SELECT session_id,page_id,created_at,updated_at FROM chat "
-            "WHERE session_id='session-old'"
-        ).fetchall() == [("session-old", "existing", "created", "updated")]
 
 
 def test_old_chat_table_defaults_to_chat_purpose(tmp_path) -> None:
@@ -387,7 +40,7 @@ def test_old_chat_table_defaults_to_chat_purpose(tmp_path) -> None:
     assert store.chat("old-chat").get("purpose") == "chat"
     assert store.chats(1)[0]["purpose"] == "chat"
     with store.transaction() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 def test_old_audit_table_gains_actor_and_record_id(tmp_path) -> None:
@@ -405,128 +58,6 @@ def test_old_audit_table_gains_actor_and_record_id(tmp_path) -> None:
             "SELECT action, actor, record_id FROM audit WHERE action LIKE 'old%' ORDER BY id"
         ).fetchall()
     assert [tuple(row) for row in rows] == [("old", None, None), ("older", None, None)]
-
-
-def test_update_layout_rejects_stale_and_unknown_tool_without_writes(tmp_path):
-    store = PageStore(tmp_path)
-    page_id = _update_page(store)
-    with store._connect() as db:
-        before = {
-            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
-            for table in ("page", "layout_version", "audit")
-        }
-
-    with pytest.raises(ValidationError) as stale:
-        store.update_layout(page_id, {"blocks": []}, 2)
-    assert (stale.value.code, stale.value.path, stale.value.expected) == (
-        "conflict",
-        "/expected_version",
-        "current active layout version",
-    )
-    with pytest.raises(ValidationError) as unknown:
-        store.update_layout(
-            page_id,
-            {"blocks": [{"type": "form", "title": "edit", "tool": "missing"}]},
-            1,
-        )
-    assert (unknown.value.path, unknown.value.expected) == (
-        "/layout/blocks/0/tool",
-        "assigned tool name",
-    )
-    with store._connect() as db:
-        after = {
-            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
-            for table in ("page", "layout_version", "audit")
-        }
-    assert after == before
-
-
-def test_concurrent_layout_updates_have_one_winner(tmp_path):
-    store = PageStore(tmp_path)
-    page_id = _update_page(store)
-    barrier = Barrier(2)
-
-    def update(text):
-        connection = PageStore(tmp_path)
-        barrier.wait(timeout=10)
-        try:
-            return connection.update_layout(
-                page_id, {"blocks": [{"type": "text", "text": text}]}, 1
-            )
-        except ValidationError as exc:
-            return exc
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = list(pool.map(update, ("first", "second")))
-    winners = [outcome for outcome in outcomes if isinstance(outcome, tuple)]
-    conflicts = [outcome for outcome in outcomes if isinstance(outcome, ValidationError)]
-    assert len(winners) == 1 and winners[0][0] == 2
-    assert len(conflicts) == 1 and conflicts[0].code == "conflict"
-    with store._connect() as db:
-        assert (
-            db.execute(
-                "SELECT COUNT(*) FROM layout_version WHERE page_id=?", (page_id,)
-            ).fetchone()[0]
-            == 2
-        )
-        assert (
-            db.execute(
-                "SELECT COUNT(*) FROM audit WHERE page_id=? AND action='update_layout'", (page_id,)
-            ).fetchone()[0]
-            == 1
-        )
-
-
-def test_update_layout_preserves_records_tools_and_chats(tmp_path):
-    store = PageStore(tmp_path)
-    page_id = _update_page(store)
-    store.register_chat(page_id, "synthetic-chat")
-    call_record(store, page_id, "add_book", {"title": "one"}, 1, "agent")
-    with store._connect() as db:
-        before = {
-            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
-            for table in ("page_record", "tool", "tool_version", "page_tool", "chat")
-        }
-    layout = {"blocks": [{"type": "text", "text": "updated"}]}
-    assert store.update_layout(page_id, layout, 1)[0] == 2
-    assert store.layout(page_id) == layout
-    assert store.inspect_page(page_id)["layout_version"] == 2
-    with store._connect() as db:
-        after = {
-            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
-            for table in ("page_record", "tool", "tool_version", "page_tool", "chat")
-        }
-    assert after == before
-
-
-def test_null_active_layout_version_reads_version_one_not_latest(tmp_path):
-    store = PageStore(tmp_path)
-    page_id = _update_page(store)
-    inactive = {"blocks": [{"type": "text", "text": "inactive"}]}
-    with store.transaction() as db:
-        db.execute("UPDATE page SET active_layout_version=NULL WHERE id=?", (page_id,))
-        db.execute(
-            "INSERT INTO layout_version VALUES(?,?,?,?,?)",
-            (page_id, 2, "inactive", json.dumps(inactive), "later"),
-        )
-    assert store.layout(page_id)["blocks"][0]["type"] == "list"
-    assert store.inspect_page(page_id)["layout_version"] == 1
-
-
-def test_versions_summary_labels_each_layout_from_its_first_block(tmp_path):
-    store = PageStore(tmp_path)
-    store.set_create_mode("home", True)
-    page, _, _, _, _ = store.create_page(
-        "/n", "n", {"blocks": [{"type": "text", "text": "  v1  the   start "}]}
-    )
-    pid = page["id"]
-    store.set_create_mode(pid, True)
-    store.update_layout(pid, {"blocks": [{"type": "detail", "title": "pick", "fields": ["id"]}]}, 1)
-    store.update_layout(pid, {"blocks": [{"type": "metric", "label": "runs", "value": "3"}]}, 2)
-    store.update_layout(pid, {"blocks": []}, 3)
-    summaries = [row.get("summary") for row in store.versions(pid)["layout"]]
-    # newest first: empty -> None, metric -> label, detail -> title, text -> collapsed text
-    assert summaries == [None, "runs", "pick", "v1 the start"]
 
 
 def test_save_session_compare_and_set_has_one_winner(tmp_path):
@@ -562,72 +93,330 @@ def test_save_session_compare_and_set_has_one_winner(tmp_path):
             ]
 
 
-def test_list_and_form_fields_refuse_unknown_names_before_any_write(tmp_path):
-    store = PageStore(tmp_path)
-    store.set_create_mode("home", True)
+def _built(source: str = "ok") -> dict:
+    return {
+        "digest": f"digest-{source}",
+        "size": len(source),
+        "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", "nanoid": "^5"},
+        "resolved_dependencies": {"react": "19.0.0", "react-dom": "19.0.0", "nanoid": "5.1.6"},
+        "lockfile": "exact lockfile",
+    }
 
-    def blocks(list_fields, form_fields):
+
+def test_code_build_failure_keeps_previous_revision_active(monkeypatch, tmp_path):
+    import achilles.pages as pages
+    from achilles.page_build import PageBuildError
+
+    store = PageStore(tmp_path)
+    monkeypatch.setattr(pages, "build_page", lambda *_: _built())
+    first = store.write_page("home", "first", {"nanoid": "^5"}, 0)
+    monkeypatch.setattr(
+        pages,
+        "build_page",
+        lambda *_: (_ for _ in ()).throw(PageBuildError("src/Page.tsx:2:3: bad")),
+    )
+
+    with pytest.raises(ValidationError) as failure:
+        store.write_page("home", "broken", {}, 1)
+
+    assert failure.value.hint == "src/Page.tsx:2:3: bad"
+    assert store.page_code("home")["version"] == first["revision"]
+    failed = _revisions(store)[0]
+    assert failed["digest"] is None and failed["diagnostics"] == "src/Page.tsx:2:3: bad"
+
+
+def test_overlapping_build_cannot_activate_after_expected_revision_changes(monkeypatch, tmp_path):
+    from threading import Event
+
+    import achilles.pages as pages
+
+    store = PageStore(tmp_path)
+    slow_started, release_slow = Event(), Event()
+
+    def build(_root, _page_id, source, _dependencies):
+        if source == "slow":
+            slow_started.set()
+            assert release_slow.wait(10)
+        return _built(source)
+
+    monkeypatch.setattr(pages, "build_page", build)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        slow = pool.submit(store.write_page, "home", "slow", {}, 0)
+        assert slow_started.wait(10)
+        fast = store.write_page("home", "fast", {}, 0)
+        release_slow.set()
+        with pytest.raises(ValidationError) as failure:
+            slow.result()
+        assert failure.value.hint == "build started at revision 0, but revision 1 is now active"
+
+    assert store.page_code("home")["digest"] == fast["digest"]
+    revisions = _revisions(store)
+    assert revisions[0]["digest"] is None
+    assert (
+        revisions[0]["diagnostics"] == "build started at revision 0, but revision 1 is now active"
+    )
+
+
+def test_code_revision_returns_exact_versions_and_lockfile(monkeypatch, tmp_path):
+    import achilles.pages as pages
+
+    store = PageStore(tmp_path)
+    monkeypatch.setattr(pages, "build_page", lambda *_: _built())
+    result = store.write_page("home", "ok", {"nanoid": "^5"}, 0)
+
+    assert result["resolved_dependencies"]["nanoid"] == "5.1.6"
+    assert result["lockfile"] == "exact lockfile"
+    revision = _revisions(store)[0]
+    assert revision["resolved_dependencies"] == {
+        "nanoid": "5.1.6",
+        "react": "19.0.0",
+        "react-dom": "19.0.0",
+    }
+    assert revision["lockfile"] == "exact lockfile"
+
+
+@pytest.fixture
+def built(monkeypatch):
+    counter = 0
+
+    def build(_root, _page_id, source, dependencies):
+        nonlocal counter
+        counter += 1
         return {
-            "blocks": [
-                {"type": "list", "title": "books", "collection": "books", "fields": list_fields},
-                {"type": "form", "title": "add", "tool": "add_book", "fields": form_fields},
-            ]
+            "digest": f"digest-{counter}",
+            "size": len(source),
+            "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", **dependencies},
+            "resolved_dependencies": {
+                "react": "19.0.0",
+                "react-dom": "19.0.0",
+                **{name: "1.0.0" for name in dependencies},
+            },
+            "lockfile": f"lock-{counter}",
         }
 
-    with pytest.raises(ValidationError) as unknown_column:
-        store.create_page("/a", "a", blocks(["title", "author"], ["title"]), tools=[_BUNDLE])
-    assert (unknown_column.value.path, unknown_column.value.expected) == (
-        "/layout/blocks/0/fields/1",
-        "field in the books collection schema",
-    )
-    assert "Unknown field: author. Fields: title." in unknown_column.value.hint
-    with pytest.raises(ValidationError) as unknown_input:
-        store.create_page("/a", "a", blocks(["title"], ["titel"]), tools=[_BUNDLE])
-    assert unknown_input.value.path == "/layout/blocks/1/fields/0"
-    assert "Unknown field: titel. Fields: title." in unknown_input.value.hint
-    with pytest.raises(ValidationError) as repeated:
-        store.create_page("/a", "a", blocks(["title", "title"], ["title"]), tools=[_BUNDLE])
-    assert repeated.value.path == "/layout/blocks/0"
-    assert [page["route"] for page in store.pages()[0]] == ["/"]
-
-    page_id = _update_page(store)
-    with pytest.raises(ValidationError) as on_update:
-        store.update_layout(page_id, blocks(["status"], []), 1)
-    assert on_update.value.path == "/layout/blocks/0/fields/0"
-    chosen = blocks(["title"], ["title"])
-    assert store.update_layout(page_id, chosen, 1)[0] == 2
-    assert store.layout(page_id) == chosen
+    monkeypatch.setattr(pages, "build_page", build)
 
 
-def test_stored_layout_without_fields_still_reads_and_updates(tmp_path):
+def test_old_database_migrates_in_place_with_backup_and_non_page_data(tmp_path, capsys):
+    database = tmp_path / "achilles.sqlite3"
+    shutil.copy(Path(__file__).parent / "fixtures/old-block-achilles.sqlite3", database)
+
     store = PageStore(tmp_path)
-    page_id = _update_page(store)
-    # the shape stored before list and form blocks had fields
-    old = {
-        "blocks": [
-            {"type": "list", "title": "books", "collection": "books"},
-            {"type": "form", "title": "add", "tool": "add_book"},
-        ]
-    }
-    with store.transaction() as db:
-        db.execute(
-            "UPDATE layout_version SET document=? WHERE page_id=? AND version=1",
-            (json.dumps(old), page_id),
+
+    backup = Path(str(database) + ".pre-block-model-v3.backup")
+    assert capsys.readouterr().out.strip() == f"Achilles database backup: {backup}"
+    assert backup.is_file()
+    with sqlite3.connect(database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert (
+            db.execute("SELECT name FROM sqlite_master WHERE name='layout_version'").fetchone()
+            is None
         )
-    assert store.layout(page_id) == old
-    assert store.inspect_page(page_id)["layout"] == old
-    assert store.update_layout(page_id, old, 1)[0] == 2
+        assert "active_layout_version" not in {
+            row[1] for row in db.execute("PRAGMA table_info(page)")
+        }
+        assert db.execute("SELECT document FROM page_record").fetchone()[0] == '{"text": "keep me"}'
+        assert (
+            db.execute("SELECT title FROM chat WHERE session_id='chat-1'").fetchone()[0]
+            == "kept chat"
+        )
+        # main's ensure_column runs after the v3 -> v4 drop and leaves old chats at version 0
+        assert db.execute(
+            "SELECT state_version FROM chat WHERE session_id='chat-1'"
+        ).fetchone() == (0,)
+        assert (
+            db.execute("SELECT source FROM code_revision")
+            .fetchone()[0]
+            .startswith("export default")
+        )
+        assert db.execute("SELECT COUNT(*) FROM audit").fetchone()[0] >= 0
+    assert store.page_code("home")["digest"] == "code-digest"
+
+    PageStore(tmp_path)
+    assert capsys.readouterr().out == ""
+    with sqlite3.connect(backup) as db:
+        assert db.execute("SELECT document FROM layout_version").fetchone() is not None
 
 
-def test_page_list_order_survives_setting_toggles(tmp_path) -> None:
+def test_migration_after_another_process_migrated_is_a_no_op(monkeypatch, tmp_path):
+    database = tmp_path / "achilles.sqlite3"
+    shutil.copy(Path(__file__).parent / "fixtures/old-block-achilles.sqlite3", database)
+    backup = Path(str(database) + ".pre-block-model-v3.backup")
+    racing = sqlite3.connect(database)
+    assert racing.execute("PRAGMA user_version").fetchone()[0] == 3
+    try:
+        PageStore(tmp_path)  # the other process wins the first open
+        # the racing open checked for the backup before the winner wrote it
+        real_exists = Path.exists
+        monkeypatch.setattr(Path, "exists", lambda path: path != backup and real_exists(path))
+        pages._drop_block_model(racing, database)
+    finally:
+        racing.close()
+
+    with sqlite3.connect(database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+    with sqlite3.connect(backup) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3, "v3 backup was overwritten"
+    assert [path.name for path in tmp_path.iterdir() if path.name.endswith(".tmp")] == []
+
+
+def test_create_write_inspect_history_and_restore_code(built, tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    source = "export default function Page(){return <main>one</main>}"
+    page, digest, existing, _ = store.create_page(
+        "/notes", "notes", {"source": source, "dependencies": {}}
+    )
+    assert not existing
+    assert digest == "digest-1"
+    page_id = page["id"]
+
+    written = store.write_page(
+        page_id,
+        "export default function Page(){return <main>two</main>}",
+        {},
+        expected_revision=1,
+    )
+    inspected = store.inspect_page(page_id)
+    assert written["revision"] == 2
+    assert inspected["code"]["revision"] == 2
+    assert [row["version"] for row in store.versions(page_id)["code"]] == [2, 1]
+
+    store.set_create_mode(page_id, True)
+    restored = store.restore_code(page_id, 1, 2)
+    assert restored == {"revision": 3, "restored_from": 1, "digest": "digest-1"}
+    assert store.page_code(page_id)["source"] == source
+    assert store.versions(page_id)["code"][0]["restored_from"] == 1
+
+
+def test_inspect_bounds_non_ascii_candidate_diagnostics(built, monkeypatch, tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    page, _, _, _ = store.create_page("/notes", "notes")
+
+    def fail(*_args):
+        raise pages.PageBuildError("書" * 3000)
+
+    monkeypatch.setattr(pages, "build_page", fail)
+    with pytest.raises(ValidationError):
+        store.write_page(page["id"], "broken", {}, expected_revision=1)
+    result, encoded = pages.bounded_inspect(store.inspect_page(page["id"]))
+    assert result["candidate"]["revision"] == 2
+    assert result["candidate"]["diagnostics"].startswith("書")
+    assert len(encoded.encode()) <= pages.INSPECT_MAX_BYTES
+
+
+def test_edit_page_conflicts_when_a_write_commits_between_its_reads(built, monkeypatch, tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    page, _, _, _ = store.create_page(
+        "/notes", "notes", {"source": "<main>one</main>", "dependencies": {}}
+    )
+    newest_code = store._newest_code
+    injected = []
+
+    def newest_then_write(db, page_id):
+        row = newest_code(db, page_id)
+        if not injected:
+            injected.append(store.write_page(page_id, "<main>newer</main>", {}, 1))
+        return row
+
+    monkeypatch.setattr(store, "_newest_code", newest_then_write)
+    with pytest.raises(ValidationError) as raised:
+        store.edit_page(page["id"], "src/Page.tsx", [{"old_string": "one", "new_string": "two"}], 1)
+    assert raised.value.code == "conflict"
+    assert store.page_code(page["id"])["source"] == "<main>newer</main>"
+
+
+def test_create_page_without_package_builds_minimal_react_shell(built, tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    page, _, _, _ = store.create_page("/empty", "empty")
+    code = store.page_code(page["id"])
+    assert 'createRoot(document.getElementById("root")!)' in code["source"]
+    assert code["version"] == 1
+
+
+def test_existing_page_session_is_copied_to_chat_once(tmp_path) -> None:
+    database = tmp_path / "achilles.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "CREATE TABLE page (id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, "
+            "title TEXT NOT NULL, zeta_session_id TEXT, active_layout_version INTEGER, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT)"
+        )
+        db.execute(
+            "INSERT INTO page VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                "existing",
+                "/existing",
+                "existing",
+                "session-old",
+                None,
+                "created",
+                "updated",
+                0,
+                None,
+            ),
+        )
+        db.execute("PRAGMA user_version = 3")
+    PageStore(tmp_path)
+    PageStore(tmp_path)
+    with sqlite3.connect(database) as db:
+        assert db.execute(
+            "SELECT session_id,page_id,created_at,updated_at FROM chat "
+            "WHERE session_id='session-old'"
+        ).fetchall() == [("session-old", "existing", "created", "updated")]
+
+
+def test_page_list_order_survives_setting_toggles(built, tmp_path) -> None:
     store = PageStore(tmp_path / "achilles")
-    reading = _update_page(store)
+    store.set_create_mode("home", True)
+    reading = store.create_page("/reading", "reading")[0]["id"]
     order = [page["route"] for page in store.pages()[0]]
     assert order == ["/", "/reading"]
-    store.set_create_mode(reading, False)
-    store.set_create_mode("home", False)
     store.set_create_mode(reading, True)
+    store.set_create_mode("home", False)
+    store.set_create_mode(reading, False)
     assert [page["route"] for page in store.pages()[0]] == order
     first, cursor = store.pages(limit=1)
     assert [page["route"] for page in first] == ["/"]
     assert [page["route"] for page in store.pages(limit=1, before=cursor)[0]] == ["/reading"]
+
+
+@pytest.mark.parametrize(
+    "route, allowed",
+    [
+        (f"/{segment}{suffix}", False)
+        for segment in (
+            "chats",
+            "pages",
+            "agents",
+            "sessions",
+            "projects",
+            "telemetry",
+            "skills",
+            "agent-profiles",
+            "settings",
+            "accounts",
+            "mcp",
+            "create",
+            "api",
+            "assets",
+        )
+        for suffix in ("", "/report")
+    ]
+    + [("/settingsx", True), ("/create-list", True), ("/my/settings", True)],
+)
+def test_create_page_schema_rejects_reserved_route_through_store(built, tmp_path, route, allowed):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    if allowed:
+        page, *_ = store.create_page(route, "report")
+        assert page["route"] == route
+    else:
+        with pytest.raises(ValidationError) as caught:
+            store.create_page(route, "report")
+        assert caught.value.path == "/route"
+        assert caught.value.expected.startswith("pattern ")

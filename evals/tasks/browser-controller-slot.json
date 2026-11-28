@@ -1,6 +1,7 @@
 {
   "id": "browser-controller-slot",
-"suite": "focused",
+  "suite": "focused",
+  "backend": "scripted",
   "page_plan": [
     {
       "alias": "home",
@@ -23,7 +24,7 @@
       "kind": "prompt",
       "page": "home",
       "chat": "smoke-chat",
-      "prompt": "call create_page to create /eval-smoke with title Eval Smoke and a layout containing one text block whose text is smoke"
+      "prompt": "call create_page to create /eval-smoke with title Eval Smoke and a React package that renders smoke"
     }
   ],
   "checks": [
@@ -32,14 +33,6 @@
       "type": "page_exists",
       "page": "smoke",
       "route": "/eval-smoke"
-    },
-    {
-      "id": "layout",
-      "type": "layout_contains",
-      "page": "smoke",
-      "value": {
-        "text": "smoke"
-      }
     },
     {
       "id": "create",

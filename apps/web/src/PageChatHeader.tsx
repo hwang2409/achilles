@@ -7,6 +7,9 @@ import { WRITE_SURFACE } from "./writeSurfaces";
 import { rowState } from "./zeta/rowState";
 import "./page-chat-header.css";
 
+// the open chat is already new: the empty chat below says so, so the disabled + keeps this only as its tooltip
+export const ALREADY_NEW = "already in a new chat";
+
 export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, onSelect, newChat, newReason, close, closeRef }: {
   pageId: string;
   sessionId: string | null;
@@ -20,6 +23,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
   closeRef: Ref<HTMLButtonElement>;
 }) {
   const catalog = useContext(PageChatCatalog)!;
+  const shownReason = newReason === ALREADY_NEW ? undefined : newReason;
   const chats = catalog.chats.filter((chat) => chat.page_id === pageId);
   const count = `${chats.length} ${chats.length === 1 ? "chat" : "chats"}`;
   const [open, setOpen] = useState(false);
@@ -78,7 +82,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
         <button className="ui-button page-chat-switcher" type="button" ref={switcher} aria-label={`${title}, ${count}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? "page-chat-choices" : undefined} onClick={toggle}>
           <strong id="page-chat-title" title={title}>{title}</strong><NavIcon d="M4 6l4 4 4-4" />
         </button>
-        <button className="ui-icon-button page-chat-icon" type="button" aria-label="new page chat" data-write-surface={WRITE_SURFACE.pageChatNew} title={newReason ?? "new page chat"} aria-describedby={newReason ? "page-chat-new-reason" : !newChat ? "tab-authority-description" : undefined} disabled={!newChat} onClick={newChat}><span aria-hidden="true">+</span></button>
+        <button className="ui-icon-button page-chat-icon" type="button" aria-label="new page chat" data-write-surface={WRITE_SURFACE.pageChatNew} title={newReason ?? "new page chat"} aria-describedby={shownReason ? "page-chat-new-reason" : !newChat && !newReason ? "tab-authority-description" : undefined} disabled={!newChat} onClick={newChat}><span aria-hidden="true">+</span></button>
         {close && <button className="ui-icon-button page-chat-icon page-chat-close" type="button" ref={closeRef} aria-label="close page chat" onClick={close}><span aria-hidden="true">×</span></button>}
       </div>
       <div className={`page-chat-readouts ui-status state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</div>
@@ -93,7 +97,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
         {catalog.next && !catalog.loading && !catalog.error && <button className="page-chat-popup-note page-chat-more" type="button" tabIndex={-1} data-popup-row onClick={catalog.more}>load older chats</button>}
       </div>}
     </div>
-    {newReason && <div className="page-chat-new-reason" id="page-chat-new-reason">{newReason}</div>}
+    {shownReason && <div className="page-chat-new-reason" id="page-chat-new-reason">{shownReason}</div>}
   </>;
 }
 

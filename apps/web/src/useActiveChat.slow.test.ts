@@ -72,7 +72,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const page = { id: "home", route: "/", title: "home", zeta_session_id: "chat", workspace: "/tmp", create_mode: false, approval_mode: "allow", layout: { blocks: [] } };
+const page = { id: "home", route: "/", title: "home", zeta_session_id: "chat", workspace: "/tmp", create_mode: false, approval_mode: "allow" };
 const chat = { purpose: "chat" as const, session_id: "chat", page_id: "home", title: "chat", last_state: "idle" };
 
 function client(firstResume?: Promise<unknown>) {
@@ -327,7 +327,7 @@ test("a page refresh keeps the header create mode while the tool refresh still f
   expect(harness.state.serverCreateMode).toBe(true); // the server stored create mode before zeta's refresh failed
   expect(harness.active.state).toMatchObject({ page: { create_mode: false } });
 
-  await act(async () => { await harness.active.refreshPage(); }); // a form write, a finished turn, or update_layout
+  await act(async () => { await harness.active.refreshPage(); }); // a form write, a finished turn, or a compiled page change
   expect(harness.active.toggleBlocked).toBe(true);
   expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "fresh", page: { create_mode: false } });
 });

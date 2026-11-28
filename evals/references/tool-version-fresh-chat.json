@@ -75,21 +75,6 @@
           "title": "Legacy Book"
         }
       }
-    ],
-    "layouts": [
-      {
-        "page_id": "home",
-        "version": 1,
-        "document": {
-          "blocks": [
-            {
-              "type": "list",
-              "title": "Books",
-              "collection": "books"
-            }
-          ]
-        }
-      }
     ]
   },
   "good": {
@@ -200,21 +185,6 @@
         "data": {
           "title": "Dune",
           "rating": 5
-        }
-      }
-    ],
-    "layouts": [
-      {
-        "page_id": "home",
-        "version": 1,
-        "document": {
-          "blocks": [
-            {
-              "type": "list",
-              "title": "Books",
-              "collection": "books"
-            }
-          ]
         }
       }
     ],
@@ -411,21 +381,6 @@
             "title": "Legacy Book"
           }
         }
-      ],
-      "layouts": [
-        {
-          "page_id": "home",
-          "version": 1,
-          "document": {
-            "blocks": [
-              {
-                "type": "list",
-                "title": "Books",
-                "collection": "books"
-              }
-            ]
-          }
-        }
       ]
     },
     "tool_schema_validations": [
@@ -536,21 +491,6 @@
         "version": 1,
         "data": {
           "title": "Legacy Book"
-        }
-      }
-    ],
-    "layouts": [
-      {
-        "page_id": "home",
-        "version": 1,
-        "document": {
-          "blocks": [
-            {
-              "type": "list",
-              "title": "Books",
-              "collection": "books"
-            }
-          ]
         }
       }
     ],
@@ -745,21 +685,6 @@
           "version": 1,
           "data": {
             "title": "Legacy Book"
-          }
-        }
-      ],
-      "layouts": [
-        {
-          "page_id": "home",
-          "version": 1,
-          "document": {
-            "blocks": [
-              {
-                "type": "list",
-                "title": "Books",
-                "collection": "books"
-              }
-            ]
           }
         }
       ]

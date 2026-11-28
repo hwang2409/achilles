@@ -28,3 +28,5 @@
 }
 
 .pages-mode::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: var(--g1-space-1); vertical-align: .12em; background: currentColor; }
+.pages-hint { margin: var(--g1-space-4) 0 0; color: var(--fulcrum-muted); }
+.pages-hint a { color: inherit; text-decoration: underline; }

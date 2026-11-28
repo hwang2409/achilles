@@ -7,17 +7,26 @@ from typing import Any
 import anyio
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
-from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool, ToolAnnotations
+from mcp.types import (
+    CallToolResult,
+    ImageContent,
+    ListToolsResult,
+    TextContent,
+    Tool,
+    ToolAnnotations,
+)
 
 from .pages import (
     CREATE_PAGE_SCHEMA,
-    LAYOUT_SCHEMA,
+    EDIT_PAGE_SCHEMA,
+    READ_PAGE_FILE_SCHEMA,
     RESTORE_VERSION_SCHEMA,
-    UPDATE_LAYOUT_SCHEMA,
     PageStore,
     bounded_inspect,
+    edits_own_page,
 )
 from .records import call_record, list_input_schema
+from .render_page import RENDER_PAGE_SCHEMA, RenderError, render_page
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
 
@@ -49,6 +58,17 @@ _FIELD_GUIDANCE = (
     "update tool. "
 )
 
+PAGE_RECORDS_API = (
+    "The page stores its data with window.achilles.records (each call returns a Promise; "
+    "collections belong to this page): list(collection) returns at most 100 records newest "
+    "first, each with record_id; insert(collection, document) returns the new record; "
+    "update(collection, record_id, fields) merges fields into the record and returns it; "
+    "delete(collection, record_id) removes it. A failed call rejects with {detail}. "
+    "Ask for confirmation inside the page, not with confirm() or alert(). "
+)
+RENDER_WAIT_SECONDS = 5
+RENDER_AFTER_BUILD = "After a visual change, call render_page to see the result. "
+
 INSPECT_PAGE_SCHEMA = {
     "type": "object",
     "properties": {"route": {"type": "string"}, "page_id": {"type": "string"}},
@@ -60,89 +80,16 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
         "route": {"type": "string"},
         "title": {"type": "string"},
         "create_mode": {"type": "boolean"},
-        "layout": {
-            "description": (
-                "The complete stored layout to edit with update_layout, or null when "
-                "layout_complete is false."
-            ),
-            "anyOf": [LAYOUT_SCHEMA, {"type": "null"}],
-        },
-        "layout_complete": {
-            "type": "boolean",
-            "description": (
-                "When false, do not change the page; tell the user the page is too large "
-                "to edit from chat."
-            ),
-        },
-        "message": {"type": "string"},
-        "layout_version": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "The value to pass as update_layout expected_version.",
-        },
-        "layout_digest": {"type": ["string", "null"]},
-        "detail_filter_matches": {
-            "type": "array",
-            "description": "Match count and repair hint for each filtered detail block.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "block": {"type": "integer", "minimum": 0},
-                    "matched": {"type": "integer", "minimum": 0},
-                    "hint": {"type": "string"},
-                },
-                "required": ["block", "matched"],
-                "additionalProperties": False,
-            },
-        },
-        "metric_values": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "block": {"type": "integer", "minimum": 0},
-                    "value": {"type": "integer", "minimum": 0},
-                },
-                "required": ["block", "value"],
-                "additionalProperties": False,
-            },
-        },
+        "code": {"type": ["object", "null"]},
+        "candidate": {"type": ["object", "null"]},
         "tools": {"type": "array", "items": {"type": "object"}},
-        "layout_versions": {
-            "type": "array",
-            "description": (
-                "Up to 20 recent stored layout versions, newest first; pass one as "
-                "restore_version version."
-            ),
-            "items": {
-                "type": "object",
-                "properties": {
-                    "version": {"type": "integer", "minimum": 1},
-                    "created_at": {"type": "string"},
-                    "block_types": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["version", "created_at", "block_types"],
-                "additionalProperties": False,
-            },
-        },
         "collections": {
             "type": "object",
             "additionalProperties": {"type": "integer", "minimum": 0},
         },
         "truncated": {"type": "boolean"},
-        "omitted": {
-            "type": "object",
-            "additionalProperties": {"type": "integer", "minimum": 0},
-        },
     },
-    "required": [
-        "route",
-        "create_mode",
-        "layout",
-        "layout_complete",
-        "layout_version",
-        "layout_digest",
-    ],
+    "required": ["route", "title", "create_mode", "code", "tools", "collections"],
     "additionalProperties": False,
 }
 
@@ -181,6 +128,12 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
     )
 
 
+def _write_error(exc: ValidationError) -> CallToolResult:
+    document = {"error": exc.code, "diagnostics": exc.hint, **(exc.current or {})}
+    text = json.dumps(document)
+    return CallToolResult(isError=True, content=[TextContent(type="text", text=text)])
+
+
 def _inspect_result(value: dict[str, Any]) -> CallToolResult:
     _, encoded = bounded_inspect(value)
     return CallToolResult(content=[TextContent(type="text", text=encoded)])
@@ -200,7 +153,6 @@ def _validate_create(name: str, args: Any) -> None:
     schema = {
         "create_page": CREATE_PAGE_SCHEMA,
         "create_tool": CREATE_TOOL_SCHEMA,
-        "update_layout": UPDATE_LAYOUT_SCHEMA,
         "restore_version": RESTORE_VERSION_SCHEMA,
     }[name]
     try:
@@ -221,6 +173,8 @@ def _validate_create(name: str, args: Any) -> None:
 
 def build_mcp(store: PageStore):
     sessions: dict[str, set] = {}
+    # each render holds a worker thread for up to ~35 s; two at once leaves threads for store calls
+    renders = anyio.Semaphore(2)
 
     async def principal(context):
         token = _token(context)
@@ -244,100 +198,128 @@ def build_mcp(store: PageStore):
         if not connection.state.get(cleanup_key):
             connection.state[cleanup_key] = True
             connection.exit_stack.push_async_callback(remove_connection, page["id"], connection)
-        # inspect_page only reads, so every page chat can see what is on its page.
-        inspect_edit_hint = (
-            "when layout_complete is true, layout is the complete stored layout to edit "
-            "and layout_version is the value for update_layout expected_version; when "
-            "layout_complete is false, do not change the page and tell the user it is "
-            "too large to edit from chat"
-            if page["create_mode"]
-            else "use it to answer questions about the page; this chat cannot change the page"
-        )
         create_status = "ON" if page["create_mode"] else "OFF"
+        can_edit = edits_own_page(page)
+        edit_tools: list[Tool] = [
+            Tool(
+                name="write_page",
+                description="write and compile React/TypeScript that mounts into #root; writes are immediate and audited. "  # noqa: E501
+                "For a small change to existing code, use edit_page instead. "
+                + RENDER_AFTER_BUILD
+                + PAGE_RECORDS_API,
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string"},
+                        "dependencies": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "expected_revision": {"type": ["integer", "null"]},
+                    },
+                    "required": ["source", "dependencies"],
+                    "additionalProperties": False,
+                },
+            ),
+            Tool(
+                name="read_page_file",
+                description=(
+                    "read one file of this page's newest code by lines: src/Page.tsx (the "
+                    "source) or package.json (the dependencies). If the newest build failed, "
+                    "this is that failed code, so you can fix it. Returns revision for "
+                    "edit_page and next_offset while more lines remain."
+                ),
+                inputSchema=READ_PAGE_FILE_SCHEMA,
+                annotations=ToolAnnotations(readOnlyHint=True),
+            ),
+            Tool(
+                name="edit_page",
+                description=(
+                    "change one file of this page's code with exact replacements, without "
+                    "resending the whole file. Each old_string must occur exactly once; edits "
+                    "apply in order. Pass the revision read_page_file returned as "
+                    "expected_revision. The result compiles like write_page; if an edit does "
+                    "not match, nothing changes. " + RENDER_AFTER_BUILD
+                ),
+                inputSchema=EDIT_PAGE_SCHEMA,
+            ),
+            Tool(
+                name="render_page",
+                description=(
+                    "open this page's compiled code in headless chromium at 1440 x 900 and "
+                    "return a screenshot plus the visible text, console errors, page errors, "
+                    "failed requests, and bridge rejections. The page reads its real records; "
+                    "writes are blocked during the render, so nothing is saved."
+                    + (
+                        " In create mode, pass route or page_id to render a page this chat created."
+                        if page["create_mode"]
+                        else ""
+                    )
+                ),
+                inputSchema=RENDER_PAGE_SCHEMA,
+                annotations=ToolAnnotations(readOnlyHint=True),
+            ),
+        ]
         tools: list[Tool] = [
             Tool(
                 name="inspect_page",
                 description=(
-                    f"this chat is on the page at route {page['route']!r} "
-                    f"(title {page['title']!r}); create mode is currently {create_status} "
-                    "for this chat. "
-                    "read-only: this page's route, title, layout blocks, record counts, "
-                    "tools, metric_values and detail_filter_matches (by block index), and "
-                    "pages it created. "
-                    f"{inspect_edit_hint}"
+                    f"this chat is on the page at route {page['route']!r} (title {page['title']!r}); "  # noqa: E501
+                    f"create mode is currently {create_status}"
+                    + (
+                        "; this chat can still change this page with write_page or edit_page and "
+                        "restore its code; creating pages and tools needs create mode. "
+                        if can_edit and not page["create_mode"]
+                        else ". "
+                    )
+                    + "Inspect the active React package (file sizes, dependency versions), a "
+                    "newer failed build as candidate with its diagnostics, code revision "
+                    "history, record counts, tools, and pages created by this page."
                 ),
                 inputSchema=INSPECT_PAGE_SCHEMA,
                 outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
                 annotations=ToolAnnotations(readOnlyHint=True),
             ),
         ]
-        if page["create_mode"]:
+        restore_tool = Tool(
+            name="restore_version",
+            description=(
+                "restore an earlier code or tool revision by appending a copy, so history is kept. "  # noqa: E501
+                "First call inspect_page. Pass the active revision as expected_version."
+                + ("" if page["create_mode"] else " Tool revisions need create mode.")
+            ),
+            inputSchema=RESTORE_VERSION_SCHEMA,
+        )
+        if can_edit:
+            tools[:0] = edit_tools
+        if can_edit and not page["create_mode"]:
+            tools.append(restore_tool)
+        elif page["create_mode"]:
             tools.extend(
                 [
                     Tool(
                         name="create_page",
                         description=(
-                            "create a page; available only in create mode. "
+                            "create and compile a React page; available only in create mode. "
+                            "Provide source that mounts into #root and its dependencies, or omit package for a minimal React shell. "  # noqa: E501
+                            + RENDER_AFTER_BUILD
+                            + PAGE_RECORDS_API
                             + _FIELD_GUIDANCE
-                            + "A detail block can "
-                            "select records with collection and filter, for example "
-                            '{"field":"run_id","equals":"run-002"}; use a field from the '
-                            "collection's assigned tool schema. The result reports how many "
-                            "records the filter matches and gives a repair hint for zero matches. "
-                            "It shows the highest creation time, with ties resolved by highest "
-                            "record id; without a filter it shows field labels only."
                         ),
                         inputSchema=CREATE_PAGE_SCHEMA,
                     ),
                     Tool(
                         name="create_tool",
                         description=(
-                            "create a page-owned immutable declarative tool version; "
+                            "create a page-owned immutable declarative data tool version; "
                             + _FIELD_GUIDANCE
                             + "For an update tool, use this minimal example: "
                             + _UPDATE_TOOL_EXAMPLE_TEXT
-                            + ". revision comes from list/get results and guards against "
-                            "overwriting a newer change. Results include record_id and revision; "
-                            "omit output_schema because it is derived; bundle <= 64 KB"
+                            + ". revision comes from list/get results; omit output_schema because it is derived; bundle <= 64 KB"  # noqa: E501
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
                     ),
-                    Tool(
-                        name="update_layout",
-                        description=(
-                            "REPLACES the whole layout; any block you leave out is deleted. "
-                            "First call achilles__inspect_page. If layout_complete is false, do "
-                            "not change the page; tell the user it is too large to edit from chat. "
-                            "Otherwise, copy its `layout` exactly, change "
-                            "only what the user asked (insert, reorder, edit, or remove blocks), "
-                            "and pass the full layout with `layout_version` as expected_version. "
-                            "On a version conflict, inspect again and retry. To change another "
-                            "page, open that page's chat. A detail block can select records with "
-                            "collection and filter, for example "
-                            '{"field":"run_id","equals":"run-002"}; use a field from the '
-                            "collection's assigned tool schema. The result reports how many "
-                            "records the filter matches and gives a repair hint for zero matches. "
-                            "It shows the highest creation time, with ties resolved by highest "
-                            "record id; without a filter it shows field labels only."
-                        ),
-                        inputSchema=UPDATE_LAYOUT_SCHEMA,
-                    ),
-                    Tool(
-                        name="restore_version",
-                        description=(
-                            "Undo a layout or tool change on this page, for example when the "
-                            "user says undo or you need to take back your own change. First "
-                            "call achilles__inspect_page. For kind layout, pick a version from "
-                            "layout_versions and pass layout_version as expected_version. For "
-                            "kind tool, pass the tool name, an earlier version, and the tool's "
-                            "current version as expected_version. Either way this creates a new "
-                            "version that copies the old one, so history is kept and the "
-                            "restore can itself be undone. On a "
-                            "version conflict, inspect again and retry. To change another "
-                            "page, open that page's chat."
-                        ),
-                        inputSchema=RESTORE_VERSION_SCHEMA,
-                    ),
+                    restore_tool,
                 ]
             )
         bundles = await anyio.to_thread.run_sync(store.page_tools, page["id"])
@@ -369,6 +351,93 @@ def build_mcp(store: PageStore):
             )
         return ListToolsResult(tools=tools)
 
+    async def write_page(page, args) -> CallToolResult:
+        try:
+            result = await anyio.to_thread.run_sync(
+                store.write_page,
+                page["id"],
+                args.get("source", ""),
+                args.get("dependencies", {}),
+                args.get("expected_revision"),
+            )
+        except ValidationError as exc:
+            return _write_error(exc)
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(result))])
+
+    async def read_page_file(page, args) -> CallToolResult:
+        try:
+            validate_schema(args, READ_PAGE_FILE_SCHEMA)
+            result = await anyio.to_thread.run_sync(
+                store.read_page_file,
+                page["id"],
+                args["path"],
+                args.get("offset", 0),
+                args.get("limit", 500),
+            )
+        except ValidationError as exc:
+            return _safe_error(exc)
+        return _text(result)
+
+    async def edit_page(page, args) -> CallToolResult:
+        try:
+            validate_schema(args, EDIT_PAGE_SCHEMA)
+            result = await anyio.to_thread.run_sync(
+                store.edit_page, page["id"], args["path"], args["edits"], args["expected_revision"]
+            )
+        except ValidationError as exc:
+            # a build failure reads like write_page's; a bad edit or stale revision is a plain error
+            return _write_error(exc) if exc.path == "/source" else _safe_error(exc)
+        return _text(result)
+
+    async def render(context, page, args) -> CallToolResult:
+        try:
+            validate_schema(args, RENDER_PAGE_SCHEMA)
+            if "route" in args and "page_id" in args:
+                raise ValidationError("", "one selector", "invalid_input")
+        except ValidationError as exc:
+            return _safe_error(exc)
+        target = page
+        if "route" in args or "page_id" in args:
+            target = await anyio.to_thread.run_sync(
+                store.page, args.get("route", args.get("page_id"))
+            )
+            # another page needs create mode and must be one this chat's page created
+            if target is None or (
+                target["id"] != page["id"]
+                and not (page["create_mode"] and target["created_by_page_id"] == page["id"])
+            ):
+                return _inspect_error()
+        if not await anyio.to_thread.run_sync(store.page_code, target["id"]):
+            return _safe_error(ValidationError("", "a compiled page", "no_code"))
+        credential = (
+            _token(context)
+            if target["id"] == page["id"]
+            else await anyio.to_thread.run_sync(store.ensure_credential, target["id"])
+        )
+        host, port = context.request.scope["server"]
+        host = f"[{host}]" if ":" in host else host
+        try:
+            with anyio.fail_after(RENDER_WAIT_SECONDS):
+                await renders.acquire()
+        except TimeoutError:
+            busy = "render_page is busy with other renders; try again"
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=busy)])
+        try:
+            result = await anyio.to_thread.run_sync(
+                render_page, f"http://{host}:{port}", target["id"], credential
+            )
+        except RenderError as exc:
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
+        finally:
+            renders.release()
+        screenshot = result.pop("screenshot", None)
+        content: list[TextContent | ImageContent] = [
+            TextContent(type="text", text=json.dumps(result, sort_keys=True))
+        ]
+        if screenshot:
+            content.insert(0, ImageContent(type="image", data=screenshot, mimeType="image/jpeg"))
+        return CallToolResult(isError=not result.get("ready"), content=content)
+
     async def inspect_page(page, args) -> CallToolResult:
         try:
             validate_schema(args, INSPECT_PAGE_SCHEMA)
@@ -395,17 +464,11 @@ def build_mcp(store: PageStore):
             raise ValidationError(
                 "/route", "this page", "forbidden", "To change another page, open that page's chat."
             )
-        if args["kind"] == "layout":
-            version, digest, detail_summary = await anyio.to_thread.run_sync(
-                store.restore_layout, page["id"], args["version"], args["expected_version"]
+        if args["kind"] == "code":
+            restored = await anyio.to_thread.run_sync(
+                store.restore_code, page["id"], args["version"], args["expected_version"]
             )
-            return {
-                "kind": "layout",
-                "version": version,
-                "restored_from": args["version"],
-                "digest": digest,
-                "detail_filter_matches": detail_summary,
-            }
+            return {"kind": "code", **restored}
         if "name" not in args:
             raise ValidationError("/name", "a tool name when kind is tool")
         restored = await anyio.to_thread.run_sync(
@@ -420,10 +483,32 @@ def build_mcp(store: PageStore):
                 isError=True, content=[TextContent(type="text", text="forbidden")]
             )
         args = params.arguments or {}
+        page_editors = {
+            "write_page": write_page,
+            "read_page_file": read_page_file,
+            "edit_page": edit_page,
+        }
+        if params.name in page_editors:
+            if not edits_own_page(page):
+                return CallToolResult(
+                    isError=True,
+                    content=[TextContent(type="text", text="forbidden: create mode is off")],
+                )
+            return await page_editors[params.name](page, args)
+        if params.name == "render_page":
+            if not edits_own_page(page):
+                return CallToolResult(
+                    isError=True,
+                    content=[TextContent(type="text", text="forbidden: create mode is off")],
+                )
+            return await render(context, page, args)
         if params.name == "inspect_page":
             return await inspect_page(page, args)
         if params.name in BUILTIN_TOOL_NAMES:
-            if not page["create_mode"]:
+            own_code_restore = (
+                params.name == "restore_version" and args.get("kind") == "code"
+            ) and edits_own_page(page)
+            if not page["create_mode"] and not own_code_restore:
                 return CallToolResult(
                     isError=True,
                     content=[TextContent(type="text", text="forbidden: create mode is off")],
@@ -435,13 +520,12 @@ def build_mcp(store: PageStore):
                         created,
                         digest,
                         existing,
-                        detail_summary,
                         note,
                     ) = await anyio.to_thread.run_sync(
                         store.create_page,
                         args["route"],
                         args["title"],
-                        args["layout"],
+                        args.get("package"),
                         page["id"],
                         args.get("tools"),
                     )
@@ -451,24 +535,11 @@ def build_mcp(store: PageStore):
                             "route": created["route"],
                             "digest": digest,
                             "existing": existing,
-                            "detail_filter_matches": detail_summary,
                         },
                         note,
                     )
                 elif params.name == "restore_version":
                     result = await restore_version(page, args)
-                elif params.name == "update_layout":
-                    version, digest, detail_summary = await anyio.to_thread.run_sync(
-                        store.update_layout,
-                        page["id"],
-                        args["layout"],
-                        args["expected_version"],
-                    )
-                    result = {
-                        "version": version,
-                        "digest": digest,
-                        "detail_filter_matches": detail_summary,
-                    }
                 else:
                     created, digest, note = await anyio.to_thread.run_sync(
                         store.create_tool, page["id"], args["bundle"], "/bundle", args.get("page")
@@ -478,10 +549,13 @@ def build_mcp(store: PageStore):
                         await notify(created["page_id"])
             except ValidationError as exc:
                 return _safe_error(exc)
+            # PermissionError is an OSError: catch it first, so create mode off says forbidden
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
                 return CallToolResult(
                     isError=True, content=[TextContent(type="text", text=str(exc))]
                 )
+            except OSError:
+                return _safe_error(ValidationError("", "atomic page creation", "create_failed"))
             await notify(page["id"])
             return _text(result)
         listed_versions = context.session._connection.state.get(

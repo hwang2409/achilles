@@ -296,11 +296,11 @@ test("flag present: a build this tab never saw run is done with no receipt (quie
   expect(rowOf(hook)).toEqual({ label: "done", receipt: null });
 });
 
-test("rows with no turn end are no claim: the fallback label stays", async () => {
+test("rows with no turn end are no claim: a remembered building shows no badge", async () => {
   await rememberBuilding();
   const zeta = serveZeta({ status: () => idle("newer"), read: () => rows([call()]) });
   const hook = await mount(zeta);
-  expect({ ...rowOf(hook), reads: zeta.reads().length }).toEqual({ label: "last known building · not the current session", receipt: null, reads: 1 });
+  expect({ ...rowOf(hook), reads: zeta.reads().length }).toEqual({ label: null, receipt: null, reads: 1 });
 });
 
 test("-32004: the read waits at least retry_after_ms before it asks again", async () => {
@@ -361,7 +361,7 @@ test("a read sent before the live pass saw the build current is dropped", async 
   await settle();
   held.resolve(rows(done));
   await settle();
-  expect(rowOf(hook)).toEqual({ label: "last known building · not the current session", receipt: null });
+  expect(rowOf(hook)).toEqual({ label: null, receipt: null });
 });
 
 // Visible-first reads: the views report rows on screen; the queue holds at most 10 and refills from the rows on screen.
@@ -424,6 +424,18 @@ test("a chat-list reload with the same updated_at reads nothing; a new turn read
   hook.rerender({ client: zeta.client, chats: [{ ...chat, updated_at: "2030-01-02" }] });
   await settle();
   expect(zeta.reads().length).toBe(2);
+});
+
+test("a turn that moves state_version but not updated_at reads again and shows the new label", async () => {
+  let reply = done;
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => rows(reply) });
+  const hook = await mount(zeta, [{ ...chat, state_version: 1 }]);
+  expect({ ...rowOf(hook), reads: zeta.reads().length }).toEqual({ label: "done", receipt: null, reads: 1 });
+  // a zeta-started turn (no user send in this tab) fails: updated_at stays, state_version moves
+  reply = [call(), result, { ...end, data: { turn_id: "zeta-turn", reason: "error" } }];
+  hook.rerender({ client: zeta.client, chats: [{ ...chat, state_version: 2 }] });
+  await settle();
+  expect({ ...rowOf(hook), reads: zeta.reads().length }).toEqual({ label: "failed", receipt: null, reads: 2 });
 });
 
 // zeta gives the same session_not_found for an absent id, another project, project versus no project, and a child id.
@@ -571,7 +583,6 @@ type Reply = "done" | "hold" | "busy" | "holdbusy" | "nomethod";
 type ReadStep = "show" | "hide" | "release" | "wait" | "end" | "refresh" | "focus" | "turn" | "?";
 type ReadRow = { name: string; remember?: object; features?: string[]; shown?: ("o" | "t" | "full")[]; replies?: Reply[]; steps?: ReadStep[]; trace?: string[]; reads: number; label: string | null; pending?: boolean; stale?: boolean };
 const dropped: Reply[] = ["busy", "busy", "busy"];
-const lastKnown = "last known building · not the current session";
 const READ_ROWS: ReadRow[] = [
   { name: "on screen: queued, in flight, then read", shown: ["o", "t"], replies: ["hold"], steps: ["?", "release", "?", "release"], trace: ["0 checking", "1 checking"], reads: 1, label: "done" },
   { name: "on screen: a busy wait, then read", replies: ["busy"], steps: ["?", "wait"], trace: ["1 checking"], reads: 2, label: "done" },
@@ -591,11 +602,11 @@ const READ_ROWS: ReadRow[] = [
   { name: "dropped, then refresh reads it", replies: dropped, steps: ["wait", "wait", "wait", "refresh"], reads: 4, label: "done" },
   { name: "dropped, then a focus reads it", replies: dropped, steps: ["wait", "wait", "wait", "focus"], reads: 4, label: "done" },
   { name: "dropped, then a scroll reads it", replies: dropped, steps: ["wait", "wait", "wait", "hide", "show"], reads: 4, label: "done" },
-  { name: "remembered building, dropped off screen, then a focus reads it", remember: running, shown: [], replies: dropped, steps: ["wait", "wait", "wait", "wait", "?", "focus"], trace: [`3 ${lastKnown}`], reads: 4, label: "done" },
+  { name: "remembered building, dropped off screen, then a focus reads it", remember: running, shown: [], replies: dropped, steps: ["wait", "wait", "wait", "wait", "?", "focus"], trace: ["3 null"], reads: 4, label: "done" },
   { name: "-32601: reads stop and the row is not checking", replies: ["nomethod"], steps: ["wait", "focus", "hide", "show", "end"], reads: 1, label: null },
   { name: "an old reply after a refresh is dropped and the build is read again", replies: ["hold"], steps: ["refresh", "release"], reads: 2, label: "done" },
   { name: "an old busy reply after a refresh: no wait, read again", replies: ["holdbusy"], steps: ["refresh", "release", "?"], trace: ["2 done"], reads: 2, label: "done" },
-  { name: "without the read feature: never read, not checking", features: [], remember: running, steps: ["wait", "focus"], reads: 0, label: lastKnown },
+  { name: "without the read feature: never read, not checking", features: [], remember: running, steps: ["wait", "focus"], reads: 0, label: null },
 ];
 test.each(READ_ROWS.map((row) => [row.name, row] as const))("a wanted build is never left unread: %s", async (_name, row) => {
   if (row.remember) { const remember = row.remember; (await mount(serveZeta({ status: () => remember }), [chat], [])).unmount(); }

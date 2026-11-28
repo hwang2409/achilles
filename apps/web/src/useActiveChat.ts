@@ -1,3 +1,4 @@
+import { shellHeaders } from "./shell";
 import { continueChatIntent, newChatIntent } from "./surface/routes";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ZetaError, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
@@ -14,7 +15,7 @@ import { holdAttached, parkedRows, reclaimHeld, refreshParked, stopParked, watch
 import { patchChat, writeShownState, type RowState } from "./zeta/rowState";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
-export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
+export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; code?: { version: number; digest: string } | null; unsupported_format?: string | null };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
 // newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
 type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
@@ -139,7 +140,7 @@ async function chatBinding(sessionId: string) {
   const loaded = await fetch(`/api/pages/${chat.page_id}`, { cache: "no-store" });
   if (!loaded.ok) return null;
   const page = await loaded.json() as Page;
-  const credential = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" });
+  const credential = await fetch(`/api/pages/${page.id}/credential`, { headers: shellHeaders(), cache: "no-store" });
   if (!credential.ok) throw new Error(`could not load page credential (${credential.status})`);
   return pageBinding(((await credential.json()) as { credential: string }).credential, page.workspace);
 }
@@ -169,7 +170,7 @@ export async function attachPage(
     if (!loaded.ok) throw new Error("page not found");
     const page = await loaded.json() as Page; requireCurrent(owner, token);
     if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
-    const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
+    const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { headers: shellHeaders(), cache: "no-store" }); requireCurrent(owner, token);
     if (!credentialResponse.ok) throw new Error(`could not load page credential (${credentialResponse.status})`);
     const credential = ((await credentialResponse.json()) as { credential: string }).credential; requireCurrent(owner, token);
     const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, purpose, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
@@ -1209,8 +1210,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [applyActive, canWrite, state]);
 
   const refreshPage = useCallback(async () => {
-    // Runs for a page with no chat started yet (phase "empty") as well as a ready chat, so a
-    // form write refreshes computed layout values (count metrics) even before the first message.
+    // Runs for a page with no chat started yet (phase "empty") as well as a ready chat.
     if (state.phase !== "ready" && state.phase !== "empty") return;
     const current = state; const token = owner.current.token();
     try {

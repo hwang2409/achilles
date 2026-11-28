@@ -9,7 +9,7 @@ import { HISTORY_READ_FEATURE, readOtherHistory } from "../zeta/historyRead";
 export type BuildState = "building" | "needs you" | "done" | "unfinished" | "failed";
 export type BuildReason = "zeta offline" | "not the current session" | "checking zeta";
 // `turn` is the turn end that made a build done; `done` orders completions in this tab: a counter taken when this tab first saw that turn end.
-// `at`: the chat's updated_at when a terminal state was proven; the state holds until a new turn moves updated_at.
+// `at`: the chat's turn key (turnKey) when a terminal state was proven; the state holds until a new turn moves it.
 type Observation = { state: BuildState; routes: string[]; turn?: string; done?: number; at?: string };
 // `unproven`: the turn ended with no route in view, but the page does not hold the whole history (Q2: no evidence, no claim).
 type Seen = Observation & { tools: string[]; unproven?: boolean };
@@ -17,6 +17,8 @@ type Live = { current: string | null; observed?: Seen; reason: BuildReason | nul
 const states: readonly BuildState[] = ["building", "needs you", "done", "unfinished", "failed"];
 const active = (state: BuildState) => state === "building" || state === "needs you";
 const isBuild = (chat: Chat) => chat.purpose === "page_build";
+// updated_at moves only on a user send; state_version also moves on a turn zeta or another client started.
+const turnKey = (chat: Chat) => `${chat.updated_at}#${chat.state_version}`;
 const object = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const isRoute = (route: unknown): route is string => typeof route === "string" && /^\/(?!\/)[^?#\\\s]+$/.test(route);
@@ -220,7 +222,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   let refreshed = false;
   // Builds whose run end this tab got.
   const ranHere = new Set<string>();
-  const updatedAt = (id: string) => latest.chats.find((chat) => chat.session_id === id)?.updated_at;
+  const updatedAt = (id: string) => { const chat = latest.chats.find((one) => one.session_id === id); return chat && turnKey(chat); };
 
   // The one receipt rule: a completion shows a receipt only when this tab saw the build active (building, needs you,
   // or its run end). A build first seen already done, on any path, is quiet.
@@ -240,7 +242,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   // A terminal state this tab proved for this updated_at needs no read until a new turn starts.
   const settled = (chat: Chat) => {
     const known = memory.observed(chat.session_id);
-    return !refreshed && known !== undefined && !active(known.state) && known.at !== undefined && known.at === chat.updated_at;
+    return !refreshed && known !== undefined && !active(known.state) && known.at !== undefined && known.at === turnKey(chat);
   };
   // A demand (a chat-list change, a row scrolled into view, a run end, a refresh) asks again for dropped builds.
   const demand = () => { dropped.forEach((id) => readKeys.delete(id)); dropped.clear(); };
@@ -248,7 +250,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   // Wanted: a build on screen, or one this tab last knew as active.
   const wanted = (id: string) => shownCount.has(id) || active(memory.observed(id)?.state ?? "done");
   // A wanted build with no read for its updated_at yet.
-  const owed = (chat: Chat) => wanted(chat.session_id) && readKeys.get(chat.session_id) !== chat.updated_at && !settled(chat);
+  const owed = (chat: Chat) => wanted(chat.session_id) && readKeys.get(chat.session_id) !== turnKey(chat) && !settled(chat);
   const enqueue = (forced: readonly string[] = []) => {
     if (!readable()) return;
     let added = false;
@@ -398,8 +400,9 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
 
 // `checking`: no state yet, and a read of this build is queued or in flight.
 export type BuildRow = { chat: Chat; state: BuildState | null; reason: BuildReason | null; results: string[]; tools: string[]; checking?: boolean };
-// A reason marks a remembered state that is not live now; it is never counted.
-export const buildLabel = ({ state, reason, checking }: Pick<BuildRow, "state" | "reason" | "checking">) => state === null ? checking ? "checking" : null : reason ? `last known ${state} · ${reason}` : state;
+// A reason marks a remembered state that is not live now; it is never counted. A remembered building or needs-you
+// may have ended elsewhere, so it shows no badge.
+export const buildLabel = ({ state, reason, checking }: Pick<BuildRow, "state" | "reason" | "checking">) => state === null || (reason && active(state)) ? checking ? "checking" : null : reason ? `last known ${state} · ${reason}` : state;
 // The chat-list state class for a build row: only live states get a live tone.
 export const buildTone = (row?: BuildRow) => !row?.state || row.reason ? null : row.state === "building" ? "running" : row.state === "needs you" ? "approval" : row.state;
 

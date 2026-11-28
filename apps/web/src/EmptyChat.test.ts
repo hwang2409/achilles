@@ -28,7 +28,7 @@ function stubFetch() {
 }
 
 function page(createMode: boolean): Page {
-  return { id: "page-1", route: "/", title: "home", zeta_session_id: null, workspace: "default", create_mode: createMode, layout: { blocks: [] } };
+  return { id: "page-1", route: "/", title: "home", zeta_session_id: null, workspace: "default", create_mode: createMode };
 }
 
 async function renderEmptyChat(props: {

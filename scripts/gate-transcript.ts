@@ -571,7 +571,8 @@ async function gateSameChatReadOnly(browser: Browser, a: Page) {
     await c.getByText("you said: after tab c joined", { exact: true }).waitFor(wait);
     const credential = await c.evaluate(async () => {
       const page = await (await fetch("/api/pages/home", { cache: "no-store" })).json() as { id: string };
-      return (await (await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" })).json() as { credential: string }).credential;
+      const shell = document.querySelector<HTMLMetaElement>('meta[name="achilles-shell"]')!.content;
+      return (await (await fetch(`/api/pages/${page.id}/credential`, { headers: { "X-Achilles-Shell": shell }, cache: "no-store" })).json() as { credential: string }).credential;
     });
     const resumes = sent.filter((frame) => frame.method === "resume");
     if (!resumes.length || resumes.some((frame) => !refused.has(frame.id))) throw new Error(`tab c's resume was not refused session_controlled: ${resumes.length} sent, ${refused.size} refused`);

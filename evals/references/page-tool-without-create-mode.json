@@ -109,8 +109,7 @@
           }
         }
       ],
-      "records": [],
-      "layouts": []
+      "records": []
     }
   },
   "bad": {
@@ -251,8 +250,7 @@
           }
         }
       ],
-      "records": [],
-      "layouts": []
+      "records": []
     }
   }
 }

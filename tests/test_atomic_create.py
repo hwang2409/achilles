@@ -6,8 +6,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from starlette.testclient import TestClient
 
+import achilles.pages as pages
 import achilles.web as web
-from achilles.pages import UPDATE_LAYOUT_SCHEMA, PageStore
+from achilles.pages import PageStore
 from achilles.tools import derived_output_schema
 
 
@@ -32,16 +33,16 @@ def bundle(name="add_book", operation="insert"):
     }
 
 
-def request(tools=None, layout=None):
+def request(tools=None):
     return {
         "route": "/reading",
         "title": "reading list",
-        "layout": layout
-        or {
-            "blocks": [
-                {"type": "form", "title": "add a book", "tool": "add_book"},
-                {"type": "list", "title": "books", "collection": "books"},
-            ]
+        "package": {
+            "source": (
+                'import { createRoot } from "react-dom/client"; '
+                'createRoot(document.getElementById("root")!).render(<main />);'
+            ),
+            "dependencies": {},
         },
         "tools": tools or [bundle()],
     }
@@ -88,6 +89,18 @@ def creation_client(monkeypatch, tmp_path):
     root = tmp_path / "achilles"
     monkeypatch.setenv("ACHILLES_HOME", str(root))
     monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    monkeypatch.setattr(
+        pages,
+        "build_page",
+        lambda _root, _page_id, source, dependencies: {
+            "digest": "test-digest",
+            "size": len(source),
+            # the real builder stores the react pins with the requested deps
+            "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", **dependencies},
+            "resolved_dependencies": dependencies,
+            "lockfile": "test-lock",
+        },
+    )
     store = PageStore(root)
     store.set_create_mode("home", True)
     app = web.create_app()
@@ -99,7 +112,7 @@ def state(root):
     with sqlite3.connect(root / "achilles.sqlite3") as db:
         counts = {
             table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in ("page", "layout_version", "tool", "tool_version", "page_tool", "audit")
+            for table in ("page", "code_revision", "tool", "tool_version", "page_tool", "audit")
         }
     files = {
         path.relative_to(root).as_posix()
@@ -108,186 +121,6 @@ def state(root):
         if path.is_file()
     }
     return counts, files
-
-
-def install_layout(store, page_id, version, layout):
-    encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
-    with store.transaction() as db:
-        db.execute(
-            "INSERT INTO layout_version VALUES(?,?,?,?,?)",
-            (page_id, version, f"synthetic-{version}", encoded, "synthetic"),
-        )
-        db.execute(
-            "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=?",
-            (version, "synthetic", page_id),
-        )
-        db.execute(
-            "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
-            (page_id, "update_layout", f"synthetic-{version}", "synthetic"),
-        )
-
-
-@pytest.mark.parametrize(
-    ("block_title_length", "layout_complete"),
-    [(100, True), (256, False)],
-)
-def test_inspect_page_bounds_large_summary_over_public_mcp(
-    creation_client, block_title_length, layout_complete
-):
-    _, store, client, home_headers = creation_client
-    tools = []
-    blocks = []
-    for index in range(32):
-        name = f"tool_{index}_{'x' * 54}"
-        collection = f"collection_{index}_{'y' * 49}"
-        schema = {"type": "object", "properties": {"value": {"type": "string"}}}
-        tools.append(
-            {
-                "format_version": 1,
-                "kind": "data_operation",
-                "name": name,
-                "description": "x" * 2_000,
-                "input_schema": schema,
-                "implementation": {
-                    "operation": "insert",
-                    "collection": collection,
-                    "data_schema": schema,
-                },
-            }
-        )
-        blocks.append(
-            {
-                "type": "list",
-                "title": "b" * block_title_length,
-                "collection": collection,
-            }
-        )
-    created = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {
-            "name": "create_page",
-            "arguments": request(
-                tools=tools,
-                layout={
-                    "blocks": [
-                        {**block, "title": "b" * min(block_title_length, 100)} for block in blocks
-                    ]
-                },
-            ),
-        },
-    )
-    page_id = json.loads(created["content"][0]["text"])["page_id"]
-    if not layout_complete:
-        install_layout(store, page_id, 2, {"blocks": blocks})
-    with store.transaction() as db:
-        for index in range(32):
-            db.execute(
-                "INSERT INTO page_record("
-                "page_id,collection,record_id,version,document,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (
-                    page_id,
-                    f"collection_{index}_{'y' * 49}",
-                    f"record-{index}",
-                    1,
-                    "{}",
-                    "now",
-                    "now",
-                ),
-            )
-    summary = mcp(
-        client,
-        home_headers,
-        40,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {"route": "/reading"}},
-    )
-    text = summary["content"][0]["text"]
-    value = json.loads(text)
-    assert len(text.encode()) <= 8 * 1024
-    assert value["truncated"] is True
-    if layout_complete:
-        assert len(value["layout"]["blocks"]) == 32
-    assert value["layout_complete"] is layout_complete
-    if not layout_complete:
-        assert value["layout"] is None
-        assert value["message"] == (
-            "do not change this page; tell the user it is too large to edit from chat"
-        )
-    assert "blocks" not in value["omitted"]
-    assert sum(value["omitted"].values()) > 0
-
-
-def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_client):
-    root, store, client, home_headers = creation_client
-    created = mcp(
-        client, home_headers, 2, "tools/call", {"name": "create_page", "arguments": request()}
-    )
-    reading_id = json.loads(created["content"][0]["text"])["page_id"]
-    summary = mcp(
-        client,
-        home_headers,
-        3,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {"route": "/reading"}},
-    )
-    value = json.loads(summary["content"][0]["text"])
-    assert value["route"] == "/reading"
-    assert value["layout_version"] == 1
-    assert value["tools"][0]["name"] == "add_book"
-    assert value["collections"] == {}
-    serialized = json.dumps(value)
-    assert len(serialized.encode()) <= 8 * 1024
-    assert "credentials" not in serialized and str(root) not in serialized
-    secret = (root / "credentials" / reading_id).read_text()
-    with store.transaction() as db:
-        credential_hash = db.execute(
-            "SELECT credential_hash FROM page WHERE id=?", (reading_id,)
-        ).fetchone()[0]
-    assert secret not in serialized and credential_hash not in serialized
-
-    third = mcp(
-        client,
-        home_headers,
-        4,
-        "tools/call",
-        {"name": "create_page", "arguments": {**request(), "route": "/third", "title": "third"}},
-    )
-    third_id = json.loads(third["content"][0]["text"])["page_id"]
-    store.set_create_mode(third_id, True)
-    third_headers = initialize(client, store.ensure_credential(third_id), 5)
-    forbidden = mcp(
-        client,
-        third_headers,
-        6,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {"route": "/reading"}},
-    )
-    assert forbidden["isError"]
-    expected = {"code": "forbidden", "expected": "authorized page", "path": ""}
-    assert json.loads(forbidden["content"][0]["text"]) == expected
-
-    store.set_create_mode(reading_id, True)
-    reading_headers = initialize(client, store.ensure_credential(reading_id), 7)
-    cross_forbidden = mcp(
-        client,
-        reading_headers,
-        8,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {"route": "/"}},
-    )
-    missing = mcp(
-        client,
-        reading_headers,
-        9,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {"route": "/missing"}},
-    )
-    assert json.loads(cross_forbidden["content"][0]["text"]) == expected
-    assert json.loads(missing["content"][0]["text"]) == expected
 
 
 @pytest.fixture
@@ -372,43 +205,192 @@ def test_create_tool_page_refuses_pages_this_page_did_not_create(page_family, ca
     assert state(root) == before
 
 
-def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_client):
-    root, store, client, headers = creation_client
-    created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
-    page_id = json.loads(created["content"][0]["text"])["page_id"]
-    page_headers = initialize(client, store.ensure_credential(page_id), 3)
-    assert not store.page(page_id)["create_mode"]
+def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_client):
+    root, store, client, home_headers = creation_client
+    created = mcp(
+        client, home_headers, 2, "tools/call", {"name": "create_page", "arguments": request()}
+    )
+    reading_id = json.loads(created["content"][0]["text"])["page_id"]
+    summary = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
+    value = json.loads(summary["content"][0]["text"])
+    assert value["route"] == "/reading"
+    assert value["code"]["revision"] == 1
+    assert value["code"]["source"] == request()["package"]["source"]
+    assert value["tools"][0]["name"] == "add_book"
+    assert value["collections"] == {}
+    serialized = json.dumps(value)
+    assert len(serialized.encode()) <= 8 * 1024
+    assert "credentials" not in serialized and str(root) not in serialized
+    secret = (root / "credentials" / reading_id).read_text()
+    with store.transaction() as db:
+        credential_hash = db.execute(
+            "SELECT credential_hash FROM page WHERE id=?", (reading_id,)
+        ).fetchone()[0]
+    assert secret not in serialized and credential_hash not in serialized
 
-    catalog = mcp(client, page_headers, 4, "tools/list", {})
-    assert sorted(tool["name"] for tool in catalog["tools"]) == ["add_book", "inspect_page"]
+    third = mcp(
+        client,
+        home_headers,
+        4,
+        "tools/call",
+        {"name": "create_page", "arguments": {**request(), "route": "/third", "title": "third"}},
+    )
+    third_id = json.loads(third["content"][0]["text"])["page_id"]
+    store.set_create_mode(third_id, True)
+    third_headers = initialize(client, store.ensure_credential(third_id), 5)
+    forbidden = mcp(
+        client,
+        third_headers,
+        6,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
+    assert forbidden["isError"]
+    expected = {"code": "forbidden", "expected": "authorized page", "path": ""}
+    assert json.loads(forbidden["content"][0]["text"]) == expected
+
+    store.set_create_mode(reading_id, True)
+    reading_headers = initialize(client, store.ensure_credential(reading_id), 7)
+    cross_forbidden = mcp(
+        client,
+        reading_headers,
+        8,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/"}},
+    )
+    missing = mcp(
+        client,
+        reading_headers,
+        9,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/missing"}},
+    )
+    assert json.loads(cross_forbidden["content"][0]["text"]) == expected
+    assert json.loads(missing["content"][0]["text"]) == expected
+
+
+def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_client):
+    # the home chat is not a page chat: with create mode off it can only inspect
+    root, store, client, headers = creation_client
+    mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    store.set_create_mode("home", False)
+
+    catalog = mcp(client, headers, 4, "tools/list", {})
+    assert sorted(tool["name"] for tool in catalog["tools"]) == ["inspect_page"]
     inspect = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
-    assert "update_layout" not in inspect["description"]
+    assert "create mode is currently OFF" in inspect["description"]
     assert inspect["annotations"]["readOnlyHint"] is True
 
     before = state(root)
-    inspected = mcp(
-        client, page_headers, 5, "tools/call", {"name": "inspect_page", "arguments": {}}
-    )
+    inspected = mcp(client, headers, 5, "tools/call", {"name": "inspect_page", "arguments": {}})
     assert inspected.get("isError") is not True, inspected
-    summary = json.loads(inspected["content"][0]["text"])
-    assert summary["route"] == "/reading" and summary["title"] == "reading list"
-    assert [block["type"] for block in summary["layout"]["blocks"]] == ["form", "list"]
+    assert json.loads(inspected["content"][0]["text"])["route"] == "/"
     assert state(root) == before
 
-    layout = {"blocks": [{"type": "text", "text": "changed"}]}
     for request_id, name, arguments in (
-        (6, "update_layout", {"layout": layout, "expected_version": 1}),
+        (6, "write_page", {"source": "export default 1", "dependencies": {}}),
         (7, "create_page", {**request(), "route": "/other"}),
         (8, "create_tool", {"bundle": bundle(name="sneaky")}),
-        (9, "restore_version", {"kind": "layout", "version": 1, "expected_version": 1}),
+        (9, "restore_version", {"kind": "code", "version": 1, "expected_version": 1}),
+    ):
+        refused = mcp(
+            client, headers, request_id, "tools/call", {"name": name, "arguments": arguments}
+        )
+        assert refused["isError"] is True, name
+        assert refused["content"][0]["text"] == "forbidden: create mode is off", name
+    assert state(root) == before
+
+
+def test_page_chat_edits_its_own_page_without_create_mode(creation_client):
+    root, store, client, headers = creation_client
+    created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    token = store.ensure_credential(page_id)
+    page_headers = initialize(client, token, 3)
+    assert not store.page(page_id)["create_mode"]
+
+    catalog = mcp(client, page_headers, 4, "tools/list", {})
+    names = sorted(tool["name"] for tool in catalog["tools"])
+    assert names == [
+        "add_book",
+        "edit_page",
+        "inspect_page",
+        "read_page_file",
+        "render_page",
+        "restore_version",
+        "write_page",
+    ]
+    inspect = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
+    assert "read-only" not in inspect["description"]
+
+    source = "export default 2"
+    written = mcp(
+        client,
+        page_headers,
+        5,
+        "tools/call",
+        {"name": "write_page", "arguments": {"source": source, "dependencies": {}}},
+    )
+    assert written.get("isError") is not True, written
+    assert store.page(page_id)["active_code_revision"] == 2
+    restored = mcp(
+        client,
+        page_headers,
+        6,
+        "tools/call",
+        {
+            "name": "restore_version",
+            "arguments": {"kind": "code", "version": 1, "expected_version": 2},
+        },
+    )
+    assert restored.get("isError") is not True, restored
+    assert store.page(page_id)["active_code_revision"] == 3
+    # the page's history dialog restores through http with the same rule
+    restore = client.post(
+        f"/api/pages/{page_id}/code/restore",
+        headers={
+            "authorization": f"Bearer {token}",
+            "origin": "http://127.0.0.1:5190",
+            "host": "127.0.0.1:5190",
+        },
+        json={"version": 2, "expected_version": 3},
+    )
+    assert restore.status_code == 200, restore.text
+
+    before = state(root)
+    for request_id, name, arguments in (
+        (7, "create_page", {**request(), "route": "/other"}),
+        (8, "create_tool", {"bundle": bundle(name="sneaky")}),
+        (
+            9,
+            "restore_version",
+            {"kind": "tool", "name": "add_book", "version": 1, "expected_version": 1},
+        ),
     ):
         refused = mcp(
             client, page_headers, request_id, "tools/call", {"name": name, "arguments": arguments}
         )
         assert refused["isError"] is True, name
+        assert refused["content"][0]["text"] == "forbidden: create mode is off", name
     assert state(root) == before
-    home = {"name": "inspect_page", "arguments": {"route": "/"}}
-    assert mcp(client, page_headers, 10, "tools/call", home)["isError"] is True
+
+
+def test_inspect_page_bounds_large_code_over_public_mcp(creation_client):
+    _, store, client, headers = creation_client
+    store.write_page("home", "x" * 20_000, {}, None)
+    inspected = mcp(client, headers, 2, "tools/call", {"name": "inspect_page", "arguments": {}})
+    assert inspected.get("isError") is not True, inspected
+    text = inspected["content"][0]["text"]
+    value = json.loads(text)
+    assert len(text.encode()) <= 8 * 1024
+    assert value["truncated"] is True
+    assert "source" not in value["code"] and value["code"]["revision"] == 1
 
 
 def test_fresh_mcp_session_must_list_tools_before_generated_call(creation_client):
@@ -909,14 +891,22 @@ def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creatio
     assert created["existing"] is False
     page_id = created["page_id"]
     assert [tool["name"] for tool in store.page_tools(page_id)] == ["add_book"]
-    assert store.layout(page_id) == request()["layout"]
+    assert store.page_code(page_id)["source"] == request()["package"]["source"]
     assert not store.page(page_id)["create_mode"]
     with store.transaction() as db:
-        actions = db.execute("SELECT action FROM audit WHERE page_id=?", (page_id,))
+        actions = db.execute("SELECT action FROM audit WHERE page_id=? ORDER BY id", (page_id,))
         assert [row[0] for row in actions] == ["create_page", "create_tool"]
     page_headers = initialize(client, store.ensure_credential(page_id), 3)
     catalog = mcp(client, page_headers, 4, "tools/list", {})
-    assert [tool["name"] for tool in catalog["tools"]] == ["inspect_page", "add_book"]
+    assert [tool["name"] for tool in catalog["tools"]] == [
+        "write_page",
+        "read_page_file",
+        "edit_page",
+        "render_page",
+        "inspect_page",
+        "restore_version",
+        "add_book",
+    ]
     inserted = mcp(
         client,
         page_headers,
@@ -926,7 +916,7 @@ def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creatio
     )
     assert json.loads(inserted["content"][0]["text"])["title"] == "Synthetic Book"
     assert store.records(page_id, "books")[1] == 1
-    assert len(list((root / "bundles").glob("*.json"))) == 2
+    assert len(list((root / "bundles").glob("*.json"))) == 1
 
 
 @pytest.mark.parametrize(
@@ -937,20 +927,10 @@ def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creatio
             "invalid_input",
             "/tools/0/implementation/operation",
         ),
-        (
-            request(layout={"blocks": [{"type": "form", "title": "add", "tool": "missing"}]}),
-            "invalid_input",
-            "/layout/blocks/0/tool",
-        ),
-        (
-            request(layout={"blocks": [{"type": "list", "title": "other", "collection": "other"}]}),
-            "invalid_input",
-            "/layout/blocks/0/collection",
-        ),
         (request(tools=[bundle(), bundle()]), "create_failed", ""),
     ],
 )
-def test_create_page_failures_leave_no_rows_or_files(creation_client, arguments, code, path):
+def test_create_page_failures_leave_no_rows_or_page_files(creation_client, arguments, code, path):
     root, _store, client, headers = creation_client
     before = state(root)
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": arguments})
@@ -961,77 +941,69 @@ def test_create_page_failures_leave_no_rows_or_files(creation_client, arguments,
         "expected": error["expected"],
         "path": path,
     }
-    assert state(root) == before
+    # content-addressed bundle files may stay: they are never removed once written
+    counts, files = state(root)
+    assert (counts, {name for name in files if not name.startswith("bundles/")}) == before
 
 
-def test_actionable_layout_errors_reach_public_mcp_without_echoing_values(creation_client):
-    _, _, client, headers = creation_client
-    cases = [
-        (
-            "create_page",
-            request(
-                layout={
-                    "blocks": [{"type": "list", "title": "runs", "collection": "private value!"}]
-                }
-            ),
-            {
-                "code": "invalid_input",
-                "path": "/layout/blocks/0/collection",
-                "expected": "assigned collection",
-            },
-            "create_page.tools",
-            "private value!",
-        ),
-        (
-            "create_page",
-            request(
-                layout={"blocks": [{"type": "form", "title": "edit", "tool": "private value!"}]}
-            ),
-            {
-                "code": "invalid_input",
-                "path": "/layout/blocks/0/tool",
-                "expected": "assigned tool name",
-            },
-            "create_tool",
-            "private value!",
-        ),
-        (
-            "update_layout",
-            {"layout": {"blocks": []}, "expected_version": 99},
-            {
-                "code": "conflict",
-                "path": "/expected_version",
-                "expected": "current active layout version",
-            },
-            "inspect_page",
-            "99",
-        ),
+def test_simultaneous_identical_create_page_calls_are_idempotent(creation_client):
+    root, store, client, headers = creation_client
+    barrier = threading.Barrier(2)
+    results = [None, None]
+    errors = []
+    concurrent_headers = [
+        initialize(client, store.ensure_credential("home"), 10),
+        initialize(client, store.ensure_credential("home"), 11),
     ]
 
-    for request_id, (tool, arguments, expected, named_fix, private_value) in enumerate(cases, 2):
-        result = mcp(
-            client,
-            headers,
-            request_id,
-            "tools/call",
-            {"name": tool, "arguments": arguments},
-        )
-        document = json.loads(result["content"][0]["text"])
-        assert result["isError"] is True
-        assert {key: document[key] for key in ("code", "path", "expected")} == expected
-        assert named_fix in document["hint"]
-        assert private_value not in document["hint"]
+    def call(index):
+        try:
+            barrier.wait(timeout=10)
+            results[index] = mcp(
+                client,
+                concurrent_headers[index],
+                20 + index,
+                "tools/call",
+                {"name": "create_page", "arguments": request()},
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=call, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for index, thread in enumerate(threads):
+        thread.join(timeout=10)
+        assert not thread.is_alive(), f"concurrent create caller {index} hung"
+    assert not errors, errors
+    values = [json.loads(result["content"][0]["text"]) for result in results]
+    assert sorted(value.get("existing") for value in values if "code" not in value) == [
+        False,
+        True,
+    ], values
+    assert len({value["page_id"] for value in values}) == 1
+    counts, files = state(root)
+    assert counts == {
+        "page": 2,
+        "code_revision": 1,
+        "tool": 1,
+        "tool_version": 1,
+        "page_tool": 1,
+        "audit": 2,
+    }
+    assert len([path for path in files if path.startswith("bundles/")]) == 1
+    assert store.page_tools(values[0]["page_id"])[0]["name"] == "add_book"
 
 
 def test_create_page_file_failure_leaves_no_rows_or_files(creation_client, monkeypatch):
     root, _store, client, headers = creation_client
     before = state(root)
 
-    def fail_write(_self, path, content):
+    def fail_write(path, content):
         path.write_bytes(content)
         raise OSError("synthetic write failure")
 
-    monkeypatch.setattr(PageStore, "_atomic_private_write", fail_write)
+    monkeypatch.setattr(pages, "atomic_private_write", fail_write)
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
     error = json.loads(result["content"][0]["text"])
     assert result["isError"] is True
@@ -1054,7 +1026,6 @@ def test_create_page_is_idempotent_and_route_conflicts_are_structured(creation_c
         "route",
         "digest",
         "existing",
-        "detail_filter_matches",
         "note",
     }
     assert credential.decode() not in first_serialized
@@ -1095,679 +1066,6 @@ def test_create_page_is_idempotent_and_route_conflicts_are_structured(creation_c
     assert state(root) == before
 
 
-def test_simultaneous_identical_create_page_calls_are_idempotent(creation_client):
-    root, store, client, headers = creation_client
-    barrier = threading.Barrier(2)
-    results = [None, None]
-    errors = []
-    concurrent_headers = [
-        initialize(client, store.ensure_credential("home"), 10),
-        initialize(client, store.ensure_credential("home"), 11),
-    ]
-
-    def call(index):
-        try:
-            barrier.wait(timeout=10)
-            results[index] = mcp(
-                client,
-                concurrent_headers[index],
-                20 + index,
-                "tools/call",
-                {"name": "create_page", "arguments": request()},
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    threads = [threading.Thread(target=call, args=(index,)) for index in range(2)]
-    for thread in threads:
-        thread.start()
-    for index, thread in enumerate(threads):
-        thread.join(timeout=10)
-        assert not thread.is_alive(), f"concurrent create caller {index} hung"
-    assert not errors, errors
-    values = [json.loads(result["content"][0]["text"]) for result in results]
-    assert sorted(value["existing"] for value in values) == [False, True]
-    assert len({value["page_id"] for value in values}) == 1
-    counts, files = state(root)
-    assert counts == {
-        "page": 2,
-        "layout_version": 1,
-        "tool": 1,
-        "tool_version": 1,
-        "page_tool": 1,
-        "audit": 2,
-    }
-    assert len([path for path in files if path.startswith("bundles/")]) == 2
-    page_id = values[0]["page_id"]
-    assert store.page_tools(page_id)[0]["name"] == "add_book"
-
-
-def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_client):
-    _, _, client, home_headers = creation_client
-    inspected = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {}},
-    )
-    before = json.loads(inspected["content"][0]["text"])
-    assert before["layout_version"] == 1
-
-    layout = {"blocks": [{"type": "detail", "title": "changed", "fields": ["id"]}]}
-    updated = mcp(
-        client,
-        home_headers,
-        3,
-        "tools/call",
-        {
-            "name": "update_layout",
-            "arguments": {
-                "layout": layout,
-                "expected_version": before["layout_version"],
-            },
-        },
-    )
-    assert json.loads(updated["content"][0]["text"])["version"] == 2
-
-    inspected = mcp(
-        client,
-        home_headers,
-        4,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {}},
-    )
-    after = json.loads(inspected["content"][0]["text"])
-    assert after["layout_version"] == 2
-    assert after["layout"] == layout
-
-    stale = mcp(
-        client,
-        home_headers,
-        5,
-        "tools/call",
-        {
-            "name": "update_layout",
-            "arguments": {
-                "layout": {"blocks": []},
-                "expected_version": before["layout_version"],
-            },
-        },
-    )
-    assert stale["isError"] is True
-    assert json.loads(stale["content"][0]["text"]) == {
-        "code": "conflict",
-        "path": "/expected_version",
-        "expected": "current active layout version",
-        "hint": "Call inspect_page, set expected_version to layout.version, and retry.",
-    }
-
-
-@pytest.mark.parametrize("writer", ["create_page", "update_layout"])
-@pytest.mark.parametrize("block_type", ["detail", "metric", "list"])
-def test_unknown_filter_field_is_actionable_through_public_tools(
-    creation_client, writer, block_type
-):
-    _, store, client, home_headers = creation_client
-    field_filter = {"field": "missing", "equals": "the book"}
-    block = {
-        "detail": {
-            "type": "detail",
-            "title": "book",
-            "collection": "books",
-            "fields": ["title"],
-            "filter": field_filter,
-        },
-        "metric": {
-            "type": "metric",
-            "label": "books",
-            "collection": "books",
-            "count": True,
-            "where": field_filter,
-        },
-        "list": {"type": "list", "title": "books", "collection": "books", "filter": field_filter},
-    }[block_type]
-    layout = {"blocks": [block]}
-    created = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {
-            "name": "create_page",
-            "arguments": request(
-                layout=layout
-                if writer == "create_page"
-                else {"blocks": [{"type": "text", "text": "start"}]}
-            ),
-        },
-    )
-    result = created
-    if writer == "update_layout":
-        page_id = json.loads(created["content"][0]["text"])["page_id"]
-        with store.transaction() as db:
-            db.execute(
-                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
-                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (page_id, "books", "book-1", 1, json.dumps({"title": "the book"}), "1", "1"),
-            )
-        store.set_create_mode(page_id, True)
-        page_headers = initialize(client, store.ensure_credential(page_id), 3)
-        result = mcp(
-            client,
-            page_headers,
-            4,
-            "tools/call",
-            {
-                "name": "update_layout",
-                "arguments": {"layout": layout, "expected_version": 1},
-            },
-        )
-
-    hint = "Use a field from the books collection schema. Unknown field: missing. Fields: title."
-    if writer == "update_layout":
-        hint += " Did you mean title?"
-    assert json.loads(result["content"][0]["text"]) == {
-        "code": "invalid_input",
-        "path": f"/layout/blocks/0/{'where' if block_type == 'metric' else 'filter'}/field",
-        "expected": "field in collection schema",
-        "hint": hint,
-    }
-
-
-def test_list_filter_is_stored_through_create_page(creation_client):
-    _, store, client, home_headers = creation_client
-    block = {
-        "type": "list",
-        "title": "the book",
-        "collection": "books",
-        "filter": {"field": "title", "equals": "the book"},
-    }
-    created = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {"name": "create_page", "arguments": request(layout={"blocks": [block]})},
-    )
-    assert created.get("isError") is not True, created
-    page_id = json.loads(created["content"][0]["text"])["page_id"]
-    assert store.layout(page_id)["blocks"] == [block]
-
-
-@pytest.mark.parametrize(
-    ("records", "field_filter", "expected"),
-    [
-        ([{"run_id": "run-002"}], {"field": "run_id", "equals": "run-002"}, {"matched": 1}),
-        (
-            [{"run_id": "run-002"}, {"run_id": "run-002"}, {"run_id": "run-003"}],
-            {"field": "run_id", "equals": "run-002"},
-            {"matched": 2},
-        ),
-        (
-            [{"run_id": "run-002"}],
-            {"field": "record_id", "equals": "run-002"},
-            {
-                "matched": 0,
-                "hint": "no record has record_id = run-002; did you mean run_id?",
-            },
-        ),
-        (
-            [{"run_id": "run-003"}],
-            {"field": "run_id", "equals": "run-002"},
-            {"matched": 0, "hint": "no record has run_id = run-002"},
-        ),
-        (
-            [],
-            {"field": "run_id", "equals": "run-002"},
-            {"matched": 0, "hint": "no record has run_id = run-002"},
-        ),
-    ],
-    ids=["one", "several", "suggestion", "no-suggestion", "empty"],
-)
-def test_detail_filter_match_results_through_public_mcp(
-    creation_client, records, field_filter, expected
-):
-    _, store, client, home_headers = creation_client
-    data_schema = {
-        "type": "object",
-        "properties": {"run_id": {"type": "string"}, "record_id": {"type": "string"}},
-        "additionalProperties": False,
-    }
-    detail = {
-        "type": "detail",
-        "title": "run",
-        "collection": "books",
-        "fields": ["run_id"],
-        "filter": field_filter,
-    }
-    run_bundle = bundle(name="add_run")
-    run_bundle["input_schema"] = data_schema
-    run_bundle["implementation"]["data_schema"] = data_schema
-    created = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {
-            "name": "create_page",
-            "arguments": request(
-                tools=[run_bundle],
-                layout={"blocks": [detail]},
-            ),
-        },
-    )
-    created_value = json.loads(created["content"][0]["text"])
-    initial_hint = f"no record has {field_filter['field']} = run-002"
-    assert created_value["detail_filter_matches"] == [
-        {"block": 0, "matched": 0, "hint": initial_hint}
-    ]
-    page_id = created_value["page_id"]
-    with store.transaction() as db:
-        for index, document in enumerate(records):
-            db.execute(
-                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
-                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (
-                    page_id,
-                    "books",
-                    f"record-{index}",
-                    1,
-                    json.dumps(document),
-                    f"{index}",
-                    f"{index}",
-                ),
-            )
-    store.set_create_mode(page_id, True)
-    page_headers = initialize(client, store.ensure_credential(page_id), 3)
-    updated = mcp(
-        client,
-        page_headers,
-        4,
-        "tools/call",
-        {
-            "name": "update_layout",
-            "arguments": {"layout": {"blocks": [detail]}, "expected_version": 1},
-        },
-    )
-    update_value = json.loads(updated["content"][0]["text"])
-    assert update_value["detail_filter_matches"] == [{"block": 0, **expected}]
-    inspected = mcp(
-        client,
-        home_headers,
-        5,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {"page_id": page_id}},
-    )
-    inspect_value = json.loads(inspected["content"][0]["text"])
-    assert inspect_value["detail_filter_matches"] == [{"block": 0, **expected}]
-
-
-def test_inspect_page_diagnoses_legacy_unknown_filter_field(creation_client):
-    _, store, client, home_headers = creation_client
-    created = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {"name": "create_page", "arguments": request()},
-    )
-    page_id = json.loads(created["content"][0]["text"])["page_id"]
-    legacy_layout = {
-        "blocks": [
-            {
-                "type": "detail",
-                "title": "book",
-                "collection": "books",
-                "fields": ["title"],
-                "filter": {"field": "missing", "equals": "the book"},
-            }
-        ]
-    }
-    install_layout(store, page_id, 2, legacy_layout)
-    with store.transaction() as db:
-        db.execute(
-            "INSERT INTO page_record(page_id,collection,record_id,version,document,"
-            "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-            (page_id, "books", "book-1", 1, json.dumps({"title": "the book"}), "1", "1"),
-        )
-
-    inspected = mcp(
-        client,
-        home_headers,
-        3,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {"page_id": page_id}},
-    )
-
-    assert json.loads(inspected["content"][0]["text"])["detail_filter_matches"] == [
-        {
-            "block": 0,
-            "matched": 0,
-            "hint": "no record has missing = the book; did you mean title?",
-        }
-    ]
-
-
-def test_concurrent_updates_return_their_own_match_counts(creation_client, monkeypatch):
-    _, store, client, home_headers = creation_client
-    created = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {
-            "name": "create_page",
-            "arguments": request(layout={"blocks": [{"type": "text", "text": "start"}]}),
-        },
-    )
-    page_id = json.loads(created["content"][0]["text"])["page_id"]
-    with store.transaction() as db:
-        db.execute(
-            "INSERT INTO page_record(page_id,collection,record_id,version,document,"
-            "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-            (page_id, "books", "book-1", 1, json.dumps({"title": "first"}), "1", "1"),
-        )
-    store.set_create_mode(page_id, True)
-    first_headers = initialize(client, store.ensure_credential(page_id), 3)
-    second_headers = initialize(client, store.ensure_credential(page_id), 4)
-    first_committed = threading.Event()
-    second_committed = threading.Event()
-    original = PageStore.update_layout
-
-    def ordered_update(self, target_page_id, layout, expected_version):
-        if expected_version == 2:
-            assert first_committed.wait(10)
-        result = original(self, target_page_id, layout, expected_version)
-        if expected_version == 1:
-            first_committed.set()
-            assert second_committed.wait(10)
-        else:
-            second_committed.set()
-        return result
-
-    monkeypatch.setattr(PageStore, "update_layout", ordered_update)
-
-    def update(headers, request_id, expected_version, value):
-        layout = {
-            "blocks": [
-                {
-                    "type": "detail",
-                    "title": "book",
-                    "collection": "books",
-                    "fields": ["title"],
-                    "filter": {"field": "title", "equals": value},
-                }
-            ]
-        }
-        return mcp(
-            client,
-            headers,
-            request_id,
-            "tools/call",
-            {
-                "name": "update_layout",
-                "arguments": {"layout": layout, "expected_version": expected_version},
-            },
-        )
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(update, first_headers, 5, 1, "first")
-        second = pool.submit(update, second_headers, 6, 2, "second")
-        first_value = json.loads(first.result()["content"][0]["text"])
-        second_value = json.loads(second.result()["content"][0]["text"])
-
-    assert first_value["detail_filter_matches"] == [{"block": 0, "matched": 1}]
-    assert second_value["detail_filter_matches"] == [
-        {"block": 0, "matched": 0, "hint": "no record has title = second"}
-    ]
-
-
-def test_update_layout_refuses_page_too_large_to_inspect(creation_client):
-    _, store, client, home_headers = creation_client
-    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
-    install_layout(store, "home", 2, large_layout)
-
-    inspected = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {}},
-    )
-    value = json.loads(inspected["content"][0]["text"])
-    assert value["layout"] is None
-    assert value["layout_complete"] is False
-
-    before = state(store.root)
-    refused = mcp(
-        client,
-        home_headers,
-        3,
-        "tools/call",
-        {
-            "name": "update_layout",
-            "arguments": {"layout": {"blocks": []}, "expected_version": 2},
-        },
-    )
-    assert refused["isError"] is True
-    assert json.loads(refused["content"][0]["text"]) == {
-        "code": "layout_too_large",
-        "path": "/layout",
-        "expected": "inspect_page result no larger than 8192 bytes",
-        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
-    }
-    assert store.layout("home") == large_layout
-    assert state(store.root) == before
-
-
-def test_update_layout_guard_is_atomic_with_write(creation_client, monkeypatch):
-    _, store, client, home_headers = creation_client
-    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
-    original = PageStore.update_layout
-    installed = False
-
-    def interleaved_update(self, page_id, layout, expected_version):
-        nonlocal installed
-        if not installed:
-            installed = True
-            install_layout(PageStore(self.root), page_id, 2, large_layout)
-        return original(self, page_id, layout, expected_version)
-
-    monkeypatch.setattr(PageStore, "update_layout", interleaved_update)
-    refused = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {
-            "name": "update_layout",
-            "arguments": {"layout": {"blocks": []}, "expected_version": 2},
-        },
-    )
-
-    assert refused["isError"] is True
-    assert json.loads(refused["content"][0]["text"])["code"] == "layout_too_large"
-    assert store.layout("home") == large_layout
-    with store._connect() as db:
-        assert (
-            db.execute("SELECT active_layout_version FROM page WHERE id='home'").fetchone()[0] == 2
-        )
-        assert (
-            db.execute(
-                "SELECT COUNT(*) FROM layout_version WHERE page_id='home' AND version=3"
-            ).fetchone()[0]
-            == 0
-        )
-
-
-def test_update_layout_refuses_new_layout_too_large_to_inspect(creation_client):
-    _, store, client, home_headers = creation_client
-    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
-    before = state(store.root)
-
-    refused = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {
-            "name": "update_layout",
-            "arguments": {"layout": large_layout, "expected_version": 1},
-        },
-    )
-
-    assert refused["isError"] is True
-    assert json.loads(refused["content"][0]["text"]) == {
-        "code": "layout_too_large",
-        "path": "/layout",
-        "expected": "inspect_page result no larger than 8192 bytes",
-        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
-    }
-    assert store.inspect_page("home")["layout_version"] == 1
-    assert state(store.root) == before
-
-
-def test_create_page_refuses_layout_too_large_to_inspect(creation_client):
-    root, _, client, home_headers = creation_client
-    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
-    before = state(root)
-
-    refused = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {
-            "name": "create_page",
-            "arguments": request(layout=large_layout),
-        },
-    )
-
-    assert refused["isError"] is True
-    assert json.loads(refused["content"][0]["text"]) == {
-        "code": "layout_too_large",
-        "path": "/layout",
-        "expected": "inspect_page result no larger than 8192 bytes",
-        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
-    }
-    assert state(root) == before
-
-
-def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_client):
-    _, store, client, home_headers = creation_client
-    created = mcp(
-        client,
-        home_headers,
-        2,
-        "tools/call",
-        {"name": "create_page", "arguments": request()},
-    )
-    page_id = json.loads(created["content"][0]["text"])["page_id"]
-    page_headers = initialize(client, store.ensure_credential(page_id), 3)
-    catalog = mcp(client, page_headers, 4, "tools/list", {})
-    assert "update_layout" not in [tool["name"] for tool in catalog["tools"]]
-
-    store.set_create_mode(page_id, True)
-    catalog = mcp(client, page_headers, 5, "tools/list", {})
-    update_tool = next(tool for tool in catalog["tools"] if tool["name"] == "update_layout")
-    assert update_tool["inputSchema"] == UPDATE_LAYOUT_SCHEMA
-    assert update_tool["description"] == (
-        "REPLACES the whole layout; any block you leave out is deleted. First call "
-        "achilles__inspect_page. If layout_complete is false, do not change the page; tell "
-        "the user it is too large to edit from chat. Otherwise, copy its `layout` exactly, "
-        "change only what the user asked (insert, "
-        "reorder, edit, or remove blocks), and pass the full layout with "
-        "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
-        "To change another page, open that page's chat. A detail block can select records with "
-        'collection and filter, for example {"field":"run_id","equals":"run-002"}; use a '
-        "field from the collection's assigned tool schema. The result reports how many records "
-        "the filter matches and gives a repair hint for zero matches. It shows the highest "
-        "creation time, with ties resolved by highest record id; without a filter it shows "
-        "field labels only."
-    )
-    assert (
-        update_tool["inputSchema"]["properties"]["layout"]["description"]
-        == "When achilles__inspect_page reports layout_complete true, copy its complete stored "
-        "layout; any block you leave out is deleted. When layout_complete is false, do not "
-        "change the page; tell the user it is too large to edit from chat."
-    )
-    assert (
-        update_tool["inputSchema"]["properties"]["expected_version"]["description"]
-        == "The layout_version from achilles__inspect_page; pass it as expected_version. "
-        "On a conflict, inspect again and retry."
-    )
-    assert (
-        "full ordered block list"
-        in update_tool["inputSchema"]["properties"]["layout"]["properties"]["blocks"]["description"]
-    )
-    inspect_tool = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
-    assert "when layout_complete is true" in inspect_tool["description"]
-    assert (
-        "when layout_complete is false, do not change the page and tell the user it is too large "
-        "to edit from chat" in inspect_tool["description"]
-    )
-    assert (
-        inspect_tool["outputSchema"]["properties"]["layout"]["description"]
-        == "The complete stored layout to edit with update_layout, or null when "
-        "layout_complete is false."
-    )
-    assert (
-        inspect_tool["outputSchema"]["properties"]["layout_complete"]["description"]
-        == "When false, do not change the page; tell the user the page is too large to edit "
-        "from chat."
-    )
-    assert (
-        inspect_tool["outputSchema"]["properties"]["layout_version"]["description"]
-        == "The value to pass as update_layout expected_version."
-    )
-
-    layout = {"blocks": [{"type": "text", "text": "changed"}]}
-    updated = mcp(
-        client,
-        page_headers,
-        6,
-        "tools/call",
-        {"name": "update_layout", "arguments": {"layout": layout, "expected_version": 1}},
-    )
-    assert json.loads(updated["content"][0]["text"])["version"] == 2
-    assert store.layout(page_id) == layout
-
-    other = mcp(
-        client,
-        home_headers,
-        7,
-        "tools/call",
-        {
-            "name": "create_page",
-            "arguments": {**request(), "route": "/other", "title": "other"},
-        },
-    )
-    other_id = json.loads(other["content"][0]["text"])["page_id"]
-    before = store.layout(other_id)
-    forbidden = mcp(
-        client,
-        page_headers,
-        8,
-        "tools/call",
-        {
-            "name": "update_layout",
-            "arguments": {"page_id": other_id, "layout": layout, "expected_version": 1},
-        },
-    )
-    assert forbidden["isError"] is True
-    assert json.loads(forbidden["content"][0]["text"]) == {
-        "code": "invalid_input",
-        "path": "",
-        "expected": "only properties: layout, expected_version",
-    }
-    assert store.layout(other_id) == before
-
-
-LAYOUT_V2 = {"blocks": [{"type": "text", "text": "first"}]}
-LAYOUT_V3 = {"blocks": [{"type": "text", "text": "second"}]}
-
-
 def _restore(client, headers, arguments):
     result = mcp(
         client, headers, 90, "tools/call", {"name": "restore_version", "arguments": arguments}
@@ -1781,23 +1079,15 @@ def _active_tool_version(store):
 
 @pytest.mark.parametrize(
     "case",
-    [
-        "layout",
-        "tool",
-        "stale_layout",
-        "stale_tool",
-        "other_page",
-        "unknown_version",
-        "route_bad_json",
-    ],
+    ["code", "tool", "stale_code", "stale_tool", "other_page", "unknown_version", "route_bad_json"],
 )
 def test_restore_version_guards_over_public_interfaces(creation_client, monkeypatch, case):
     root, store, client, headers = creation_client
     store.create_tool("home", bundle())
     store.create_tool("home", {**bundle(), "description": "insert books v2"})
-    assert store.update_layout("home", LAYOUT_V2, 1)[0] == 2
-    assert store.update_layout("home", LAYOUT_V3, 2)[0] == 3
-    store.create_page("/other", "other", LAYOUT_V2)
+    store.write_page("home", "first", {}, None)
+    store.write_page("home", "second", {}, 1)
+    store.create_page("/other", "other")
     notified = []
 
     async def record_list_changed(session):
@@ -1808,20 +1098,15 @@ def test_restore_version_guards_over_public_interfaces(creation_client, monkeypa
     )
     mcp(client, headers, 80, "tools/list", {})
     before = state(root)
-    if case == "layout":
+    if case == "code":
         error, value = _restore(
-            client, headers, {"kind": "layout", "version": 2, "expected_version": 3}
+            client, headers, {"kind": "code", "version": 1, "expected_version": 2}
         )
         assert not error, value
-        assert (value["version"], value["restored_from"]) == (4, 2)
-        assert store.layout("home") == LAYOUT_V2
-        inspected = mcp(
-            client, headers, 91, "tools/call", {"name": "inspect_page", "arguments": {}}
-        )
-        versions = json.loads(inspected["content"][0]["text"])["layout_versions"]
-        assert [row["version"] for row in versions] == [4, 3, 2]
+        assert (value["revision"], value["restored_from"]) == (3, 1)
+        assert store.page_code("home")["source"] == "first"
         after = state(root)[0]
-        assert after["layout_version"] == before[0]["layout_version"] + 1
+        assert after["code_revision"] == before[0]["code_revision"] + 1
         assert after["audit"] == before[0]["audit"] + 1
         return
     if case == "tool":
@@ -1856,8 +1141,8 @@ def test_restore_version_guards_over_public_interfaces(creation_client, monkeypa
         assert state(root) == before
         return
     arguments, code, path = {
-        "stale_layout": (
-            {"kind": "layout", "version": 2, "expected_version": 2},
+        "stale_code": (
+            {"kind": "code", "version": 1, "expected_version": 1},
             "conflict",
             "/expected_version",
         ),
@@ -1867,12 +1152,12 @@ def test_restore_version_guards_over_public_interfaces(creation_client, monkeypa
             "/expected_version",
         ),
         "other_page": (
-            {"kind": "layout", "route": "/other", "version": 2, "expected_version": 3},
+            {"kind": "code", "route": "/other", "version": 1, "expected_version": 1},
             "forbidden",
             "/route",
         ),
         "unknown_version": (
-            {"kind": "layout", "version": 99, "expected_version": 3},
+            {"kind": "code", "version": 99, "expected_version": 2},
             "not_found",
             "/version",
         ),
@@ -1883,5 +1168,335 @@ def test_restore_version_guards_over_public_interfaces(creation_client, monkeypa
     if case == "other_page":
         assert value["hint"] == "To change another page, open that page's chat."
     assert state(root) == before
-    assert store.layout("home") == LAYOUT_V3
+    assert store.page_code("home")["source"] == "second"
     assert _active_tool_version(store) == 2
+
+
+def test_page_code_lifecycle_through_real_mcp_requests(monkeypatch, tmp_path):
+    count = 0
+
+    def build(_root, _page_id, source, dependencies):
+        nonlocal count
+        count += 1
+        return {
+            "digest": f"digest-{count}",
+            "size": len(source),
+            "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", **dependencies},
+            "resolved_dependencies": {
+                "react": "19.0.0",
+                "react-dom": "19.0.0",
+                **{name: "1.0.0" for name in dependencies},
+            },
+            "lockfile": f"lock-{count}",
+        }
+
+    monkeypatch.setattr(pages, "build_page", build)
+    root = tmp_path / "achilles"
+    monkeypatch.setenv("ACHILLES_HOME", str(root))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    store = PageStore(root)
+    store.set_create_mode("home", True)
+    app = web.create_app()
+    with TestClient(app, client=("127.0.0.1", 1234)) as client:
+        home_headers = initialize(client, store.ensure_credential("home"))
+        listed = mcp(client, home_headers, 2, "tools/list", {})
+        assert {tool["name"] for tool in listed["tools"]} >= {
+            "create_page",
+            "write_page",
+            "inspect_page",
+            "restore_version",
+        }
+        assert all("layout" not in tool["name"] for tool in listed["tools"])
+
+        created = mcp(
+            client,
+            home_headers,
+            3,
+            "tools/call",
+            {
+                "name": "create_page",
+                "arguments": {
+                    "route": "/notes",
+                    "title": "notes",
+                    "package": {
+                        "source": "export default function Page(){return <main>one</main>}",
+                        "dependencies": {},
+                    },
+                },
+            },
+        )
+        created_value = json.loads(created["content"][0]["text"])
+        page_id = created_value["page_id"]
+        store.set_create_mode(page_id, True)
+        page_headers = initialize(client, store.ensure_credential(page_id), 4)
+        mcp(client, page_headers, 5, "tools/list", {})
+
+        written = mcp(
+            client,
+            page_headers,
+            6,
+            "tools/call",
+            {
+                "name": "write_page",
+                "arguments": {
+                    "source": "export default function Page(){return <main>two</main>}",
+                    "dependencies": {},
+                    "expected_revision": 1,
+                },
+            },
+        )
+        assert json.loads(written["content"][0]["text"])["revision"] == 2
+
+        inspected = mcp(
+            client,
+            page_headers,
+            7,
+            "tools/call",
+            {"name": "inspect_page", "arguments": {}},
+        )
+        assert json.loads(inspected["content"][0]["text"])["code"]["revision"] == 2
+
+        restored = mcp(
+            client,
+            page_headers,
+            8,
+            "tools/call",
+            {
+                "name": "restore_version",
+                "arguments": {"kind": "code", "version": 1, "expected_version": 2},
+            },
+        )
+        value = json.loads(restored["content"][0]["text"])
+        assert value == {
+            "digest": "digest-1",
+            "kind": "code",
+            "restored_from": 1,
+            "revision": 3,
+        }
+
+        browser_restore = client.post(
+            f"/api/pages/{page_id}/code/restore",
+            headers={
+                "authorization": f"Bearer {store.ensure_credential(page_id)}",
+                "host": "127.0.0.1:5190",
+                "origin": "http://127.0.0.1:5190",
+            },
+            json={"version": 2, "expected_version": 3},
+        )
+        assert browser_restore.status_code == 200
+        assert browser_restore.json()["version"] == 4
+
+
+_FILE_SOURCE = (
+    'import { createRoot } from "react-dom/client";\n'
+    "function Page() { return <main><h1>reading</h1><p>a</p><p>a</p></main>; }\n"
+    'createRoot(document.getElementById("root")!).render(<Page />);\n'
+)
+
+
+def _tool_value(result):
+    return result.get("isError", False), json.loads(result["content"][0]["text"])
+
+
+def test_page_files_read_edit_and_restore_over_public_mcp(creation_client, monkeypatch):
+    import hashlib
+
+    from achilles.page_build import PageBuildError
+
+    root, store, client, headers = creation_client
+    builds = []
+
+    def build(build_root, _page_id, source, dependencies):
+        builds.append((source, dependencies))
+        if "BROKEN" in source:
+            raise PageBuildError("src/Page.tsx:2:1: Unexpected BROKEN")
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        (build_root / "bundles" / f"{digest}.js").write_text(source)
+        return {
+            "digest": digest,
+            "size": len(source),
+            "dependencies": {"react": "19.0.0", "react-dom": "19.0.0", **dependencies},
+            "resolved_dependencies": dependencies,
+            "lockfile": "test-lock",
+        }
+
+    monkeypatch.setattr(pages, "build_page", build)
+    created = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": {**request(), "package": {"source": _FILE_SOURCE, "dependencies": {}}},
+        },
+    )
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    token = store.ensure_credential(page_id)
+    page_headers = initialize(client, token, 3)
+    store.set_create_mode("home", False)
+
+    def call(request_id, name, arguments):
+        return _tool_value(
+            mcp(
+                client,
+                page_headers,
+                request_id,
+                "tools/call",
+                {"name": name, "arguments": arguments},
+            )
+        )
+
+    listed = mcp(client, page_headers, 4, "tools/list", {})
+    catalog = {tool["name"]: tool for tool in listed["tools"]}
+    assert catalog["read_page_file"]["annotations"]["readOnlyHint"] is True
+    assert "exactly once" in catalog["edit_page"]["description"]
+
+    # 1. a source file reads in two chunks that join to the whole file
+    error, first = call(5, "read_page_file", {"path": "src/Page.tsx", "limit": 2})
+    assert not error, first
+    assert (first["revision"], first["next_offset"], first["total_lines"]) == (1, 2, 3)
+    error, second = call(6, "read_page_file", {"path": "src/Page.tsx", "offset": 2})
+    assert not error and second["next_offset"] is None
+    assert first["content"] + second["content"] == _FILE_SOURCE
+
+    # path traversal is refused by the schema before anything is read or written
+    before = state(root)
+    for request_id, name, arguments in (
+        (7, "read_page_file", {"path": f"../credentials/{page_id}"}),
+        (8, "read_page_file", {"path": "/etc/passwd"}),
+        (
+            9,
+            "edit_page",
+            {
+                "path": "../../achilles.sqlite3",
+                "edits": [{"old_string": "a", "new_string": "b"}],
+                "expected_revision": 1,
+            },
+        ),
+    ):
+        error, refused = call(request_id, name, arguments)
+        assert error and refused["code"] == "invalid_input" and refused["path"] == "/path", name
+        assert token not in json.dumps(refused)
+    assert state(root) == before
+
+    # 4. zero or two matches, or one bad edit after a good one, change nothing
+    for request_id, edits, count in (
+        (10, [{"old_string": "<h2>", "new_string": "x"}], 0),
+        (11, [{"old_string": "<p>a</p>", "new_string": "x"}], 2),
+        (
+            12,
+            [
+                {"old_string": "<h1>reading</h1>", "new_string": "<h1>books</h1>"},
+                {"old_string": "missing", "new_string": "x"},
+            ],
+            0,
+        ),
+    ):
+        error, failed = call(
+            request_id,
+            "edit_page",
+            {"path": "src/Page.tsx", "edits": edits, "expected_revision": 1},
+        )
+        assert error and failed["code"] == "edit_error", failed
+        assert failed["hint"].startswith(f"found {count} matches; nothing was changed")
+    assert state(root) == before and len(builds) == 1
+
+    # 2. one exact edit compiles and becomes the active revision
+    error, edited = call(
+        13,
+        "edit_page",
+        {
+            "path": "src/Page.tsx",
+            "edits": [{"old_string": "<h1>reading</h1>", "new_string": "<h1>books</h1>"}],
+            "expected_revision": 1,
+        },
+    )
+    assert not error, edited
+    assert edited["revision"] == 2
+    assert store.page_code(page_id)["source"] == _FILE_SOURCE.replace("reading</h1>", "books</h1>")
+
+    # 3. a stale revision is a conflict and adds no revision
+    before = state(root)
+    error, stale = call(
+        14,
+        "edit_page",
+        {
+            "path": "src/Page.tsx",
+            "edits": [{"old_string": "books", "new_string": "stale"}],
+            "expected_revision": 1,
+        },
+    )
+    assert error and stale["code"] == "conflict" and stale["current"] == {"revision": 2}
+    assert state(root) == before
+
+    # a failed build is the candidate: inspect shows it, the next read and edit start from it
+    error, broken = call(
+        15,
+        "edit_page",
+        {
+            "path": "src/Page.tsx",
+            "edits": [{"old_string": "<main>", "new_string": "<main>BROKEN"}],
+            "expected_revision": 2,
+        },
+    )
+    assert error and broken == {
+        "error": "compile_error",
+        "diagnostics": "src/Page.tsx:2:1: Unexpected BROKEN",
+        "revision": 3,
+    }
+    assert store.page(page_id)["active_code_revision"] == 2
+    error, inspected = call(16, "inspect_page", {})
+    assert inspected["code"]["revision"] == 2
+    assert inspected["code"]["files"][0] == {
+        "path": "src/Page.tsx",
+        "bytes": len(store.page_code(page_id)["source"].encode()),
+    }
+    assert inspected["candidate"]["revision"] == 3
+    assert inspected["candidate"]["diagnostics"] == "src/Page.tsx:2:1: Unexpected BROKEN"
+    error, failed_read = call(17, "read_page_file", {"path": "src/Page.tsx"})
+    assert failed_read["failed"] is True and "BROKEN" in failed_read["content"]
+    error, fixed = call(
+        18,
+        "edit_page",
+        {
+            "path": "package.json",
+            "edits": [
+                {
+                    "old_string": '"react": "19.0.0"',
+                    "new_string": '"nanoid": "5.1.6",\n    "react": "19.0.0"',
+                }  # noqa: E501
+            ],
+            "expected_revision": 3,
+        },
+    )
+    assert error  # still broken: the package edit keeps the candidate's source
+    error, fixed = call(
+        19,
+        "edit_page",
+        {
+            "path": "src/Page.tsx",
+            "edits": [{"old_string": "<main>BROKEN", "new_string": "<main>"}],
+            "expected_revision": 4,
+        },
+    )
+    assert not error, fixed
+    assert builds[-2][1]["nanoid"] == "5.1.6"
+    assert fixed["revision"] == 5
+    error, inspected = call(20, "inspect_page", {})
+    assert inspected["candidate"] is None
+
+    # 5. restoring revision 1 appends a new revision that renders the original code
+    error, restored = call(
+        21,
+        "restore_version",
+        {"kind": "code", "version": 1, "expected_version": 5},
+    )
+    assert not error, restored
+    assert restored["revision"] == 6
+    assert store.page_code(page_id)["source"] == _FILE_SOURCE
+    frame = client.get(f"/api/pages/{page_id}/frame")
+    assert frame.status_code == 200
+    digest = hashlib.sha256(_FILE_SOURCE.encode()).hexdigest()
+    assert f"artifact/{digest}" in frame.text
+    assert client.get(f"/api/pages/{page_id}/artifact/{digest}").text == _FILE_SOURCE

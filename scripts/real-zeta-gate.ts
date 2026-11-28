@@ -28,17 +28,34 @@ import { freeGatePort } from "./gate-port";
 
 const root = new URL("..", import.meta.url).pathname;
 
-const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
-
-const metricStrips = {
-  "sb7-short": [["queued", "7"], ["reading", "1"], ["done", "12"]],
-  "long-currency": [["usd revenue", "$12,345.67"], ["euro revenue", "€123,456,789.00"], ["net revenue", "−£12,345.67"]],
-  "three-long": [["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"]],
-  "seven-mixed": [["queued", "7"], ["reading", "1"], ["done", "12"], ["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"], ["review", "waiting on an intentionally long legal and editorial review"]],
-  "sb7-values": [["Users", "42"], ["Growth", "18%"], ["Uptime", "99.9%"]],
-  "mixed-types": [["integer", "42"], ["percent", "18%"], ["decimal", "1.25"], ["currency", "$12.50"], ["compact", "12.3K"], ["text", "Ready"]],
-  "three-oversize": [["state", "supercalifragilisticexpialidocious"], ["cjk", "国際共同編集進捗"], ["emoji", "📚📚📚📚📚📚📚📚"]],
+// the compiled home page the gate seeds: plain ESM is valid TSX, so it stands in for a write_page build without docker.
+// it lists two collections through the frame bridge every 500 ms and writes one record from a button.
+const gateHomePage = `const root = document.getElementById("root");
+const list = async (collection) => (await window.achilles.records.list(collection)).map((row) => row.text).join(" | ") || "none";
+const button = document.createElement("button");
+button.textContent = "add frame note";
+button.onclick = () => window.achilles.records.insert("frame_notes", { text: "from the frame" });
+const first = async () => (await window.achilles.records.list("frame_notes"))[0];
+const edit = document.createElement("button");
+edit.textContent = "edit frame note";
+edit.onclick = async () => window.achilles.records.update("frame_notes", (await first()).record_id, { text: "edited in the frame" });
+const remove = document.createElement("button");
+remove.textContent = "delete frame note";
+remove.onclick = async () => window.achilles.records.delete("frame_notes", (await first()).record_id);
+const annotations = document.createElement("p");
+const notes = document.createElement("p");
+const heading = document.createElement("h1");
+heading.textContent = "gate home";
+root.append(heading, annotations, notes, button, edit, remove);
+const render = async () => {
+  annotations.textContent = "trace annotations: " + await list("trace_annotations");
+  notes.textContent = "frame notes: " + await list("frame_notes");
 };
+// a failed list rejects (achilles restarts mid-gate); the next poll tries again
+const poll = () => render().catch(() => {});
+poll();
+setInterval(poll, 500);
+`;
 
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
@@ -331,6 +348,10 @@ try {
       await action.click();
     };
     authPage.setDefaultTimeout(10_000);
+    // this achilles home is unseeded: home without code is the plain chat, not a docked page notice
+    await authPage.goto(origin);
+    await authPage.locator(".page-view").waitFor({ timeout: 20_000 });
+    if (await authPage.locator(".page-view.docked, .page-unsupported").count()) throw new Error("a fresh home without code rendered as a docked page");
     await authPage.goto(`${origin}/not-a-real-page`);
     await authPage.getByRole("button", { name: "new chat", exact: true }).click({ timeout: 20_000 });
     const composer = authPage.getByRole("textbox", { name: "message", exact: true });
@@ -459,23 +480,18 @@ try {
       "python",
       "-c",
       `
-import json, sys
-from achilles.web import _database
+import hashlib, sys
+from achilles.web import _database, _home
 with _database() as db:
     db.execute("UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'")
-    row = db.execute("SELECT document FROM layout_version WHERE page_id='home' ORDER BY version DESC LIMIT 1").fetchone()
-    layout = json.loads(row[0]) if row else {'blocks': []}
-    layout['blocks'].append({'type': 'list', 'title': 'trace annotations', 'collection': 'trace_annotations'})
-    db.execute("INSERT OR IGNORE INTO layout_version VALUES('home',1,'gate',?,datetime('now'))", (json.dumps(layout),))
-    db.execute("UPDATE layout_version SET document=? WHERE page_id='home' AND version=1", (json.dumps(layout),))
+    artifact = sys.argv[1].encode()
+    digest = hashlib.sha256(artifact).hexdigest()
+    (_home() / "bundles" / f"{digest}.js").write_bytes(artifact)
+    db.execute("INSERT INTO code_revision(page_id,version,source,dependencies,digest,artifact_size,created_at) VALUES('home',1,?,'{}',?,?,datetime('now'))", (sys.argv[1], digest, len(artifact)))
+    db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
     db.executemany("INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)", [(f'gate-page-{i}', f'/gate-page-{i}', f'gate page {i}', f'2025-01-{i:02d}', f'2025-01-{i:02d}') for i in range(1,46)])
-    # Use existing catalog rows so the metric proof does not change catalog order or pagination.
-    for page_id, values in json.loads(sys.argv[1]).items():
-        layout = {"blocks": [{"type": "metric", "label": label, "value": value} for label, value in values]}
-        db.execute("INSERT INTO layout_version VALUES(?,1,'gate',?,datetime('now'))", (page_id, json.dumps(layout)))
-        db.execute("UPDATE page SET active_layout_version=1 WHERE id=?", (page_id,))
 `,
-      JSON.stringify(Object.fromEntries(Object.values(metricStrips).map((values, i) => [`gate-page-${39 + i}`, values]))),
+      gateHomePage,
     ],
     env,
   );
@@ -491,74 +507,6 @@ with _database() as db:
     if (parent !== app.pid || !cwd.split("\n").includes(`n${root.replace(/\/$/, "")}`)) throw new Error("gate did not start the listener in this worktree");
     console.log(`verified worktree listener pid=${pid} port=${port}`);
   }
-  for (const [width, height, scale] of [[320, 720, 1], [360, 780, 1], [390, 844, 1], [1440, 900, 1], [390, 844, 2]]) {
-    const viewport = { width: width / scale, height: height / scale };
-    const tab = await browser.newPage({ viewport, deviceScaleFactor: scale });
-    try {
-      const failures: string[] = [];
-      for (const [index, [strip, values]] of Object.entries(metricStrips).entries()) {
-        const pageNumber = 39 + index;
-        await tab.goto(`${origin}/gate-page-${pageNumber}`);
-        await tab.locator(".page-head h1", { hasText: `gate page ${pageNumber}` }).waitFor();
-        await tab.evaluate(() => document.fonts.ready);
-        const viewportName = `${width}px${scale === 2 ? " at 200% (195 CSS px)" : ""}`;
-        const strips = tab.locator(".metric-strip");
-        const blocks = strips.locator(":scope > .metric-block");
-        const metricValues = blocks.locator(".metric-value");
-        const counts = { strips: await strips.count(), blocks: await blocks.count(), values: await metricValues.count() };
-        if (counts.strips !== 1 || counts.blocks !== values.length || counts.values !== values.length)
-          throw new Error(`${strip} at ${viewportName}: expected 1 strip, ${values.length} direct metric blocks and ${values.length} values, got ${JSON.stringify(counts)}`);
-        const metrics = await metricValues.evaluateAll(elements => elements.map(element => {
-          const { scrollWidth, clientWidth, scrollHeight, clientHeight } = element;
-          const truncated = [element, ...element.querySelectorAll("*")].some(node => {
-            const style = getComputedStyle(node);
-            return (style.textOverflow === "ellipsis" && node.scrollWidth > node.clientWidth)
-              || (style.webkitLineClamp !== "none" && node.scrollHeight > node.clientHeight);
-          });
-          const value = element.getAttribute("aria-label") ?? "";
-          const numeric = /^[+−-]?[\p{Sc}]?[+−-]?\s*\d[\d,.]*(?:e[+-]?\d+|[%KMBT])?\s*[\p{Sc}]?$/iu.test(value);
-          const range = document.createRange();
-          range.selectNodeContents(element);
-          const lines = new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => rect.top)).size;
-          const tile = element.closest(".metric-block")!;
-          const strip = tile.closest(".metric-strip")!;
-          const fullWidth = Math.abs(tile.getBoundingClientRect().width - strip.clientWidth) < 1;
-          const area = element.closest(".metric-value-line")!.clientWidth;
-          const fonts = document.createElement("canvas").getContext("2d")!;
-          const words = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-          const fontSizes = new Set([getComputedStyle(element).fontSize]);
-          const brokenWords: string[] = [];
-          const illegibleWords: string[] = [];
-          for (let wordNode = words.nextNode(); wordNode; wordNode = words.nextNode()) {
-            const style = getComputedStyle(wordNode.parentElement!);
-            for (const word of (wordNode.textContent ?? "").matchAll(/\S+/g)) {
-              const token = document.createRange();
-              token.setStart(wordNode, word.index);
-              token.setEnd(wordNode, word.index + word[0].length);
-              fonts.font = `${style.fontWeight} 12px ${style.fontFamily}`;
-              const minimumWidth = fonts.measureText(word[0]).width;
-              fontSizes.add(style.fontSize);
-              if (parseFloat(style.fontSize) < 12) illegibleWords.push(word[0]);
-              if (!numeric && token.getClientRects().length > 1 && !(fullWidth && minimumWidth > area)) brokenWords.push(word[0]);
-            }
-          }
-          return { value, numeric, lines, fontSizes: [...fontSizes], brokenWords, illegibleWords, scrollWidth, clientWidth, scrollHeight, clientHeight, truncated, top: element.closest(".metric-block")!.getBoundingClientRect().top };
-        }));
-        if (new Set(metrics.flatMap(metric => metric.fontSizes)).size !== 1)
-          failures.push(`${strip} at ${viewportName}: metric values have different font sizes: ${JSON.stringify(metrics.map(({ value, fontSizes }) => ({ value, fontSizes })))}`);
-        for (const metric of metrics) {
-          if (metric.scrollWidth > metric.clientWidth || metric.truncated || (metric.numeric && metric.lines > 1) || metric.brokenWords.length || metric.illegibleWords.length)
-            failures.push(`${strip} at ${viewportName}, value ${JSON.stringify(metric.value)}: scrollWidth=${metric.scrollWidth}, clientWidth=${metric.clientWidth}, scrollHeight=${metric.scrollHeight}, clientHeight=${metric.clientHeight}, ellipsis=${metric.truncated}, lines=${metric.lines}, brokenWords=${JSON.stringify(metric.brokenWords)}, under12px=${JSON.stringify(metric.illegibleWords)}`);
-        }
-        if (strip === "sb7-short" && scale === 1 && (width === 360 || width === 390) && new Set(metrics.map(metric => metric.top)).size !== 1)
-          failures.push(`${strip} at ${viewportName}: expected all three metrics in the first row`);
-      }
-      if (failures.length) throw new Error(`metric strip fit:\n${failures.join("\n")}`);
-    } finally {
-      await tab.close();
-    }
-  }
-  console.log("metric strips fit at 320px, 360px, 390px, 1440px and effective 200% zoom");
   // every tab is its own zeta controller: the settings tab writes without borrowing a chat tab's control
   await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
   const mcpWriteSurfaceIds = await gateMcpWrites(browser, origin, zetaHome, cwd, screenshotDir);
@@ -850,7 +798,7 @@ with _database() as db:
       console.log("telemetry next to a chat tab: both control zeta, no observer banner, no take-control button");
     } finally { await observerTelemetry.close(); }
   } finally { await telemetryChatPage.close(); }
-  const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
+  const capturePageState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
     for (const width of [390, 1280, 1440, 1920]) {
       if (width === 390) {
         await setupMobileSheet(page, mobileHeight);
@@ -881,11 +829,9 @@ with _database() as db:
       } else {
         await page.setViewportSize({ width, height: desktopHeight });
       }
-      await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
+      await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-frame")?.scrollTo(0, 0); });
       if (assertFrame) await assertFrame(`${width}px`);
-      const captureName = state === "metric-boundary"
-        ? `metric-boundary-after-${width}x${width === 390 ? mobileHeight : desktopHeight}.png`
-        : state === "page-chat-closed" && width === 390
+      const captureName = state === "page-chat-closed" && width === 390
           ? "page-chat-closed-390x844.png"
           : `state-${state}-${width}.png`;
       if (screenshotDir) await page.screenshot({ path: join(screenshotDir, captureName), fullPage: true });
@@ -1098,7 +1044,10 @@ with _database() as db:
   await trimmedPagination;
   await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"]:not([data-loaded-count="${beforeTrim}"])`), "waitFor", { timeout: 20_000 });
   const own = await readDiscovery(ownDiscovery);
-  const connected = await fetch(discoveryUrl).then((response) => response.json()) as { url: string };
+  const shellHtml = await fetch(origin).then((response) => response.text());
+  const shellToken = shellHtml.match(/<meta name="achilles-shell" content="([^"]+)">/)?.[1];
+  if (!shellToken) throw new Error("achilles shell secret is unavailable");
+  const connected = await fetch(discoveryUrl, { headers: { "X-Achilles-Shell": shellToken } }).then((response) => response.json()) as { url: string };
   if (sharedProcess.exitCode !== null || zetaProcess.exitCode !== null) throw new Error("one of the unrelated zeta serves exited during chat");
   if (shared.pid === own.pid || shared.port === own.port) throw new Error("shared and achilles zeta serves did not remain distinct");
   if (new URL(connected.url).port !== String(own.port)) throw new Error("achilles connected to the shared zeta serve");
@@ -1433,7 +1382,7 @@ with _database() as db:
     );
   for (const [index, { path }] of surfaceRoutes.entries()) {
     const refused = await homeMcp(100 + index, "tools/call", {
-      name: "create_page", arguments: { route: path, title: "reserved route probe", layout: { blocks: [] } },
+      name: "create_page", arguments: { route: path, title: "reserved route probe", package: { source: "export default function Page(){return <main />}", dependencies: {} } },
     });
     if (!refused.result?.isError || (await fetch(`${origin}/api/pages${path}`)).status !== 404)
       throw new Error(`create_page did not refuse reserved route ${path}`);
@@ -1441,7 +1390,6 @@ with _database() as db:
   const createApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "create_page" });
   const createApprovalBefore = await createApproval.count();
   const createRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
-  const pageRequestsBeforeCreate = pageIndexRequests.length;
   const annotationComplete = page.getByText("annotation complete", { exact: true });
   const annotationCompleteBefore = await annotationComplete.count();
   await field.fill("create page");
@@ -1454,8 +1402,6 @@ with _database() as db:
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
   await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
-  if (pageIndexRequests.length - pageRequestsBeforeCreate !== 1)
-    throw new Error(`create_page made ${pageIndexRequests.length - pageRequestsBeforeCreate} /api/pages refetches, expected 1`);
   await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
   const pageSection = page.locator('.page-list[data-list-state="ready"]');
   await gateWait.playwright(pageSection, "waitFor");
@@ -1487,11 +1433,12 @@ with _database() as db:
   const sessionsBeforeReading = zetaSessionCount();
   await readingLink.click({ timeout: 20_000 });
   await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === "/reading", { timeout: 20_000 });
-  await gateWait.playwright(page.getByText("reading list layout", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 }).catch(async (error) => {
-    throw new Error(`${error}\ncreated page layout did not appear before chat creation: ${redact(await page.locator("body").innerText())}; errors=${redact(errors.join(" | "))}; console=${redact(consoleErrors.join(" | "))}`);
+  // an agent-created page renders only its compiled React package
+  await gateWait.playwright(page.locator(".page-frame"), "waitFor", { state: "visible", timeout: 20_000 }).catch(async (error) => {
+    throw new Error(`${error}\ncreated page notice did not appear before chat creation: ${redact(await page.locator("body").innerText())}; errors=${redact(errors.join(" | "))}; console=${redact(consoleErrors.join(" | "))}`);
   });
   if ((await page.getByText("loading chat…", { exact: true }).count()) || await chatCount() !== chatsBeforeReading || zetaSessionCount() !== sessionsBeforeReading)
-    throw new Error("created page layout did not appear before chat creation");
+    throw new Error("created page notice did not appear before chat creation");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "created-page-before-first-send.png"), fullPage: true, timeout: 20_000 });
   // Let the selected-chat attach read the old title before the sidebar PATCH, but deliver it afterward.
   let heldAttach: { chatId: string; release: (deliver: boolean) => void } | undefined;
@@ -1682,7 +1629,6 @@ with _database() as db:
   if (
     homeInspect.result?.isError ||
     homeInspectValue.route !== "/reading" ||
-    homeInspectValue.layout_version !== 1 ||
     homeInspectValue.tools?.[0]?.name !== "add_book" ||
     JSON.stringify(homeInspectValue).includes("credentials") ||
     JSON.stringify(homeInspectValue).includes(achillesHome)
@@ -1703,328 +1649,9 @@ with _database() as db:
     `raw capture: arguments truncated by zeta marker asserted in the rendered disclosure`,
   ].join("\n") + "\n");
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
-  const accessibility = await page.context().newCDPSession(page);
-  await setupMobileSheet(page, 760);
-  const textMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "review status" }) });
-  const textMetricGeometry = await textMetric.evaluate((element) => ({
-    blockScrollWidth: element.scrollWidth,
-    blockClientWidth: element.clientWidth,
-    documentScrollWidth: document.documentElement.scrollWidth,
-    viewportWidth: innerWidth,
-  }));
-  if (await textMetric.locator("strong").innerText() !== "waiting on an intentionally long legal and editorial review" || textMetricGeometry.blockScrollWidth > textMetricGeometry.blockClientWidth || textMetricGeometry.documentScrollWidth > textMetricGeometry.viewportWidth)
-    throw new Error(`long nonnumeric metric overflowed at 390px: ${JSON.stringify(textMetricGeometry)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-boundary-after-390x844.png"), fullPage: true });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-boundary-after-1440x900.png"), fullPage: true });
-  const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
-  await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
-  const booksList = page.locator('.record-list[data-collection="books"]');
-  await gateWait.playwright(booksList.getByText("No books yet", { exact: true }), "waitFor", { timeout: 20_000 });
-  if (await booksList.locator("header .record-count").innerText() !== "0" || await booksList.getByText("sorted by updated", { exact: true }).count())
-    throw new Error("empty books state showed the wrong count or sort label");
-  const addBook = booksList.getByRole("button", { name: "Add a book", exact: true });
-  await addBook.click();
-  if (!(await page.locator('.record-form[data-collection="books"][data-operation="insert"] input[name="title"]').evaluate((element) => document.activeElement === element)))
-    throw new Error("empty books add action did not focus the insert form");
-  const desktopComposer = page.locator('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
-  await booksList.getByRole("button", { name: "Ask the chat", exact: true }).click();
-  await waitFor(async () => (await desktopComposer.inputValue()) === "add a book to this page", "desktop empty-state chat draft");
-  if (!(await desktopComposer.evaluate((element) => document.activeElement === element))) throw new Error("empty-state chat action did not focus the composer");
-  if ((JSON.parse(await Bun.file(control).text()).requests ?? []).some((request: { method?: string; params?: { text?: string } }) => request.method === "send" && request.params?.text === "add a book to this page")) throw new Error("empty-state chat action sent a message");
-  await desktopComposer.fill("");
-  await captureBlockState("a-empty", booksList.locator(".record-list-empty"));
-
-  const recordsPattern = `**/api/pages/${createdPage.id}/records/books?*`;
-  await page.route(recordsPattern, async (route) => {
-    try {
-      const response = await route.fetch();
-      if (new URL(route.request().url()).searchParams.get("limit") === "100") await new Promise((resolve) => setTimeout(resolve, 5000));
-      await route.fulfill({ response });
-    } catch (error) {
-      if (!String(error).includes("already handled")) throw error;
-    }
-  });
-  await page.reload();
-  await gateWait.playwright(page.getByText("books loading…", { exact: true }), "waitFor", { timeout: 20_000 });
-  if (await booksList.getByText("No books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
-  await captureBlockState("b-loading", booksList.locator('[role="status"]'));
-  await page.unroute(recordsPattern);
-
-  let failRecords = true;
-  await page.route(recordsPattern, async (route) => {
-    if (new URL(route.request().url()).searchParams.get("limit") === "100" && failRecords) {
-      failRecords = false;
-      await route.abort("failed");
-      return;
-    }
-    await route.continue();
-  });
-  await page.reload();
-  await gateWait.playwright(booksList.getByText("books request failed: Failed to fetch. your data is safe; nothing was changed.", { exact: true }), "waitFor", { timeout: 20_000 });
-  await captureBlockState("c-failed", booksList.locator('[role="alert"]'));
-  await booksList.getByRole("button", { name: "try again", exact: true }).click();
-  await gateWait.playwright(booksList.getByText("No books yet", { exact: true }), "waitFor", { timeout: 20_000 });
-  await page.unroute(recordsPattern);
-
-  await clickCreateMode(false);
-  await waitCreateMode(true);
-  const readingPageCredential = (await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()).trim();
-  secrets.push(readingPageCredential);
-  await homeMcp(29, "initialize", {
-    protocolVersion: "2025-03-26",
-    capabilities: {},
-    clientInfo: { name: "block-state-gate", version: "1" },
-  }, readingPageCredential);
-  const updateLayoutSchema = await homeMcp(30, "tools/list", {}, readingPageCredential);
-  const updateLayoutTool = updateLayoutSchema.result?.tools?.find((tool: { name: string }) => tool.name === "update_layout") as { inputSchema?: { properties?: Record<string, { type?: string }>; required?: string[] } } | undefined;
-  const updateLayoutProperties = updateLayoutTool?.inputSchema?.properties;
-  if (
-    !updateLayoutTool ||
-    updateLayoutProperties?.layout?.type !== "object" ||
-    updateLayoutProperties.expected_version?.type !== "integer" ||
-    JSON.stringify(Object.keys(updateLayoutProperties).sort()) !== JSON.stringify(["expected_version", "layout"]) ||
-    JSON.stringify([...updateLayoutTool.inputSchema.required ?? []].sort()) !== JSON.stringify(["expected_version", "layout"])
-  ) throw new Error(`reading page exposed an unexpected update_layout schema: ${JSON.stringify(updateLayoutSchema)}`);
-  const dLayout = structuredClone(homeInspectValue.layout) as { blocks: Array<Record<string, unknown>> };
-  dLayout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
-  const updatedD = await homeMcp(31, "tools/call", { name: "update_layout", arguments: { layout: dLayout, expected_version: homeInspectValue.layout_version } }, readingPageCredential);
-  if (updatedD.result?.isError) throw new Error(`real D update_layout failed: ${JSON.stringify(updatedD)}`);
-  await page.reload();
-  const updateHeading = page.getByRole("heading", { name: /update book/ });
-  await gateWait.playwright(updateHeading, "waitFor", { timeout: 20_000 });
-  const disabledTitle = page.locator('.record-form[data-operation="update"] input[name="title"]');
-  if (!(await disabledTitle.isDisabled()) || (await disabledTitle.getAttribute("placeholder")) !== "—") throw new Error("no-selection update form did not disable its real field with a placeholder");
-  if (!(await page.getByRole("button", { name: "add", exact: true }).last().isDisabled())) throw new Error("no-selection update form save was not disabled");
-  if (screenshotDir) {
-    await captureBlockState("d-no-selection", page.locator('.record-form[data-operation="update"]'));
-    const proofPath = join(screenshotDir, "run-proof.txt");
-    await writeFile(proofPath, `${await Bun.file(proofPath).text()}D production path: visible create mode off control clicked; waited for create mode on; authenticated reading-page tools/list exposed update_layout; real update_layout published the complete inspected layout with the update form; waited for the real page reload and attached disabled form; visible create mode on control clicked and waited for create mode off before later journey assertions.\n`);
-  }
-  // D temporarily enables create mode to publish the real layout update. restore it before the later gate journey even when screenshots are disabled.
-  await clickCreateMode(true);
-  await waitCreateMode(false);
 
   await page.setViewportSize({ width: 1440, height: 1400 });
   const desktopViewport = page.viewportSize();
-  const matrixStrip = page.locator(".metric-strip").first();
-  const matrixBlocks = matrixStrip.locator(".metric-block");
-  const assertMetricMatrix = async (viewport: string) => {
-    const { entries, gridDiagnostics } = await matrixBlocks.evaluateAll((elements, expected) => {
-      const snapshotGrid = (elements: Element[]) => {
-        const strip = document.querySelector<HTMLElement>(".metric-strip");
-        const cellElements = [...(strip?.querySelectorAll<HTMLElement>(".metric-block") ?? [])];
-        const cells = cellElements.map((cell) => cell.getBoundingClientRect()).sort((a, b) => a.top - b.top || a.left - b.left);
-        const rows: DOMRect[][] = [];
-        for (const cell of cells) {
-          const row = rows.find((candidate) => Math.abs(candidate[0]!.top - cell.top) <= 0.5);
-          if (row) row.push(cell); else rows.push([cell]);
-        }
-        return { strip, cellElements, cells, rows };
-      };
-      const hasContinuousTopology = ({ cells, rows }: ReturnType<typeof snapshotGrid>) => {
-        const continuousRows = rows.every((row) => row.sort((a, b) => a.left - b.left).every((cell, index) => index === 0 || Math.abs(cell.left - row[index - 1]!.right) <= 0.5));
-        const columns = new Map<number, DOMRect[]>();
-        for (const cell of cells) {
-          const key = Math.round(cell.left * 2) / 2;
-          columns.set(key, [...(columns.get(key) ?? []), cell]);
-        }
-        const continuousColumns = [...columns.values()].every((column) => column.sort((a, b) => a.top - b.top).every((cell, index) => index === 0 || Math.abs(cell.top - column[index - 1]!.bottom) <= 0.5));
-        return continuousRows && continuousColumns;
-      };
-      const hasVisibleInsetShadow = (shadow: string, xOffset: number, yOffset: number) => {
-        const shadows = [...shadow.matchAll(/((rgba?\([^)]*\)|hsla?\([^)]*\)|#[\da-f]+|[a-z]+)\s+(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px(?:\s+(-?\d+(?:\.\d+)?)px)?\s+inset)/gi)];
-        return shadows.some(([, , color, x, y, blur, spread]) => {
-          const alpha = color?.startsWith("rgba") || color?.startsWith("hsla") ? Number(color.match(/,\s*([\d.]+)\s*\)$/)?.[1] ?? 1) : color === "transparent" ? 0 : 1;
-          return alpha > 0 && Number(x) === xOffset && Number(y) === yOffset && Number(blur) === 0 && Number(spread ?? 0) === 0;
-        });
-      };
-      const hasCellRightSeparator = (cell: HTMLElement) => hasVisibleInsetShadow(getComputedStyle(cell).boxShadow, -1, 0);
-      const hasCellBottomSeparator = (cell: HTMLElement) => hasVisibleInsetShadow(getComputedStyle(cell).boxShadow, 0, -1);
-      const hasCellOwnedSeparators = ({ cellElements }: ReturnType<typeof snapshotGrid>) => cellElements.length > 0 && cellElements.every((cell) => hasCellRightSeparator(cell) && hasCellBottomSeparator(cell));
-      const hasUnusedTrackPaint = ({ strip, rows, cellElements }: ReturnType<typeof snapshotGrid>) => {
-        if (!strip) return false;
-        const stripStyle = getComputedStyle(strip);
-        const finalRow = rows.at(-1) ?? [];
-        const stripBox = strip.getBoundingClientRect();
-        const trackSizes = stripStyle.gridTemplateColumns.split(/\s+/).map(Number.parseFloat);
-        const finalCell = finalRow.at(-1);
-        const transparent = (color: string) => color === "rgba(0, 0, 0, 0)" || color === "transparent";
-        const pseudoPaint = (["::before", "::after"] as const).some((pseudo) => {
-          const style = getComputedStyle(strip, pseudo);
-          return style.content !== "none" || style.backgroundImage !== "none" || !transparent(style.backgroundColor) || style.borderTopWidth !== "0px" || style.borderRightWidth !== "0px" || style.borderBottomWidth !== "0px" || style.borderLeftWidth !== "0px" || style.boxShadow !== "none";
-        });
-        if (stripStyle.backgroundImage !== "none" || !transparent(stripStyle.backgroundColor) || stripStyle.boxShadow !== "none" || stripStyle.borderRightWidth !== "0px" || stripStyle.borderBottomWidth !== "0px" || pseudoPaint || !finalCell) return false;
-        // Serialized track sizes are rounded. Use layout edges for the overlap check.
-        const left = finalCell.right;
-        const right = stripBox.right - parseFloat(stripStyle.borderRightWidth) - parseFloat(stripStyle.paddingRight);
-        const liveCells = cellElements.map((cell) => cell.getBoundingClientRect());
-        if (![left, right].every(Number.isFinite) || liveCells.some((box) => ![box.left, box.top, box.width, box.height].every(Number.isFinite) || box.width <= 0 || box.height <= 0)) return false;
-        const usedTrackCount = finalRow.length;
-        const trackCount = trackSizes.length;
-        if (usedTrackCount === trackCount) {
-          const liveFinalCell = liveCells.at(-1)!;
-          return Math.abs(right - left) <= 0.5 && Math.abs(right - liveFinalCell.right) <= 0.5;
-        }
-        if (usedTrackCount > trackCount || left >= right || liveCells.some((box) => box.right > right)) return false;
-        const occupied = liveCells.some((box) => box.left < right && box.right > left && box.top < finalCell.bottom && box.bottom > finalCell.top);
-        let trackLeft = left;
-        return !occupied && trackSizes.slice(usedTrackCount).every((width) => {
-          if (!Number.isFinite(width) || width <= 0) return false;
-          const trackRight = Math.min(trackLeft + width, right);
-          if (trackRight <= trackLeft) return false;
-          const hit = document.elementFromPoint((trackLeft + trackRight) / 2, (finalCell.top + finalCell.bottom) / 2);
-          trackLeft = trackRight;
-          return hit === strip;
-        });
-      };
-      const hasStripTopOwner = (strip: HTMLElement) => getComputedStyle(strip).borderTopWidth === "1px";
-      const hasStripLeftOwner = (strip: HTMLElement) => getComputedStyle(strip).borderLeftWidth === "1px";
-      const hasStripRightPaint = (strip: HTMLElement) => getComputedStyle(strip).borderRightWidth !== "0px" || !["", "0px"].includes(strip.style.getPropertyValue("border-right-width"));
-      const hasStripBottomPaint = (strip: HTMLElement) => getComputedStyle(strip).borderBottomWidth !== "0px" || !["", "0px"].includes(strip.style.getPropertyValue("border-bottom-width"));
-      const hasStripShadowPaint = (strip: HTMLElement) => getComputedStyle(strip).boxShadow !== "none";
-      const hasStripOwnedEdges = ({ strip }: ReturnType<typeof snapshotGrid>) => Boolean(strip) && hasStripTopOwner(strip!) && hasStripLeftOwner(strip!) && !hasStripRightPaint(strip!) && !hasStripBottomPaint(strip!);
-      const proveMutations = (grid: ReturnType<typeof snapshotGrid>) => {
-        const cell = grid.cellElements[0];
-        const strip = grid.strip;
-        const lastCell = grid.cellElements.at(-1)!;
-        const originalLastCellTransform = lastCell.style.transform;
-        const originalCellShadow = cell?.style.boxShadow ?? "";
-        const originalStrip = strip ? { cssText: strip.style.cssText } : null;
-        const mutationStyle = document.createElement("style");
-        const expectRejected = (message: string, accepted: boolean) => {
-          if (accepted) throw new Error(`grid gate accepted ${message}`);
-        };
-        try {
-          if (cell) {
-            cell.style.setProperty("box-shadow", "inset 0 -1px 0 var(--fulcrum-border)", "important");
-            expectRejected("cell missing its right separator", hasCellRightSeparator(cell));
-            cell.style.boxShadow = originalCellShadow;
-            cell.style.setProperty("box-shadow", "inset -1px 0 0 var(--fulcrum-border)", "important");
-            expectRejected("cell missing its bottom separator", hasCellBottomSeparator(cell));
-          }
-          if (strip) {
-            strip.style.setProperty("border-top", "0", "important");
-            expectRejected("strip missing its top owner", hasStripTopOwner(strip));
-            strip.style.cssText = originalStrip!.cssText;
-            strip.style.setProperty("border-left", "0", "important");
-            expectRejected("strip missing its left owner", hasStripLeftOwner(strip));
-            strip.style.cssText = originalStrip!.cssText;
-            strip.style.setProperty("border-right-width", "1px", "important");
-            expectRejected("strip right border paint", !hasStripRightPaint(strip));
-            strip.style.cssText = originalStrip!.cssText;
-            strip.style.setProperty("border-bottom-width", "1px", "important");
-            expectRejected("strip bottom border paint", !hasStripBottomPaint(strip));
-            strip.style.cssText = originalStrip!.cssText;
-            strip.style.setProperty("box-shadow", "0 0 0 1px red", "important");
-            expectRejected("strip shadow paint", !hasStripShadowPaint(strip));
-            strip.style.cssText = originalStrip!.cssText;
-            strip.style.setProperty("background-color", "red", "important");
-            expectRejected("strip background color paint", hasUnusedTrackPaint(grid));
-            strip.style.cssText = originalStrip!.cssText;
-            strip.style.setProperty("background-image", "linear-gradient(red, red)", "important");
-            expectRejected("strip background image paint", hasUnusedTrackPaint(grid));
-            strip.style.cssText = originalStrip!.cssText;
-            lastCell.style.transform = "translateX(4px)";
-            expectRejected("a cell intruding into the unused track", hasUnusedTrackPaint(grid));
-            lastCell.style.transform = `translateX(${strip.getBoundingClientRect().width}px)`;
-            expectRejected("a cell crossing the unused track and leaving the strip", hasUnusedTrackPaint(grid));
-            lastCell.style.transform = originalLastCellTransform;
-          }
-          mutationStyle.textContent = ".metric-strip::before { content: \"\"; background: red; }";
-          document.head.append(mutationStyle);
-          expectRejected("strip pseudo paint", hasUnusedTrackPaint(grid));
-        } finally {
-          lastCell.style.transform = originalLastCellTransform;
-          if (cell) cell.style.boxShadow = originalCellShadow;
-          if (strip && originalStrip) strip.style.cssText = originalStrip.cssText;
-          mutationStyle.remove();
-        }
-      };
-      const grid = snapshotGrid(elements);
-      const checks = {
-        hasContinuousTopology: hasContinuousTopology(grid),
-        hasStripOwnedEdges: hasStripOwnedEdges(grid),
-        hasCellOwnedSeparators: hasCellOwnedSeparators(grid),
-        hasUnusedTrackPaint: hasUnusedTrackPaint(grid),
-      };
-      if (Object.values(checks).every(Boolean) && innerWidth === 390) proveMutations(grid);
-      const gridDiagnostics = {
-        checks,
-        trackSizes: grid.strip ? getComputedStyle(grid.strip).gridTemplateColumns : null,
-        rows: grid.rows.map((row) => row.map(({ x, y, width, height }) => ({ x, y, width, height }))),
-      };
-      const pane = document.querySelector<HTMLElement>(".page-content")!;
-      const initialScroll = pane.scrollTop;
-      const paneBox = pane.getBoundingClientRect();
-      const entries = expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
-      const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
-      const block = element as HTMLElement | undefined;
-      const labelNode = element?.querySelector<HTMLElement>(".metric-label");
-      const rendered = element?.querySelector<HTMLElement>(".metric-value");
-      const initialBox = block?.getBoundingClientRect();
-      if (initialBox && (initialBox.top < paneBox.top || initialBox.bottom > paneBox.bottom))
-        pane.scrollTop += (initialBox.top + initialBox.bottom - paneBox.top - paneBox.bottom) / 2;
-      const blockBox = block?.getBoundingClientRect();
-      const labelBox = labelNode?.getBoundingClientRect();
-      const valueBox = rendered?.getBoundingClientRect();
-      const style = block ? getComputedStyle(block) : null;
-      const renderedStyle = rendered ? getComputedStyle(rendered) : null;
-      const clip = document.querySelector<HTMLElement>(".page-content")?.getBoundingClientRect();
-      const points = [
-        ...(blockBox ? [{ name: "top-left", x: blockBox.left + 1, y: blockBox.top + 1 }, { name: "top-right", x: blockBox.right - 1, y: blockBox.top + 1 }, { name: "bottom-left", x: blockBox.left + 1, y: blockBox.bottom - 1 }, { name: "bottom-right", x: blockBox.right - 1, y: blockBox.bottom - 1 }] : []),
-        ...(labelBox ? [{ name: "label-center", x: labelBox.left + labelBox.width / 2, y: labelBox.top + labelBox.height / 2 }] : []),
-        ...(valueBox ? [{ name: "value-center", x: valueBox.left + valueBox.width / 2, y: valueBox.top + valueBox.height / 2 }] : []),
-      ];
-      const stacks = points.map((point) => ({ ...point, stack: document.elementsFromPoint(point.x, point.y).slice(0, 5).map((node) => ({ tag: node.tagName, id: (node as HTMLElement).id, className: (node as HTMLElement).className })) }));
-      const hits = points.every((point) => { const hit = document.elementFromPoint(point.x, point.y); return Boolean(hit && block && (hit === block || block.contains(hit))); });
-      const expectedMark = expectedStatus ? `record-mark-${expectedStatus.toLowerCase().replace(/\s+/g, "-")}` : "";
-      const painted = valueBox && rendered ? { top: valueBox.top, right: valueBox.right, bottom: valueBox.bottom, left: valueBox.left } : null;
-      const numeric = ["finite", "zero", "signed-zero"].includes(classification);
-      const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
-      const textFit = Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && (renderedStyle?.overflowY === "visible" || rendered.scrollHeight <= rendered.clientHeight));
-      const numericFit = !numeric || Boolean(rendered && rendered.innerText.length <= (scientific ? 7 : 5));
-      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
-      const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
-      const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
-      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted: painted && { ...painted, top: painted.top + pane.scrollTop, bottom: painted.bottom + pane.scrollTop }, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
-      });
-      pane.scrollTop = initialScroll;
-      return { entries, gridDiagnostics };
-    }, metricBoundaryMatrix);
-    const failures = entries.flatMap((entry) => {
-      const marker = entry.expectedStatus ? entry.mark.includes(entry.expectedMark) : !entry.mark;
-      const exact = entry.found && entry.text === entry.expectedText && entry.title === entry.value && entry.aria === entry.value;
-      const geometry = entry.contained && entry.clipContained && entry.hits && !entry.overlayHit && entry.rightGap >= entry.padding && entry.textFit;
-      return exact && marker && entry.numericFit && geometry ? [] : [`${entry.label}: ${JSON.stringify({ exact, marker, numericFit: entry.numericFit, geometry, entry })}`];
-    });
-    for (let index = 0; index < entries.length; index += 1) for (let next = index + 1; next < entries.length; next += 1) {
-      const left = entries[index].painted;
-      const right = entries[next].painted;
-      if (left && right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top) failures.push(`${entries[index].label} overlaps ${entries[next].label}: ${JSON.stringify({ left, right })}`);
-    }
-    if (!Object.values(gridDiagnostics.checks).every(Boolean)) failures.push(`row/column edge assertion: metric grid separators are not continuous ${JSON.stringify(gridDiagnostics)}`);
-    for (const entry of entries) {
-      const counterpart = entry.label.startsWith("marked ") ? entries.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? entries.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined;
-      if (counterpart && entry.text !== counterpart.text) failures.push(`${entry.label}: marker parity differs from ${counterpart.label}`);
-    }
-    if (viewport === "390px") for (const entry of entries) {
-      const metricObject = await accessibility.send("Runtime.evaluate", { expression: `Array.from(document.querySelectorAll('.metric-block')).find((element) => element.querySelector('.metric-label')?.textContent === ${JSON.stringify(entry.label)})?.querySelector('.metric-value')` });
-      const tree = await accessibility.send("Accessibility.getPartialAXTree", { objectId: metricObject.result.objectId, fetchRelatives: false });
-      const names = tree.nodes.map((node) => node.name?.value).filter((name): name is string => typeof name === "string");
-      if (names.filter((name) => name === entry.value).length !== 1 || (entry.text !== entry.value && names.includes(entry.text ?? ""))) failures.push(`${entry.label}: chromium AX names=${JSON.stringify(names)}`);
-    }
-    if (failures.length) throw new Error(`metric boundary matrix failed at ${viewport}: ${JSON.stringify(failures)}`);
-  };
-  const provedMatrixViewports = new Set<string>();
-  await captureBlockState("metric-boundary", matrixStrip, 2400, 1400, async (viewport) => {
-    if (viewport === "390px" || viewport === "1440px") {
-      provedMatrixViewports.add(viewport);
-      await assertMetricMatrix(viewport);
-    }
-  });
-  if (!provedMatrixViewports.has("390px") || !provedMatrixViewports.has("1440px"))
-    throw new Error(`missing 1440px proof: ${JSON.stringify([...provedMatrixViewports])}`);
   const assertClosedFrame = async (viewport: string) => {
     const frame = await page.evaluate(() => {
       const describe = (selector: string) => {
@@ -2034,7 +1661,7 @@ with _database() as db:
         const rect = element.getBoundingClientRect();
         return { visibility: style.visibility, transform: style.transform, display: style.display, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height } };
       };
-      const target = document.querySelector<HTMLElement>(".record-form-actions button.primary:not(:disabled)");
+      const target = document.querySelector<HTMLElement>(".page-frame");
       const targetBox = target?.getBoundingClientRect();
       const point = targetBox ? { x: (Math.max(0, targetBox.left) + Math.min(innerWidth, targetBox.right)) / 2, y: (Math.max(0, targetBox.top) + Math.min(innerHeight, targetBox.bottom)) / 2 } : null;
       const hit = point ? document.elementFromPoint(point.x, point.y) : null;
@@ -2052,7 +1679,7 @@ with _database() as db:
         target: targetBox && { top: targetBox.top, right: targetBox.right, bottom: targetBox.bottom, left: targetBox.left, width: targetBox.width, height: targetBox.height },
         targetHit: Boolean(hit && target && (hit === target || target.contains(hit))),
         overlayCoversTarget: Boolean(targetBox && overlays.some(({ rect }) => intersects(targetBox, rect))),
-        scroll: { window: scrollY, content: document.querySelector<HTMLElement>(".page-content")?.scrollTop ?? -1 },
+        scroll: { window: scrollY, content: target?.scrollTop ?? -1 },
         overlays,
       };
     });
@@ -2063,13 +1690,13 @@ with _database() as db:
     if (!frame.target || !frame.targetHit || frame.overlayCoversTarget || frame.scroll.window !== 0 || frame.scroll.content !== 0)
       throw new Error(`closed frame target is not visible and unobscured: ${JSON.stringify(frame)}`);
   };
-  await captureBlockState("page-chat-closed", page.locator(".record-form-actions button.primary:not(:disabled)"), 844, 900, async (viewport) => {
+  await capturePageState("page-chat-closed", page.locator(".page-frame"), 844, 900, async (viewport) => {
     if (viewport === "390px") {
       await assertClosedFrame(viewport);
       return;
     }
     const dock = await page.locator(".page-view.docked").evaluate((grid) => {
-      const pane = grid.querySelector<HTMLElement>(":scope > .page-content")!;
+      const pane = grid.querySelector<HTMLElement>(":scope > .page-frame")!;
       const rail = grid.querySelector<HTMLElement>(":scope > .page-chat")!;
       return {
         tracks: getComputedStyle(grid).gridTemplateColumns,
@@ -2091,11 +1718,11 @@ with _database() as db:
   if (await pageChatBar.getAttribute("aria-expanded") !== "false") throw new Error(`page chat was not closed after matrix: ${JSON.stringify(await pageChatLayout())}`);
   const closedGeometry = await page.evaluate(() => {
     const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
-    const action = document.querySelector<HTMLElement>(".record-form-actions button")?.getBoundingClientRect();
+    const action = document.querySelector<HTMLElement>(".page-frame")?.getBoundingClientRect();
     return { barBottom: bar?.bottom ?? 0, barHeight: bar?.height ?? 0, actionBottom: action?.bottom ?? 0, viewport: innerHeight };
   });
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
-    throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
+    throw new Error(`390px page content is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
   await page.reload();
   await setupMobileSheet(page, 760, "button");
   await setupMobileSheet(page, 760, "resize");
@@ -2138,7 +1765,7 @@ with _database() as db:
       throw new Error("390px page chat tab focus escaped the modal sheet");
   }
   await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations().map((animation) => animation.finished)));
-  const backgroundControl = page.locator(".record-form-actions button").first();
+  const backgroundControl = page.locator(".page-frame").first();
   const backgroundControlBox = await backgroundControl.boundingBox();
   if (!backgroundControlBox) throw new Error("background chat control was not measurable behind page chat sheet");
   // wait for the sheet's own transition, not an arbitrary delay: a click during the
@@ -2153,7 +1780,7 @@ with _database() as db:
     return {
       error: null,
       point,
-      hit: hit ? { tag: hit.tagName, id: hit.id, className: hit.className, backdrop: hit.matches(".page-chat-backdrop"), backgroundControl: Boolean(hit.closest(".record-form-actions button")) } : null,
+      hit: hit ? { tag: hit.tagName, id: hit.id, className: hit.className, backdrop: hit.matches(".page-chat-backdrop"), backgroundControl: Boolean(hit.closest(".page-frame")) } : null,
       dialog: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, modal: dialog.matches(":modal") },
       surface: surface ? { left: surface.left, top: surface.top, right: surface.right, bottom: surface.bottom } : null,
       animations,
@@ -2231,25 +1858,8 @@ with _database() as db:
       `${error}\nbackend=${await safeControl()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
     );
   });
-  const filteredDetailResponse = gateWait.playwright(page, "waitForResponse", (response) => {
-    const url = new URL(response.url());
-    return url.pathname === `/api/pages/${createdPage.id}/records/books`
-      && url.searchParams.get("field") === "status"
-      && url.searchParams.get("equals") === '"reading"';
-  }, { timeout: 20000 });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await gateWait.playwright(bookAdded, "waitFor", { timeout: 20000 });
-  await gateWait.playwright(page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) }).locator("strong").filter({ hasText: "1" }), "waitFor", { timeout: 20000 });
-  const detailResponse = await filteredDetailResponse;
-  await gateWait.playwright(page, "waitForFunction", () => {
-    const text = document.querySelector(".record-detail")?.textContent ?? "";
-    return text.includes("Synthetic Book") || text.includes("could not load record");
-  }, undefined, { timeout: 20000 });
-  const filteredDetailText = await page.locator(".record-detail").innerText();
-  if (!filteredDetailText.includes("Synthetic Book"))
-    throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
-  if (filteredDetailText.includes("could not load record"))
-    throw new Error(`filtered detail showed a load error: ${JSON.stringify(filteredDetailText)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-single-record-1440.png"), fullPage: true });
   const readingModeResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await clickCreateMode(false);
@@ -2260,300 +1870,28 @@ with _database() as db:
     await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()
   ).trim();
   secrets.push(readingCredential);
-  await mcp(readingCredential, 1, "initialize", {
+  await mcp(readingCredential, 200, "initialize", {
     protocolVersion: "2025-03-26",
     capabilities: {},
-    clientInfo: { name: "metric-validation-gate", version: "1" },
+    clientInfo: { name: "gate", version: "1" },
   });
-  await mcp(readingCredential, 2, "tools/list", {});
-  const invalidMetricCall = await mcp(readingCredential, 3, "tools/call", {
-    name: "update_layout",
+  const codeWrite = await mcp(readingCredential, 201, "tools/call", {
+    name: "write_page",
     arguments: {
-      layout: {
-        blocks: [
-          { type: "metric", label: "invalid", collection: "books", count: "yes" },
-        ],
-      },
-      expected_version: 1,
+      source: 'import { createRoot } from "react-dom/client"; function Page(){return <main>revision two</main>} createRoot(document.getElementById("root")!).render(<Page />);',
+      dependencies: {},
+      expected_revision: 1,
     },
   });
-  const invalidMetricError = JSON.parse(
-    invalidMetricCall.result?.content?.[0]?.text ?? "{}",
-  );
-  if (
-    !invalidMetricCall.result?.isError ||
-    JSON.stringify(invalidMetricError) !==
-      JSON.stringify({
-        code: "invalid_input",
-        expected: "one valid schema variant",
-        path: "/layout/blocks/0",
-      })
-  )
-    throw new Error(
-      `invalid metric did not return the safe error document: ${JSON.stringify(invalidMetricCall.result)}`,
-    );
-
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-failed-1440.png"), fullPage: true });
-
-  const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
-  const updateLayoutApprovalBefore = await updateLayoutApproval.count();
-  await field.fill("layout updated without reload");
-  await field.press("Enter");
-  await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
-  await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  const seedSummary = Bun.spawn(["uv", "run", "python", "-c", `import json, sqlite3, datetime; from achilles.web import _database; db=_database(); now=datetime.datetime.now(datetime.timezone.utc).isoformat(); db.executemany("INSERT INTO page_record(page_id,collection,record_id,version,revision,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", [(${JSON.stringify(createdPage.id)}, "books", f"summary-{i}", 1, 1, json.dumps({"title": f"Summary Book {i}", "status": "done"}), now, now) for i in range(1, 5)]); db.commit(); db.close()`], { env });
-  if (await seedSummary.exited !== 0) throw new Error("could not seed summary records");
-  const listSummaryApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "list_books" });
-  await gateWait.playwright(listSummaryApproval, "waitFor", { timeout: 20000 });
-  await listSummaryApproval.getByRole("button", { name: "approve", exact: true }).click();
-  const toolRow = page.locator('[data-part="tool"]', { hasText: "list_books" }).last();
-  await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
-  const expandSummaryTool = async () => {
-    if (await toolRow.getAttribute("open") === null) await toolRow.locator('[data-part="tool-header"]').click();
-  };
-  if ((await toolRow.getAttribute("open")) !== null || await toolRow.locator('[data-part="tool-body"]').count()) throw new Error("tool details must start collapsed and unmounted");
-  await expandSummaryTool();
-  const summaryBody = toolRow.locator('[data-part="tool-summary-preview"]');
-  await gateWait.playwright(summaryBody.getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
-  await gateWait.playwright(summaryBody.getByText("+ 2 more", { exact: true }), "waitFor", { timeout: 20000 });
-  if (screenshotDir) {
-    for (const width of [390, 1280, 1440, 1920]) {
-      if (width === 390) {
-        await page.reload();
-        await setupMobileSheet(page, 900, "button");
-      } else await page.setViewportSize({ width, height: 900 });
-      await expandSummaryTool();
-      await page.screenshot({ path: join(screenshotDir, `tool-summary-${width}.png`), fullPage: true });
-    }
-    await page.setViewportSize({ width: 1440, height: 900 });
-  }
-  if ((await toolRow.locator('[data-part="tool-raw"] pre').count()) !== 0 && (await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes('"Summary Book 1"'))
-    throw new Error("raw list result was visible before opening raw");
-  if (process.env.ONLY_TOOL_SUMMARY) {
-    await page.reload();
-    await setupMobileSheet(page, 900, "button");
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
-    await expandSummaryTool();
-    await gateWait.playwright(page.locator('[data-part="tool"]', { hasText: "list_books" }).last().locator('[data-part="tool-summary-preview"]').getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
-  }
-  await toolRow.locator('[data-part="tool-raw"] summary').click();
-  await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
-  if (!(await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes("arguments truncated by zeta"))
-    throw new Error("raw disclosure hid zeta's argument truncation marker");
-  const owningVirtualRow = toolRow.locator('xpath=ancestor::*[@data-virtual-id][1]');
-  const nextTranscriptRow = owningVirtualRow.locator('xpath=following-sibling::*[@data-virtual-id][1]');
-  const rawGeometry = async () => {
-    const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
-    const rowBox = await toolRow.boundingBox();
-    const nextBox = await nextTranscriptRow.boundingBox();
-    const nextText = (await nextTranscriptRow.innerText().catch(() => "")).slice(0, 160);
-    const virtualDebug = await page.locator('[data-part="virtual-debug"]').allTextContents();
-    const timeline = page.locator('[data-part="timeline"]');
-    const virtualDimensions = await timeline.evaluate((node) => ({
-      virtual: node.getAttribute("data-virtual"),
-      styleHeight: (node as HTMLElement).style.height,
-      clientHeight: (node as HTMLElement).clientHeight,
-      scrollHeight: (node as HTMLElement).scrollHeight,
-      childCount: node.children.length,
-      rows: [...node.children].map((row) => ({ id: row.getAttribute("data-virtual-id"), index: row.getAttribute("data-virtual-index"), top: (row as HTMLElement).offsetTop, height: (row as HTMLElement).offsetHeight })).slice(-8),
-    })).catch(() => null);
-    return { rawBox, rowBox, nextBox, nextId: await nextTranscriptRow.getAttribute("data-virtual-id"), nextText, virtualDebug, virtualDimensions };
-  };
-  try {
-    await waitFor(async () => {
-      const { rawBox, nextBox, nextText } = await rawGeometry();
-      return Boolean(rawBox && nextBox && nextText.includes("layout updated") && nextBox.y >= rawBox.y + rawBox.height);
-    }, "raw disclosure remeasured before next transcript row");
-  } catch (error) {
-    throw new Error(`${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(await rawGeometry())}`);
-  }
-  const geometry = await rawGeometry();
-  const { rawBox, rowBox, nextBox } = geometry;
-  if (!rawBox || !rowBox || !nextBox || !geometry.nextText.includes("layout updated") || nextBox.y < rawBox.y + rawBox.height)
-    throw new Error(`raw disclosure overlaps next transcript row: ${JSON.stringify(geometry)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
-  const outerSummary = toolRow.locator('[data-part="tool-header"]');
-  await outerSummary.click();
-  await waitFor(async () => {
-    const collapsed = await rawGeometry();
-    const header = await outerSummary.boundingBox();
-    return Boolean(header && collapsed.rowBox && collapsed.nextBox && !(await owningVirtualRow.evaluate((row) => (row as HTMLElement).style.minHeight)) && collapsed.rowBox.height <= header.height + 4 && collapsed.nextBox.y - (collapsed.rowBox.y + collapsed.rowBox.height) <= 32);
-  }, "outer tool collapse releases the raw disclosure space");
-  await outerSummary.click();
-  if (process.env.ONLY_TOOL_SUMMARY) {
-    const rawSummary = toolRow.locator('[data-part="tool-raw"] summary');
-    await rawSummary.click();
-    await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre'), "waitFor", { state: "detached", timeout: 20000 });
-    const closedGeometry = await owningVirtualRow.evaluate((row) => ({ minHeight: (row as HTMLElement).style.minHeight, height: row.getBoundingClientRect().height }));
-    const closedNext = await nextTranscriptRow.boundingBox();
-    if (closedGeometry.minHeight || !closedNext) throw new Error(`raw close left owned virtual height: ${JSON.stringify({ closedGeometry, closedNext })}`);
-    await rawSummary.click();
-    await waitFor(async () => {
-      await rawGeometry();
-      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-      const settled = await rawGeometry();
-      return Boolean(settled.rawBox && settled.nextBox && settled.nextText.includes("layout updated") && settled.nextBox.y >= settled.rawBox.y + settled.rawBox.height);
-    }, "raw disclosure reopened after cleanup");
-    const reopened = await rawGeometry();
-    if (!reopened.rawBox || !reopened.nextBox || reopened.nextBox.y < reopened.rawBox.y + reopened.rawBox.height)
-      throw new Error(`raw disclosure failed after reopen: ${JSON.stringify(reopened)}`);
-    console.log(`isolated raw close cleanup passed: ${JSON.stringify({ closedGeometry, closedNext, reopened })}`);
-    process.exit(0);
-  }
-  await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "layout updated without reload" }), "waitFor", { timeout: 20000 });
-  const layoutContract = () => page.evaluate(() => {
-    const visible = (element: Element) => { const node = element as HTMLElement; const box = node.getBoundingClientRect(); const style = getComputedStyle(node); return Boolean(box.width && box.height && style.display !== "none" && style.visibility !== "hidden"); };
-    const labelState = (label: string) => Array.from(document.querySelectorAll(".metric-label")).filter((element) => element.textContent === label).map((element) => ({ visible: visible(element), owner: element.closest(".metric-block")?.outerHTML.slice(0, 240) }));
-    return { route: location.pathname, lead: Array.from(document.querySelectorAll(".page-lead")).map((element) => ({ text: element.textContent, visible: visible(element) })), legacy: labelState("legacy total with an unusually long descriptive label"), allBooks: labelState("all books"), reading: labelState("reading"), review: labelState("review status"), tables: Array.from(document.querySelectorAll('.record-list table[data-collection="books"]')).map((element) => ({ visible: visible(element), owner: element.closest(".page-block")?.outerHTML.slice(0, 240) })), detail: Array.from(document.querySelectorAll('.record-detail')).map((element) => ({ visible: visible(element) })), forms: Array.from(document.querySelectorAll('.record-form')).map((element) => ({ visible: visible(element) })), layoutVersion: document.querySelector(".page-layout-version")?.textContent };
+  if (codeWrite.result?.isError || JSON.parse(codeWrite.result?.content?.[0]?.text ?? "{}").revision !== 2)
+    throw new Error(`code write before restore failed: ${JSON.stringify(codeWrite)}`);
+  const codeRestore = await mcp(readingCredential, 202, "tools/call", {
+    name: "restore_version",
+    arguments: { kind: "code", version: 1, expected_version: 2 },
   });
-  const layoutDiagnostics = async () => ({ contract: await layoutContract(), control: JSON.parse(await Bun.file(control).text()) });
-  try {
-    await gateWait.playwright(page.locator(".metric-label", { hasText: "all books" }), "waitFor", { state: "visible", timeout: 20000 });
-    const contract = await layoutContract();
-    if (contract.legacy.length !== 0 || contract.allBooks.length !== 1 || !contract.allBooks[0].visible || contract.reading.length !== 1 || !contract.reading[0].visible || contract.review.length !== 1 || !contract.review[0].visible || contract.tables.length !== 1 || !contract.tables[0].visible || contract.detail.length !== 1 || !contract.detail[0].visible || contract.forms.length !== 1 || !contract.forms[0].visible)
-      throw new Error(`replacement layout contract failed: ${JSON.stringify(contract)}`);
-  } catch (error) {
-    throw new Error(`${error instanceof Error ? error.message : String(error)}: layout diagnostics=${JSON.stringify(await layoutDiagnostics())}`);
-  }
-  const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
-  const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
-  if (!updateLayoutResult || updateLayoutResult.is_error)
-    throw new Error(`update_layout tool result was missing or failed: ${JSON.stringify(afterLayoutUpdate.tool_results)}`);
-  console.log("open page re-rendered without reload after chat update_layout: page note before books");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
-  const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
-  try {
-    await waitFor(async () => (await allBooksMetric.innerText()) === "5", "exact all-books metric");
-  } catch (error) {
-    throw new Error(`${error instanceof Error ? error.message : String(error)}: observed=${JSON.stringify(await allBooksMetric.innerText().catch(() => "<missing>"))}`);
-  }
-  await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
-  const saveCountRoute = async (route: Route) => {
-    await route.fulfill({ status: 200, body: "[]", headers: { "content-type": "application/json", "x-achilles-total": "2" } });
-  };
-  await page.route("**/api/pages/*/records/books?limit=1", saveCountRoute);
-  try {
-    await page.getByRole("button", { name: "save", exact: true }).click();
-    await waitFor(async () => (await page.locator(".record-form").innerText()).includes("saved"), "form save");
-    await waitFor(async () => (await allBooksMetric.innerText()) === "2", "unfiltered metric after form save");
-  } finally {
-    await page.unroute("**/api/pages/*/records/books?limit=1", saveCountRoute);
-  }
-  console.log("real page form save refreshed the unfiltered grouped metric");
-
-  const staleLayoutApprovalBefore = await updateLayoutApproval.count();
-  await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_turn_barrier ?? null) === "held", "held final layout response");
-  await field.fill("repeat that layout update with the old version");
-  await field.press("Enter");
-  await waitFor(async () => requests().some((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version"), "late steer request");
-  const lateSteerIndex = requests().findIndex((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
-  const lateSteer = requests()[lateSteerIndex];
-  if (lateSteerIndex < 0 || !lateSteer?.params?.delivery_id) throw new Error("late steer did not include a delivery id");
-  await waitFor(async () => requests().some((frame) => frame.id === lateSteer.id && frame.result?.accepted === true), "accepted late steer response");
-  const lateControl = JSON.parse(await Bun.file(control).text());
-  await writeControl(control, { ...lateControl, release_late_turn_barrier: true });
-  await waitFor(async () => requests().slice(lateSteerIndex + 1).some((frame) => frame.method === "event" && frame.params?.event === "turn_end"), "turn end after accepted late steer");
-  // zeta starts the next turn with the steer the finished turn did not read
-  const lateStatuses = () => {
-    const frames = requests();
-    const ids = new Set(frames.filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id).map((frame) => frame.id));
-    return frames.filter((frame) => frame.method === undefined && ids.has(frame.id) && frame.result?.status).map((frame) => frame.result.status);
-  };
-  await waitFor(async () => lateStatuses().at(-1) === "delivered", "delivered late steer delivery status");
-  if (lateStatuses().includes("dropped")) throw new Error(`late steer was dropped: ${JSON.stringify(lateStatuses())}`);
-  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 19, "next turn carrying the late steer");
-  const afterLateSteer = JSON.parse(await Bun.file(control).text());
-  const lateMessages = afterLateSteer.user_messages?.filter((text: string) => text === "repeat that layout update with the old version").length;
-  if (lateMessages !== 1)
-    throw new Error(`the next turn did not carry the late steer exactly once: ${JSON.stringify(afterLateSteer.user_messages)}`);
-  await waitFor(async () => await field.inputValue() === "", "draft clear after delivered late steer");
-  const lateSteerRequests = requests().filter((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
-  const lateSendRequests = requests().filter((frame) => frame.method === "send" && frame.params?.text === "repeat that layout update with the old version");
-  if (lateSteerRequests.length !== 1 || lateSendRequests.length !== 0)
-    throw new Error(`achilles sent the late steer ${lateSteerRequests.length} times and resent it ${lateSendRequests.length} times`);
-  if (await page.getByRole("button", { name: "dismiss delivery warning", exact: true }).count()) throw new Error("delivered late steer showed a delivery warning");
-  await waitFor(async () => (await updateLayoutApproval.count()) > staleLayoutApprovalBefore, "stale layout approval");
-  await updateLayoutApproval.nth(staleLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  await gateWait.playwright(page.getByText("layout version conflict: inspect the page and retry with its current version.", { exact: true }), "waitFor", { timeout: 20000 });
-  const afterStaleLayout = JSON.parse(await Bun.file(control).text());
-  const staleLayoutResult = afterStaleLayout.tool_results?.find((result: { call_id: string }) => result.call_id === "stale-reading-layout");
-  if (!staleLayoutResult?.is_error)
-    throw new Error(`stale update_layout did not return a tool error: ${JSON.stringify(afterStaleLayout.tool_results)}`);
-  console.log("stale chat update_layout showed a readable version conflict");
-
-  await gateWait.playwright(page, "waitForFunction", () =>
-      (document.querySelector(".record-detail")?.textContent ?? "").includes(
-        "Synthetic Book",
-      ), undefined, { timeout: 20000 });
-  const storedReadingLayout = async () => {
-    const response = await fetch(`${origin}/api/pages/${createdPage.id}`, {
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!response.ok) throw new Error(`reading page fetch failed: ${response.status}`);
-    const stored = await response.json();
-    if (!Array.isArray(stored.layout?.blocks)) throw new Error("reading page layout was missing blocks");
-    return {
-      version: stored.active_layout_version,
-      blocks: stored.layout.blocks,
-    };
-  };
-  const layoutBeforeInvalidMetric = await storedReadingLayout();
-  let heldInvalidMetricDetail: Route | undefined;
-  let holdInvalidMetricDetail = true;
-  const filteredDetailPattern = `**/api/pages/${createdPage.id}/records/books?*`;
-  await page.route(filteredDetailPattern, async (route) => {
-    const url = new URL(route.request().url());
-    if (
-      holdInvalidMetricDetail
-      && url.searchParams.get("field") === "status"
-      && url.searchParams.get("equals") === '"reading"'
-    ) {
-      heldInvalidMetricDetail = route;
-      return;
-    }
-    await route.continue();
-  });
-  const invalidLayoutApprovalBefore = await updateLayoutApproval.count();
-  await field.fill("replace the page with an invalid metric");
-  await field.press("Enter");
-  await waitFor(
-    async () => (await updateLayoutApproval.count()) > invalidLayoutApprovalBefore,
-    "invalid metric layout approval",
-  );
-  await updateLayoutApproval
-    .nth(invalidLayoutApprovalBefore)
-    .getByRole("button", { name: "approve", exact: true })
-    .click();
-  await gateWait.playwright(page
-    .getByText(
-      "metric update rejected: /layout/blocks/0 must match one valid schema variant.",
-      { exact: true },
-    ), "waitFor", { timeout: 20000 });
-  const afterInvalidMetric = JSON.parse(await Bun.file(control).text());
-  const invalidMetricResult = afterInvalidMetric.tool_results?.find(
-    (result: { call_id: string }) => result.call_id === "invalid-metric-layout",
-  );
-  if (!invalidMetricResult?.is_error)
-    throw new Error(
-      `invalid metric update_layout did not return a tool error: ${JSON.stringify(afterInvalidMetric.tool_results)}`,
-    );
-  await waitFor(async () => heldInvalidMetricDetail !== undefined, "held invalid metric detail refresh");
-  await gateWait.playwright(page.getByText("loading record…", { exact: true }), "waitFor", { timeout: 20000 });
-  const layoutAfterInvalidMetric = await storedReadingLayout();
-  if (
-    layoutAfterInvalidMetric.version !== layoutBeforeInvalidMetric.version
-    || JSON.stringify(layoutAfterInvalidMetric.blocks) !== JSON.stringify(layoutBeforeInvalidMetric.blocks)
-  )
-    throw new Error(`invalid metric update changed the stored page layout: before=${JSON.stringify(layoutBeforeInvalidMetric)} after=${JSON.stringify(layoutAfterInvalidMetric)}`);
-  holdInvalidMetricDetail = false;
-  await heldInvalidMetricDetail!.continue();
-  await gateWait.playwright(page, "waitForFunction", () =>
-      (document.querySelector(".record-detail")?.textContent ?? "").includes(
-        "Synthetic Book",
-      ), undefined, { timeout: 20000 });
-  await page.unroute(filteredDetailPattern);
-  console.log("invalid metric chat update showed a readable error and kept the stored layout");
+  const restoredCode = JSON.parse(codeRestore.result?.content?.[0]?.text ?? "{}");
+  if (codeRestore.result?.isError || restoredCode.revision !== 3 || restoredCode.restored_from !== 1)
+    throw new Error(`code restore failed: ${JSON.stringify(codeRestore)}`);
 
   const readingModeOffResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await clickCreateMode(true);
@@ -2636,8 +1974,9 @@ with _database() as db:
   const nextTurnCatalog = JSON.parse(await Bun.file(control).text());
   if (!nextTurnCatalog.schemas.includes("achilles__annotate_trace"))
     throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
-  const emptyRecords = page.locator(".record-list-empty").first();
-  await gateWait.playwright(emptyRecords, "waitFor", { state: "visible" });
+  // the seeded home page reads its records through the sandboxed frame bridge
+  const homeFrame = page.frameLocator('iframe[title="custom page"]');
+  await gateWait.playwright(homeFrame.getByText("trace annotations: none", { exact: true }), "waitFor", { state: "visible", timeout: 20000 });
   await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async (error) => {
     throw new Error(
       `${error}\nannotation approval missing: backend=${await safeControl()} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
@@ -2668,9 +2007,19 @@ with _database() as db:
   );
   if (!annotationResult || annotationResult.is_error)
     throw new Error(`generated tool result was missing or failed: ${JSON.stringify(controlAfterTool.tool_results)}`);
-  await waitFor(async () => (await page.locator("tbody td").allTextContents()).includes("from zeta"), "record list inserted record value");
-  const recordValues = await page.locator("tbody td").allTextContents();
-  if (!recordValues.includes("from zeta")) throw new Error(`record list did not render inserted record value: ${JSON.stringify(recordValues)}`);
+  await gateWait.playwright(homeFrame.getByText("trace annotations: from zeta", { exact: true }), "waitFor", { timeout: 20000 });
+  // a page write needs no click approval: the frame inserts through the bridge with the page credential
+  await homeFrame.getByRole("button", { name: "add frame note", exact: true }).click();
+  await gateWait.playwright(homeFrame.getByText("frame notes: from the frame", { exact: true }), "waitFor", { timeout: 20000 });
+  const frameNotes = await (await fetch(`${origin}/api/pages/home/records/frame_notes`, { headers: { Authorization: `Bearer ${credential}` } })).json();
+  if (!Array.isArray(frameNotes) || frameNotes.length !== 1 || frameNotes[0].text !== "from the frame") throw new Error(`frame insert did not store one record: ${JSON.stringify(frameNotes)}`);
+  await homeFrame.getByRole("button", { name: "edit frame note", exact: true }).click();
+  await gateWait.playwright(homeFrame.getByText("frame notes: edited in the frame", { exact: true }), "waitFor", { timeout: 20000 });
+  await homeFrame.getByRole("button", { name: "delete frame note", exact: true }).click();
+  await gateWait.playwright(homeFrame.getByText("frame notes: none", { exact: true }), "waitFor", { timeout: 20000 });
+  const notesAfterDelete = await (await fetch(`${origin}/api/pages/home/records/frame_notes`, { headers: { Authorization: `Bearer ${credential}` } })).json();
+  if (!Array.isArray(notesAfterDelete) || notesAfterDelete.length !== 0) throw new Error(`frame delete left records: ${JSON.stringify(notesAfterDelete)}`);
+  console.log("compiled home page listed a tool-written record and inserted, updated and deleted a frame-written record");
   const homeRecords = await (
     await fetch(`${origin}/api/pages/home/records/trace_annotations`, {
       headers: { Authorization: `Bearer ${credential}` },
@@ -2694,14 +2043,14 @@ with _database() as db:
   const secondCatalog = await mcp(secondCredential, 10, "tools/list", {});
   const secondNames =
     secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
-  if (JSON.stringify(secondNames) !== JSON.stringify(["inspect_page", "add_book", "list_books", "update_book"]))
+  if (JSON.stringify(secondNames) !== JSON.stringify(["write_page", "read_page_file", "edit_page", "render_page", "inspect_page", "restore_version", "add_book", "list_books", "update_book"]))
     throw new Error(`reading page tools were not created atomically: ${JSON.stringify(secondNames)}`);
   const secondRecords = await (
     await fetch(`${origin}/api/pages/${createdPageId}/records/books`, {
       headers: { Authorization: `Bearer ${secondCredential}` },
     })
   ).json();
-  if (secondRecords.length !== 5 || !secondRecords.some((record: { title?: string }) => record.title === "Synthetic Book"))
+  if (secondRecords.length !== 1 || !secondRecords.some((record: { title?: string }) => record.title === "Synthetic Book"))
     throw new Error(`reading page did not retain its book: ${JSON.stringify(secondRecords)}`);
 
   if (createdPage.route !== "/reading") throw new Error("created page route changed");
@@ -2723,6 +2072,7 @@ with _database() as db:
   await field.fill("observe version two");
   await field.press("Enter");
   await gateWait.playwright(page.getByText("v2 turn", { exact: true }), "waitFor", { timeout: 20000 });
+  await waitForIdleTurn(page, waitFor);
   const v2Control = JSON.parse(await Bun.file(control).text());
   const v2Schemas = v2Control.schemas ?? [];
   if (!v2Schemas.some((name: string) => name === "achilles__annotate_trace"))
@@ -2760,16 +2110,16 @@ with _database() as db:
     throw new Error("rollback did not change the live generated schema");
   const allowPage = await homeMcp(15, "tools/call", {
     name: "create_page",
-    arguments: { route: "/allow", title: "allow mode", layout: { blocks: [] } },
+    arguments: { route: "/allow", title: "allow mode" },
   });
   if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
     throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
-  await page.setViewportSize({ width: 390, height: 760 });
   await page.goto(`${origin}/allow`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
-  const blocklessChat = page.locator(".page-chat");
-  const blocklessComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
-  const blocklessLayout = await page.evaluate(() => {
+  await page.setViewportSize({ width: 390, height: 760 });
+  const shellChat = page.locator(".page-chat");
+  const shellComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
+  const shellGeometry = await page.evaluate(() => {
     const chat = document.querySelector<HTMLElement>(".page-chat");
     const transcript = chat?.querySelector<HTMLElement>(".transcript");
     const composer = document.querySelector<HTMLElement>('[data-part="composer"]');
@@ -2781,9 +2131,11 @@ with _database() as db:
       dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
     };
   });
-  if (!blocklessChat.count() || blocklessLayout.chatClass.includes("page-chat-docked") || blocklessLayout.transcriptHeight <= 0 || !blocklessLayout.composerVisible || blocklessLayout.barCount !== 0 || blocklessLayout.dialogCount !== 0 || !(await blocklessComposer.isVisible()) || await blocklessComposer.isDisabled())
-    throw new Error(`390px blockless page chat gained sheet semantics or lost its layout: ${JSON.stringify(blocklessLayout)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "blockless-chat-390x760.png"), fullPage: true });
+  if (!(await shellChat.count()) || !shellGeometry.chatClass.includes("page-chat-docked") || shellGeometry.transcriptHeight <= 0 || !shellGeometry.composerVisible || shellGeometry.barCount !== 1 || shellGeometry.dialogCount !== 1 || !(await shellComposer.isVisible()) || await shellComposer.isDisabled())
+    throw new Error(`390px page chat lost its mobile sheet geometry: ${JSON.stringify(shellGeometry)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-390x760.png"), fullPage: true });
+  await page.getByRole("button", { name: "close page chat" }).click();
+  await gateWait.playwright(page.locator(".page-chat-backdrop"), "waitFor", { state: "detached" });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
@@ -2802,7 +2154,7 @@ with _database() as db:
     arguments: {
       route: "/late",
       title: "late",
-      layout: { blocks: [{ type: "text", text: "late" }] },
+      package: { source: "export default function Page(){return <main>late</main>}", dependencies: {} },
     },
   });
   if (!late.result?.isError || (await fetch(`${origin}/api/pages/late`)).status !== 404) throw new Error("late create_page call mutated state");
@@ -2815,11 +2167,7 @@ with _database() as db:
   await page.goto(`${origin}/reading`); await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
-  await waitFor(async () => {
-    reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
-    return reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list")
-      && (await page.locator("body").innerText()).includes("Synthetic Book");
-  }, "reading page inserted book render");
+  await gateWait.playwright(page.locator(".page-frame"), "waitFor", { state: "visible", timeout: 20_000 });
   const homeOpened = await newestChatId("home");
   if (!homeOpened) throw new Error("no listed home chat before achilles restart");
   const homeIdleWrite = gateWait.playwright(page, "waitForResponse", (response) => {
@@ -2899,10 +2247,10 @@ with _database() as db:
   if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after the achilles restart");
   mcpSessions.delete(credential);
   await mcp(credential, 3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
-  const invalid = await mcp(credential, 5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
-  if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
-  const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
-  if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
+  const invalid = await mcp(credential, 5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", package: { source: "", dependencies: {} } } });
+  if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid page package published");
+  const reconnectCreatedPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", package: { source: "export default function Page(){return <main>cross</main>}", dependencies: {} } } });
+  if (reconnectCreatedPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 200) throw new Error("reconnected MCP client could not create a code page");
   console.log("reconnect refresh asserted: achilles restarted mid-session; create mode and the next turn used the refreshed catalog without restarting zeta");
 
   await homeMcp(14, "tools/list", {});
@@ -3180,7 +2528,8 @@ with _database() as db:
   });
   if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
-  if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
+  if (await page.locator(".run-state, .page-chat-readouts").filter({ hasText: /offline/ }).count() !== 1)
+    throw new Error("dropped connection did not mark the chat offline");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-connection-lost-review-1440x900.png"), fullPage: true });
   await restartZeta("zeta reconnect after dropped connection");
   // automatic reconnect can clear the compact banner before the manual retry click.
@@ -3372,7 +2721,7 @@ with _database() as db:
   await gateWait.playwright(page, "waitForURL", (url) => url.pathname === "/reading" && Boolean(url.searchParams.get("chat") && url.searchParams.get("chat") !== controllerChat && url.searchParams.get("chat") !== alternateId));
   await setupMobileSheet(page, 844, "button");
   if (!(await dockHead(page).getByRole("button", { name: "new page chat" }).isDisabled())) throw new Error("new unsent chat did not disable +");
-  await gateWait.playwright(page.getByText("already in a new chat", { exact: true }), "waitFor");
+  await gateWait.playwright(dockHead(page).locator('[data-write-surface="page-chat.new"][title="already in a new chat"]:disabled'), "waitFor");
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${origin}/reading?chat=${controllerChat}&theme=${encodeURIComponent(theme)}`);
   await waitForIdleTurn(page, waitFor);
@@ -3398,11 +2747,14 @@ with _database() as db:
   await Promise.all(catalogTabs.map((tab) => tab.close()));
   console.log("cap step: five catalog tabs next to the chat tab all control zeta");
   const capFillers: Array<{ client: ReturnType<typeof createClient>; sessionId: string }> = [];
+  // discovery is shell-only on this branch: the fillers send the shell secret like the browser does
+  const capShellToken = (await fetch(origin).then((response) => response.text())).match(/<meta name="achilles-shell" content="([^"]+)">/)?.[1];
+  if (!capShellToken) throw new Error("achilles shell secret is unavailable");
   for (let opened = 0; ; opened++) {
     // the chat tab holds one of the sixteen slots, so fillers alone can be at most fifteen
     if (opened >= 16) throw new Error("zeta admitted more than sixteen session-holding controllers");
     // the same handoff the browser reads, so the raw controllers reach the zeta serve the tabs use.
-    const discovery = await fetch(discoveryUrl).then((response) => response.json()) as { url: string; controller_token: string };
+    const discovery = await fetch(discoveryUrl, { headers: { "X-Achilles-Shell": capShellToken } }).then((response) => response.json()) as { url: string; controller_token: string };
     const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
     const filler = createClient(await webSocketTransport(url.toString(), ["zeta.v1", `zeta.bearer.${discovery.controller_token}`]));
     try { await filler.hello(FEATURES, "controller"); }
@@ -3515,8 +2867,8 @@ with _database() as db:
   if (!await palette.getByText("toggle vim mode", { exact: true }).isVisible()) throw new Error("observer palette hid the local vim mode toggle");
   if (await palette.getByText("toggle create mode", { exact: true }).count()) throw new Error("observer palette exposed the shared create mode toggle");
   await observerPage.keyboard.press("Escape");
-  const observerWritableControls = observerPage.locator(".record-form button:not(:disabled), [data-part='approval'] button:not(:disabled)");
-  if (await observerWritableControls.count()) throw new Error("observer exposed an enabled form or approval action");
+  const observerWritableControls = observerPage.locator("[data-part='approval'] button:not(:disabled)");
+  if (await observerWritableControls.count()) throw new Error("observer exposed an enabled approval action");
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageAtActions) throw new Error("observer action matrix changed settings storage");
   if (observerFrames.slice(observerFrameCountAtActions).some(({ direction, payload }) => direction === "sent" && observerMutationMethods.has((JSON.parse(payload) as { method?: string }).method ?? ""))) throw new Error("observer action matrix sent a mutating websocket request");
   if (observerHttp.slice(observerHttpCountAtActions).some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer action matrix issued mutating HTTP");

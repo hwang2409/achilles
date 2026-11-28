@@ -1,6 +1,6 @@
 {
   "id": "tool-version-fresh-chat",
-"suite": "core",
+  "suite": "core",
   "page_plan": [
     {
       "alias": "reading",
@@ -59,16 +59,7 @@
           "title": "Legacy Book"
         }
       }
-    ],
-    "initial_layout": {
-      "blocks": [
-        {
-          "type": "list",
-          "title": "Books",
-          "collection": "books"
-        }
-      ]
-    }
+    ]
   },
   "checks": [
     {

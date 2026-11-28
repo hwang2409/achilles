@@ -167,7 +167,7 @@ function attachmentClient(onRequest?: (method: string, params?: unknown) => void
   };
 }
 
-const page = (sessionId: string | null) => ({ id: "home", route: "/", title: "home", zeta_session_id: sessionId, workspace: "/tmp", create_mode: false, approval_mode: "allow", layout: { blocks: [] } });
+const page = (sessionId: string | null) => ({ id: "home", route: "/", title: "home", zeta_session_id: sessionId, workspace: "/tmp", create_mode: false, approval_mode: "allow" });
 
 describe("steer delivery confirmation", () => {
   test.each([
