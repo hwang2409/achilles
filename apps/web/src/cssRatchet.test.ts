@@ -80,6 +80,7 @@ const baseline: Record<Category, Record<string, number>> = {
   "raw px font-size": {
     "agents/agents.css": 2,
     "chat/auth-error-recovery.css": 1,
+    "chat/branches.css": 3,
     "composer/composer.css": 4,
     "composer/vim-composer.css": 1,
     "create/create.css": 1,
@@ -96,6 +97,7 @@ const baseline: Record<Category, Record<string, number>> = {
   },
   "raw z-index": {
     "agents/agents.css": 1,
+    "chat/branches.css": 2,
     "chat/transcript.css": 1,
     "composer/composer-commands.css": 1,
     "composer/path-completion.css": 1,
@@ -114,6 +116,7 @@ const baseline: Record<Category, Record<string, number>> = {
     "accounts/accounts.css": 12,
     "agents/agents.css": 28,
     "chat/auth-error-recovery.css": 5,
+    "chat/branches.css": 3,
     "chat/fulcrum-g1.css": 11,
     "chat/markdown.css": 19,
     "chat/tool-summary.css": 4,
@@ -144,11 +147,13 @@ const baseline: Record<Category, Record<string, number>> = {
     "telemetry/telemetry.css": 76,
   },
   "built-in easing": {
+    "chat/branches.css": 1,
     "composer/composer.css": 3,
     "shell.css": 5,
   },
   "ungated :hover": {
     "agents/agents.css": 2,
+    "chat/branches.css": 2,
     "chat/fulcrum-g1.css": 5,
     "command-palette.css": 1,
     "composer/composer.css": 1,
