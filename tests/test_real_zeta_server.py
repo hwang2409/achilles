@@ -128,3 +128,17 @@ def test_proof_servers_refuse_a_missing_or_real_zeta_home(monkeypatch, tmp_path)
     monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
     assert proof_home.private_proof_home() == (tmp_path / "zeta").resolve()
     assert list(tmp_path.iterdir()) == []
+
+
+def test_only_proof_home_reads_zeta_home():
+    import re
+
+    read = re.compile(r"""(environ\[|environ\.get\(|getenv\()\s*["']ZETA_HOME["']""")
+    readers = [
+        path.name
+        for path in sorted(_SERVER.parent.glob("*.py"))
+        if path.name != "proof_home.py" and read.search(path.read_text())
+    ]
+    assert readers == [], (
+        f"{readers} read ZETA_HOME directly; call private_proof_home() from scripts/proof_home.py"
+    )

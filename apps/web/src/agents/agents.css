@@ -40,6 +40,8 @@
 .agents-state[data-status="completed"]::before { background: var(--fulcrum-ok); border-radius: 50%; }
 /* waiting on the user: the transcript row's warn mark */
 .agents-state[data-waiting]::before, .agents-state[data-status="waiting"]::before { background: var(--fulcrum-warn); }
+/* paused, not failed: a hollow mark in the neutral color */
+.agents-state[data-status="suspended"]::before { background: transparent; box-shadow: inset 0 0 0 1px currentColor; }
 .agents-more { margin: 8px 16px; }
 .agents-detail { overflow-wrap: anywhere; }
 .agents-back { display: inline-flex; margin-inline: var(--g1-space-10); align-items: center; min-height: var(--g1-control-height); color: var(--fulcrum-accent); font-size: inherit; }

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, jest, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { readSessionTitles } from "../sessions/reads";
 import { createAgentRunsReader, sourceNote } from "./reads";
@@ -102,6 +102,73 @@ test("a delayed continuation cannot append after refresh replaced its base", asy
     cancel();
     await deadline(more, "drain continuation on teardown");
   }
+});
+
+// zeta's provider-suspended row (child_runs.py: the five retry fields only when suspension_reason is provider_unavailable)
+const suspended = (id = "a:1", fields: Record<string, unknown> = {}) => ({ ...rich(id), status: "suspended", current_step: "suspended: provider unavailable, retrying",
+  suspension_reason: "provider_unavailable", retry_state: "retrying", retry_started_at: "2026-11-08T00:00:00+00:00", retry_deadline_at: "2026-11-08T01:00:00+00:00",
+  next_retry_at: "2026-11-08T00:00:05.004842+00:00", ...fields });
+
+test("a suspended catalog row keeps its status and zeta's retry times; a bad retry field drops the retry, not the row", async () => {
+  const { reader } = setup(["agent_run_catalog_v1"], [catalog([suspended(), suspended("a:2", { next_retry_at: "soon" }), suspended("a:3", { retry_state: "stopped", next_retry_at: undefined }),
+    { ...rich("a:4"), status: "suspended", current_step: "suspended (parent crashed)" }])]);
+  await reader.refresh();
+  const rows = reader.snapshot().report!.rows;
+  expect(rows.map((row) => row.status)).toEqual(["suspended", "suspended", "suspended", "suspended"]);
+  expect(rows[0]!.retry).toEqual({ state: "retrying", startedAt: Date.parse("2026-11-08T00:00:00Z"), deadlineAt: Date.parse("2026-11-08T01:00:00Z"), nextAt: Date.parse("2026-11-08T00:00:05.004Z") });
+  expect(rows[1]!.retry).toBeUndefined();
+  expect(rows[2]!.retry).toEqual({ state: "stopped", startedAt: Date.parse("2026-11-08T00:00:00Z"), deadlineAt: Date.parse("2026-11-08T01:00:00Z") });
+  expect(rows[3]).toMatchObject({ status: "suspended", currentStep: "suspended (parent crashed)" });
+  expect(rows[3]!.retry).toBeUndefined();
+  reader.stop();
+  // an older zeta sends the same child as running with no retry fields: the parsed row has no retry key at all
+  const old = setup(["agent_run_catalog_v1"], [catalog([{ ...rich(), status: "running", current_step: "thinking" }])]);
+  await old.reader.refresh();
+  expect(Object.keys(old.reader.snapshot().report!.rows[0]!)).not.toContain("retry");
+});
+
+test("the attached child list keeps zeta's retry times that fulcrum's row parser drops", async () => {
+  const { reader } = setup(["child_runs", "child_recovery"], [{ session: { session_id: "a" } }, { runs: [suspended(), suspended("a:2", { retry_state: "stopped", next_retry_at: undefined })] }], ["child_run_list"]);
+  await reader.refresh({ root: "a" });
+  const rows = reader.snapshot().report!.rows;
+  expect(rows.map((row) => row.status)).toEqual(["suspended", "suspended"]);
+  expect(rows[0]!.retry).toEqual({ state: "retrying", startedAt: Date.parse("2026-11-08T00:00:00Z"), deadlineAt: Date.parse("2026-11-08T01:00:00Z"), nextAt: Date.parse("2026-11-08T00:00:05.004Z") });
+  expect(rows[1]!.retry?.state).toBe("stopped");
+  reader.stop();
+});
+
+test("rows sharing a retry time reread once after it passes, never while a read is in flight, and not again for the same time", async () => {
+  jest.useFakeTimers();
+  try {
+    const next = Date.parse("2026-11-08T00:00:05Z");
+    jest.setSystemTime(next - 5000);
+    const page = catalog(Array.from({ length: 50 }, (_, index) => suspended(`a:${index}`, { next_retry_at: "2026-11-08T00:00:05+00:00" })));
+    const parked = Promise.withResolvers<unknown>();
+    const replies = [page, page, parked.promise, page];
+    const calls: unknown[] = [];
+    const client = { features: ["agent_run_catalog_v1"], request: async (_method: string, params: unknown) => { calls.push(params); return replies.shift(); } } as unknown as ZetaClient;
+    const reader = createAgentRunsReader(client, () => true);
+    await reader.refresh({ root: "a" });
+    jest.advanceTimersByTime(7900);
+    expect(calls).toHaveLength(1);
+    jest.advanceTimersByTime(200);
+    await Promise.resolve();
+    expect(calls).toEqual([{ limit: 100, root_session_id: "a" }, { limit: 100, root_session_id: "a" }]);
+    // zeta returned the same planned time again: no reread loop
+    for (let tick = 0; tick < 5; tick++) await Promise.resolve();
+    jest.advanceTimersByTime(60_000);
+    expect(calls).toHaveLength(2);
+    // a new planned time while another read runs: the due time passes during that read and is skipped
+    replies.unshift(catalog([suspended("a:1", { next_retry_at: "2026-11-08T00:01:30+00:00" })]));
+    await reader.refresh({ root: "a" });
+    const busy = reader.refresh({ root: "a" });
+    jest.setSystemTime(Date.parse("2026-11-08T00:02:00Z"));
+    jest.advanceTimersByTime(30_000);
+    expect(calls).toHaveLength(4);
+    reader.stop();
+    parked.resolve(catalog([]));
+    await busy;
+  } finally { jest.useRealTimers(); }
 });
 
 test("session titles for the agents view keep only real names and first messages", async () => {

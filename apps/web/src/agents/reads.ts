@@ -3,6 +3,7 @@ import { supportsFeature, supportsRequest } from "../zeta/connection";
 import { rpcCode } from "../zeta/historyRead";
 
 export const AGENT_REFRESH_MS = 30_000;
+const RECHECK_AFTER_MS = 3_000;
 const capabilities = { catalog: ["agent_run_catalog_v1", "agent_run_catalog"], state: ["state_read_v1", "state_agents"], attached: ["child_runs", "child_run_list"] } as const;
 type Source = keyof typeof capabilities;
 export const sourceNote = {
@@ -11,11 +12,16 @@ export const sourceNote = {
   attached: "runs from other sessions need a newer zeta. showing the attached session.",
 };
 export const unavailable = "child details need a newer zeta.";
-export const catalogStatuses = ["running", "idle", "finishing", "completed", "failed", "canceled"] as const;
+export const catalogStatuses = ["running", "idle", "finishing", "suspended", "completed", "failed", "canceled"] as const;
+// zeta sends "suspended" only to a client that negotiated this feature; an older zeta rejects it as a catalog filter
+export const recoveryFeature = "child_recovery";
 const stateStatuses = ["running", "idle", "waiting", "finished", "failed", "cancelled", "unknown"] as const;
 export type AgentStatus = typeof catalogStatuses[number] | "waiting" | "unknown";
 const statusesForState = { running: "running", idle: "idle", waiting: "waiting", finished: "completed", failed: "failed", cancelled: "canceled", unknown: "unknown" } as const;
 export const agentStatuses = [...catalogStatuses, "waiting", "unknown"] as const;
+/** The state filter's choices for a read source; "suspended" only when zeta negotiated child recovery. */
+export const statusChoices = (source: Source, recovery: boolean) => (source === "catalog" ? catalogStatuses : agentStatuses.filter((state) => source === "attached" ? state !== "waiting" : state !== "finishing"))
+  .filter((state) => state !== "suspended" || (recovery && source !== "state"));
 export const rowKey = (root: string, run: string) => JSON.stringify([root, run]);
 
 export type AgentRun = {
@@ -36,7 +42,10 @@ export type AgentRun = {
   /** reply and waiting come from the chat's live transcript row (withLiveRow) */
   waiting?: "needs approval" | "needs input";
   reply?: string;
+  /** a child zeta paused because its provider failed; times are epoch ms */
+  retry?: Retry;
 };
+export type Retry = { state: "retrying" | "stopped"; startedAt: number; deadlineAt: number; nextAt?: number };
 export type AgentFilters = { root?: string; status?: AgentStatus };
 type Cursor = string | number;
 type Page = { rows: AgentRun[]; next?: Cursor; omitted: number };
@@ -55,14 +64,23 @@ function runIdentity(v: unknown) {
   return { runId: v.run_id, sessionId: v.session_id, parentRunId: v.parent_run_id };
 }
 
+// a bad retry field drops the retry facts, not the run
+function retryOf(v: Record<string, unknown>): Retry | undefined {
+  if (v.status !== "suspended" || v.suspension_reason !== "provider_unavailable" || !date(v.retry_started_at) || !date(v.retry_deadline_at)) return;
+  const base = { startedAt: Date.parse(v.retry_started_at), deadlineAt: Date.parse(v.retry_deadline_at) };
+  if (v.retry_state === "stopped") return { state: "stopped", ...base };
+  if (v.retry_state === "retrying" && date(v.next_retry_at)) return { state: "retrying", ...base, nextAt: Date.parse(v.next_retry_at) };
+}
+
 function rich(v: unknown): AgentRun | undefined {
   const id = runIdentity(v);
   if (!id || !object(v) || !text(v.status) || typeof v.agent_type !== "string" || typeof v.description !== "string" ||
       typeof v.current_step !== "string" || typeof v.accepts_follow_ups !== "boolean" || !count(v.turns_used) ||
       !count(v.tool_count) || !finite(v.elapsed_seconds) || !date(v.started_at) || (v.finished_at !== null && !date(v.finished_at))) return;
+  const retry = retryOf(v);
   return { ...id, agentType: v.agent_type || undefined, status: catalogStatuses.find((s) => s === v.status) ?? "unknown",
     description: v.description, acceptsFollowUps: v.accepts_follow_ups, currentStep: v.current_step, turnsUsed: v.turns_used, toolCount: v.tool_count,
-    elapsedSeconds: v.elapsed_seconds, startedAt: Date.parse(v.started_at), finishedAt: v.finished_at === null ? undefined : Date.parse(v.finished_at) };
+    elapsedSeconds: v.elapsed_seconds, startedAt: Date.parse(v.started_at), finishedAt: v.finished_at === null ? undefined : Date.parse(v.finished_at), ...(retry && { retry }) };
 }
 
 function stored(v: unknown): AgentRun | undefined {
@@ -75,8 +93,9 @@ function stored(v: unknown): AgentRun | undefined {
     startedAt: v.started_ns === null ? undefined : Math.floor(v.started_ns / 1e6), finishedAt: v.ended_ns === null ? undefined : Math.floor(v.ended_ns / 1e6) };
 }
 
-function attachedRow(v: ChildRunRow): AgentRun | undefined {
-  return rich({ run_id: v.runId, session_id: v.sessionId, parent_run_id: v.parentRunId, agent_type: v.agentType,
+// fulcrum's row parser drops zeta's retry fields, so they come from the raw row with the same run id
+function attachedRow(v: ChildRunRow, raw: Record<string, unknown> = {}): AgentRun | undefined {
+  return rich({ ...raw, run_id: v.runId, session_id: v.sessionId, parent_run_id: v.parentRunId, agent_type: v.agentType,
     description: v.description, current_step: v.currentStep, status: v.status.value, accepts_follow_ups: v.acceptsFollowUps,
     turns_used: v.turnsUsed, tool_count: v.toolCount, elapsed_seconds: v.elapsedSeconds, started_at: v.startedAt, finished_at: v.finishedAt });
 }
@@ -120,6 +139,9 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
   let pending: AbortController | undefined;
   let continuation: Cursor | undefined;
   let seen = new Set<Cursor>();
+  // one reread per distinct retry time, after zeta's probe had time to land; children on one account share the time
+  let recheck: ReturnType<typeof setTimeout> | undefined;
+  const rechecked = new Set<number>();
   const denied = new Set<Source>();
   const listeners = new Set<() => void>();
   const publish = (next: Snapshot) => { snapshot = next; listeners.forEach((fn) => fn()); };
@@ -131,10 +153,13 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     signal.throwIfAborted();
     if (source === "attached") {
       if (!attached || root && root !== attached) return { rows: [], omitted: 0 };
-      const result = await listChildRuns(client, attached, { limit: 100, offset: typeof cursor === "number" ? cursor : 0, signal, timeoutMs: 12000 });
+      let reply: unknown;
+      const reading = { features: client.features, request: (...call: Parameters<ZetaClient["request"]>) => client.request(...call).then((value) => reply = value) };
+      const result = await listChildRuns(reading, attached, { limit: 100, offset: typeof cursor === "number" ? cursor : 0, signal, timeoutMs: 12000 });
       if (result.kind !== "page") throw bad();
+      const raw = new Map(object(reply) && Array.isArray(reply.runs) ? reply.runs.flatMap((row) => object(row) && text(row.run_id) ? [[row.run_id, row] as const] : []) : []);
       const rows = result.runs.flatMap((value) => {
-        const row = attachedRow(value);
+        const row = attachedRow(value, raw.get(value.runId));
         return row?.sessionId === attached ? [row] : [];
       });
       return { rows: status ? rows.filter((row) => row.status === status) : rows, next: result.nextOffset, omitted: result.invalidRows + result.runs.length - rows.length };
@@ -163,6 +188,20 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     }
     return { unsupported: true };
   };
+  // shortcut: in the Agents place, a recovery from a sent message or a slow probe shows at the next refresh (the chat
+  // dialog also rereads on the paused and resumed notices); upgrade: when the run catalog has a change stream
+  const scheduleRecheck = () => {
+    clearTimeout(recheck);
+    recheck = undefined;
+    const next = Math.min(...(snapshot.report?.rows ?? []).flatMap(({ retry }) => retry?.nextAt !== undefined && !rechecked.has(retry.nextAt) ? [retry.nextAt] : []));
+    if (!Number.isFinite(next)) return;
+    recheck = setTimeout(() => {
+      recheck = undefined;
+      rechecked.add(next);
+      if (pending) return;
+      void request(snapshot.report?.filters ?? {});
+    }, Math.min(2 ** 31 - 1, Math.max(0, next + RECHECK_AFTER_MS - now())));
+  };
   const request = async (filters: AgentFilters, more = false) => {
     const base = snapshot.report;
     const cursor = more ? continuation : undefined;
@@ -179,6 +218,7 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
       result.rows.forEach((row) => rows.set(rowKey(row.sessionId, row.runId), row));
       publish({ refreshing: false, report: { source, attached, filters, rows: [...rows.values()], omitted: result.omitted + (append ? base!.omitted : 0),
         reportedAt: append ? base!.reportedAt : now(), complete: result.next === undefined } });
+      scheduleRecheck();
     };
     publish({ ...snapshot, refreshing: !more, paging: more, warning: undefined });
     try {
@@ -211,7 +251,7 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     subscribe(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     refresh: (filters: AgentFilters = {}) => request(filters),
     more: () => request(snapshot.report?.filters ?? {}, true),
-    stop() { pending?.abort(); pending = undefined; },
+    stop() { pending?.abort(); pending = undefined; clearTimeout(recheck); recheck = undefined; },
   };
 }
 

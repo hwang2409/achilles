@@ -5,10 +5,12 @@ import { ModuleState, ShellDockSlot } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
 import { isTerminal, stateWord } from "./childControls";
 import { groupAgentRuns, type RunBranch } from "./groupAgentRuns";
-import { AGENT_REFRESH_MS, agentStatuses, catalogStatuses, createAgentRunsReader, rowKey, sourceNote, unavailable, type AgentFilters, type AgentRun } from "./reads";
-import { AgentRunDetail, duration, short, stamp, StateTag } from "./AgentRunDetail";
+import { supportsFeature } from "../zeta/connection";
+import { AGENT_REFRESH_MS, createAgentRunsReader, recoveryFeature, statusChoices, rowKey, sourceNote, unavailable, type AgentFilters, type AgentRun } from "./reads";
+import { AgentRunDetail, elapsed, RetryLine, short, stamp, StateTag } from "./AgentRunDetail";
 import "./agents.css";
 
+export const countText = (count: number, complete: boolean) => `${count} ${complete ? "run" : "loaded result"}${count === 1 ? "" : "s"}${complete ? " in view" : ""}`;
 const runHref = (run?: AgentRun) => surfaceHref(run ? `/agents/${encodeURIComponent(run.sessionId)}/${encodeURIComponent(run.runId)}` : "/agents");
 
 function selection() {
@@ -105,9 +107,9 @@ export function AgentsModule({ client, connecting, retry }: { client: ZetaClient
       <a ref={(element) => { if (element) rowRefs.current.set(key, element); else rowRefs.current.delete(key); }} className="agents-row" href={runHref(run)} onClick={follow} aria-current={id === key ? "page" : undefined} data-status={run.status} data-nested={depth > 0}>
         <div className="agents-row-copy">
           <span className="agents-row-title"><b>{run.agentType ?? short(run.runId)}</b>{run.description ? ` ${run.description}` : ""}</span>
-          <small><StateTag row={run} />{run.currentStep && run.currentStep !== run.status && !isTerminal(run.status) ? ` · ${run.currentStep}` : ""}{missingParent && run.parentRunId ? ` · parent ${short(run.parentRunId)}` : ""}</small>
+          <small><StateTag row={run} />{run.retry ? <> · <RetryLine retry={run.retry} /></> : run.currentStep && run.currentStep !== run.status && !isTerminal(run.status) ? ` · ${run.currentStep}` : ""}{missingParent && run.parentRunId ? ` · parent ${short(run.parentRunId)}` : ""}</small>
         </div>
-        {run.elapsedSeconds !== undefined && <span className="agents-elapsed">{duration(run.elapsedSeconds)}</span>}
+        {elapsed(run) && <span className="agents-elapsed">{elapsed(run)}</span>}
       </a>
     </li>;
   };
@@ -128,7 +130,7 @@ export function AgentsModule({ client, connecting, retry }: { client: ZetaClient
             <input ref={search} type="search" aria-label="filter loaded runs" placeholder="filter loaded runs" value={query} onChange={(event) => setQuery(event.target.value)} />
             <div>
               <label>state <select value={filters.status ?? ""} disabled={!client} onChange={(event) => setFilters({ ...filters, status: (event.target.value || undefined) as AgentFilters["status"] })}>
-                <option value="">all</option>{(report.source === "catalog" ? catalogStatuses : agentStatuses.filter((state) => report.source === "attached" ? state !== "waiting" : state !== "finishing")).map((state) => <option key={state} value={state}>{stateWord(state)}</option>)}
+                <option value="">all</option>{statusChoices(report.source, !!client && supportsFeature(client, recoveryFeature)).map((state) => <option key={state} value={state}>{stateWord(state)}</option>)}
               </select></label>
               {roots.length > 1 && report.source !== "attached" && <label>session <select value={filters.root ?? ""} disabled={!client} onChange={(event) => setFilters({ ...filters, root: event.target.value || undefined })}>
                 <option value="">all</option>{[...roots].sort((a, b) => rootTitle(a).localeCompare(rootTitle(b))).map((root) => <option key={root} value={root}>{rootTitle(root)}</option>)}
@@ -138,7 +140,7 @@ export function AgentsModule({ client, connecting, retry }: { client: ZetaClient
           </div>
           <div className="agents-lane-note">
             {sourceNote[report.source] && <p role="status">{sourceNote[report.source]}</p>}
-            <p>{shown.length} {report.complete ? "runs in view" : "loaded results"}{report.omitted ? ` · ${report.omitted} malformed ${report.omitted === 1 ? "row" : "rows"} omitted` : ""}</p>
+            <p>{countText(shown.length, report.complete)}{report.omitted ? ` · ${report.omitted} malformed ${report.omitted === 1 ? "row" : "rows"} omitted` : ""}</p>
           </div>
           {!lanes.length && <ModuleState kind="empty" title={matches || report.filters.status || report.filters.root || !report.complete || report.omitted ? "no agent runs in this view" : "no agent runs yet"} />}
           {lanes.map((lane) => <section className="agents-lane" key={lane.sessionId}>
