@@ -60,7 +60,8 @@ test("replacement aborts pending history and releases late and active leases exa
 test("selected report changes mark history stale and automatically reread at most every catalog interval", async () => {
   let now = 0;
   const opened: ReturnType<typeof result>[] = [];
-  const owner = createChildRunsController(client, key, { now: () => now, attached: async () => "root", open: async () => {
+  const owner = createChildRunsController(client, key, { now: () => now, attached: async () => "root", open: async (_client, _key, options?: OpenChildRunOptions) => {
+    options?.onProgress?.({ messages: 1, complete: true, restart: 0 });
     const value = result(); opened.push(value); return value;
   } });
   try {

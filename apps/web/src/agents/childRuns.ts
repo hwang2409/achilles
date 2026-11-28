@@ -78,7 +78,8 @@ export function createChildRunsController(
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     refresh,
     changed() {
-      if (!snapshot.loading && now() - latestRead >= AGENT_REFRESH_MS) return refresh();
+      // an empty read has nothing to keep: read again at once instead of asking for a refresh
+      if (!snapshot.loading && (now() - latestRead >= AGENT_REFRESH_MS || snapshot.result && !snapshot.progress?.messages)) return refresh();
       if (!snapshot.stale) publish({ ...snapshot, stale: true });
     },
     close() { release(); publish({}); },
