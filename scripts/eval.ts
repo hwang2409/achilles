@@ -599,6 +599,15 @@ function scriptedProvider() {
     }
     // own-page-edit-create-off: the page chat rewrites its own page once; a chat that lacks write_page gets an unknown-tool error
     else if (prompt.includes("Synthetic Field Notes")) { if (!toolResults.some(message => message.tool_name === "achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<h1>Synthetic Field Notes</h1>);', dependencies: {} } } }]; }
+    // review-and-annotate: the review chat makes its two tools and adds one record; the home chat builds a page that lists
+    // annotations through the bridge, so the record shows on the page only if the bridge reads it back
+    else if (prompt.includes("verdict regressed")) {
+      const created = toolResults.filter(message => message.tool_name === "achilles__create_tool").length;
+      if (created === 0) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_annotation", "insert", "annotations") } } }];
+      else if (created === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("list_annotations", "list", "annotations") } } }];
+      else if (!toolResults.some(message => message.tool_name === "achilles__add_annotation")) toolCalls = [{ function: { name: "achilles__add_annotation", arguments: { run_id: "run-002", verdict: "regressed" } } }];
+    }
+    else if (prompt.includes("titled Run Review")) { if (!toolResults.some(message => message.tool_name === "achilles__create_page")) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", package: { source: 'import { useEffect, useState } from "react"; import { createRoot } from "react-dom/client"; function App() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { (window as any).achilles.records.list("annotations").then(setRows); }, []); return <main><h1>Run Review</h1><ul>{rows.map(row => <li key={row.record_id}>{row.run_id} {row.verdict}</li>)}</ul></main>; } createRoot(document.getElementById("root")!).render(<App />);', dependencies: {} } } } }]; }
     // bridge-update-delete: the chat rewrites its page into a chores list whose buttons update and delete through the page bridge;
     // Delete asks confirm() first, as a real page might, so the run proves the harness accepts the dialog like a user
     else if (prompt.includes("the chores collection")) { if (!toolResults.some(message => message.tool_name === "achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: SCRIPTED_CHORES_PAGE, dependencies: {} } } }]; }
