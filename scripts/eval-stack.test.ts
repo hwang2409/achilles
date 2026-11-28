@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -77,6 +77,57 @@ test("a setup child that exits but leaves its output open fails with a named err
   } finally {
     process.env.PATH = path; controller.abort();
     const holder = Number(await Bun.file(pidFile).text().catch(() => "0")); if (holder) { try { process.kill(holder, "SIGKILL"); } catch {} }
+    await rm(marker, { recursive: true, force: true });
+  }
+}, 180_000);
+
+test("a SIGKILLed eval leaves no child of its stack alive", async () => {
+  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
+  const marker = await mkdtemp(join("/tmp", "achilles-eval-sigkill-")); const pidFile = join(marker, "sync.pid");
+  // the zeta sync step holds still, as a slow setup child would, until the eval is SIGKILLed (a tool timeout)
+  await writeFile(join(marker, "uv"), `#!/bin/sh\n[ "$1" = sync ] && { echo $$ > ${JSON.stringify(pidFile)}; exec sleep 600; }\nexec ${JSON.stringify(Bun.which("uv")!)} "$@"\n`); await chmod(join(marker, "uv"), 0o755);
+  const env = { ...process.env, PATH: `${marker}:${process.env.PATH}`, TMPDIR: marker, ZETA_HOME: join(marker, "zeta-home"), ACHILLES_HOME: join(marker, "achilles-home"), EVAL_BACKEND: "scripted", EVAL_SKIP_BROWSER_INSTALL: "1", MODEL: "ollama/qwen3:4b", REPORT_DIR: join(marker, "report"), BASE: "none" };
+  const child = spawn("bun", ["scripts/eval.ts", "--suite", "harness-smoke"], { cwd: new URL("..", import.meta.url).pathname, env, stdio: "ignore" });
+  try {
+    for (let i = 0; i < 1500 && !await Bun.file(pidFile).exists(); i++) await Bun.sleep(100); // a cold cache clones zeta first
+    expect(await Bun.file(pidFile).exists(), "the setup child did not start").toBe(true);
+    // by pid and pgid: macOS ps hides the environment (the marker) of /bin binaries such as sleep
+    const held = Number(await Bun.file(pidFile).text()); const alive = () => processRows().filter(row => row.pid === held || row.pgid === held || row.command.includes(marker));
+    process.kill(child.pid!, "SIGKILL");
+    let survivors = alive();
+    for (let i = 0; i < 50 && survivors.length; i++) { await Bun.sleep(100); survivors = alive(); }
+    expect(survivors.map(row => `${row.pid} ${row.ppid} ${row.command.slice(0, 80)}`), "children of the SIGKILLed eval must exit within 5s").toEqual([]);
+  } finally {
+    try { process.kill(child.pid!, "SIGKILL"); } catch {}
+    const held = Number(await Bun.file(pidFile).text().catch(() => "0"));
+    for (const row of processRows().filter(row => (held && row.pgid === held) || row.command.includes(marker))) { try { process.kill(row.pid, "SIGKILL"); } catch {} }
+    await rm(marker, { recursive: true, force: true });
+  }
+}, 180_000);
+
+test("a setup command that is not installed fails with its own cause", async () => {
+  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
+  const marker = await mkdtemp(join("/tmp", "achilles-eval-missing-")); const path = process.env.PATH;
+  await symlink(Bun.which("git")!, join(marker, "git")); process.env.PATH = marker; // git only: the zeta sync step finds no uv
+  try {
+    const outcome = await startEvalStack({ model: "ollama/qwen3:4b" }).then(() => "started", (error: Error) => String(error));
+    expect(outcome, "the error must name the missing command").toMatch(/uv: (command )?not found|Executable not found/);
+    expect(outcome).not.toContain("stayed open");
+  } finally { process.env.PATH = path; await rm(marker, { recursive: true, force: true }); }
+}, 180_000);
+
+test("a lock release that fails after the locked work failed keeps the first error", async () => {
+  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
+  const marker = await mkdtemp(join("/tmp", "achilles-eval-release-")); const path = process.env.PATH;
+  // the lock holder ignores release (stdin EOF), and the achilles sync it guards fails
+  await writeFile(join(marker, "uv"), `#!/bin/sh\n[ "$1 $2" = "run --no-project" ] && { echo $$ > ${JSON.stringify(join(marker, "holder.pid"))}; echo locked; exec sleep 600; }\n[ "$1 $2" = "sync --inexact" ] && { echo sync-broke >&2; exit 3; }\nexec ${JSON.stringify(Bun.which("uv")!)} "$@"\n`); await chmod(join(marker, "uv"), 0o755);
+  process.env.PATH = `${marker}:${path}`;
+  try {
+    const outcome = await startEvalStack({ model: "ollama/qwen3:4b" }).then(() => "started", (error: Error) => String(error));
+    expect(outcome, "the sync failure must surface, not the release timeout").toContain("could not sync achilles: sync-broke");
+  } finally {
+    process.env.PATH = path;
+    const holder = Number(await Bun.file(join(marker, "holder.pid")).text().catch(() => "0")); if (holder) { try { process.kill(holder, "SIGKILL"); } catch {} }
     await rm(marker, { recursive: true, force: true });
   }
 }, 180_000);
