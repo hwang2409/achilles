@@ -102,7 +102,8 @@ async function selectedModel(owner: ProcessOwner, zeta: string, sourceHome: stri
 }
 function childEnvironment(root: string, accountHome: string, ollamaBaseUrl?: string) {
   const env: NodeJS.ProcessEnv = {};
-  for (const key of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "NO_PROXY"]) if (Bun.env[key]) env[key] = Bun.env[key];
+  // page builds run in docker: achilles serve must use the daemon the fixture setup used
+  for (const key of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "NO_PROXY", "DOCKER_HOST", "DOCKER_CONTEXT"]) if (Bun.env[key]) env[key] = Bun.env[key];
   return { ...env, ACHILLES_HOME: join(root, "achilles-home"), ACHILLES_ZETA_DISCOVERY: join(root, "zeta-home/run/serve.ws.json"), ZETA_HOME: join(root, "zeta-home"), ZETA_ACCOUNT_HOME: accountHome, ZETA_ANTHROPIC_OAUTH_COMPAT: "1", ...(ollamaBaseUrl ? { ZETA_OLLAMA_BASE_URL: ollamaBaseUrl } : {}) };
 }
 async function prepareTargetWeb(owner: ProcessOwner, achillesDir: string) {

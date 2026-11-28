@@ -23,6 +23,7 @@ from .pages import CHAT_PURPOSES, ChatChanged, PageStore, RecordExists
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
 
+MAX_JSON_BODY = 1024 * 1024  # page bridge writes and shell requests are small JSON objects
 EMPTY_PAGE = (
     "this page has no compiled revision. ask the agent in page chat to build it with write_page."
 )
@@ -58,6 +59,11 @@ def _same_origin(request) -> bool:
         and origin == f"{request.url.scheme}://{host}"
         and request.headers.get("sec-fetch-site") in (None, "same-origin")
     )
+
+
+def _script_request(request) -> bool:
+    # a browser always sends Sec-Fetch-Dest; script tags pass, fetch() reads from other sites do not
+    return request.headers.get("sec-fetch-dest") in (None, "script")
 
 
 def _shell_authorized(request) -> bool:
@@ -167,6 +173,11 @@ class PageAuthMiddleware(BaseHTTPMiddleware):
         self.store = store
 
     async def dispatch(self, request, call_next):
+        # dns rebinding: another site's name resolved to 127.0.0.1 sends its own Host
+        if request.url.path.startswith("/api") and not _loopback(
+            f"http://{request.headers.get('host', '')}"
+        ):
+            return JSONResponse({"error": "loopback host required"}, status_code=403)
         if request.url.path.startswith("/mcp"):
             if not request.client or not _loopback(f"http://{request.client.host}"):
                 return JSONResponse({"error": "loopback required"}, status_code=403)
@@ -219,16 +230,23 @@ def create_app() -> Starlette:
         )
 
     async def page_frame(request):
+        if request.headers.get("sec-fetch-dest") not in (None, "iframe"):
+            raise HTTPException(403, "the frame loads only in an iframe")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
         code = await anyio.to_thread.run_sync(store.page_code, row["id"])
         if not code:
             raise HTTPException(404, "page has no compiled revision")
-        try:
-            await anyio.to_thread.run_sync(store.rebuild_artifact, row["id"])
-        except PageBuildError as exc:
-            raise HTTPException(404, "page artifact not found") from exc
+        # the sandboxed frame's own reloads and form posts are cross-site; only achilles rebuilds
+        if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
+            if not (store.root / "bundles" / f"{code['digest']}.js").is_file():
+                raise HTTPException(404, "page artifact not found")
+        else:
+            try:
+                await anyio.to_thread.run_sync(store.rebuild_artifact, row["id"])
+            except PageBuildError as exc:
+                raise HTTPException(404, "page artifact not found") from exc
         html = (
             "<!doctype html><meta charset='utf-8'><div id='root'></div>"
             f"<script crossorigin='anonymous' src='/api/pages/{row['id']}/"
@@ -251,6 +269,8 @@ def create_app() -> Starlette:
         )
 
     async def frame_bootstrap(request):
+        if not _script_request(request):
+            raise HTTPException(403, "load this script with a script tag")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         code = await anyio.to_thread.run_sync(store.page_code, row["id"]) if row else None
         if not code or request.query_params.get("revision") != str(code["version"]):
@@ -275,13 +295,16 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             script,
             media_type="text/javascript",
             headers={
-                "access-control-allow-origin": "*",
-                "cross-origin-resource-policy": "cross-origin",
+                # the sandboxed frame has the opaque origin "null"; no real site reads or runs it
+                "access-control-allow-origin": "null",
+                "cross-origin-resource-policy": "same-origin",
                 "cache-control": "no-store",
             },
         )
 
     async def page_artifact(request):
+        if not _script_request(request):
+            raise HTTPException(403, "load this script with a script tag")
         row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
@@ -292,19 +315,20 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             store.root / "bundles" / f"{code['digest']}.js",
             media_type="text/javascript",
             headers={
-                "access-control-allow-origin": "*",
-                "cross-origin-resource-policy": "cross-origin",
+                # the sandboxed frame has the opaque origin "null"; no real site reads or runs it
+                "access-control-allow-origin": "null",
+                "cross-origin-resource-policy": "same-origin",
             },
         )
 
     async def runtime_error(request):
         page_id = await require_page_bearer(request)
         body = await json_object(request)
+        revision = body.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int):
+            raise HTTPException(400, "revision must be an integer")
         await anyio.to_thread.run_sync(
-            store.set_runtime_error,
-            page_id,
-            int(body.get("revision", 0)),
-            str(body.get("error", "runtime error")),
+            store.set_runtime_error, page_id, revision, str(body.get("error", "runtime error"))
         )
         return JSONResponse({"ok": True})
 
@@ -470,7 +494,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
         try:
-            body = await request.json()
+            body = await capped_json(request)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             error = ValidationError("", "valid JSON object")
             return JSONResponse({"error": error_document(error)}, status_code=400)
@@ -519,9 +543,17 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             raise HTTPException(403, "same-origin request required")
         return await page_bearer(request)
 
+    async def capped_json(request):
+        raw = b""
+        async for chunk in request.stream():  # stop reading at the cap, even for a chunked body
+            raw += chunk
+            if len(raw) > MAX_JSON_BODY:
+                raise HTTPException(413, f"body must be at most {MAX_JSON_BODY} bytes")
+        return json.loads(raw)
+
     async def json_object(request) -> dict:
         try:
-            body = await request.json()
+            body = await capped_json(request)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             body = None
         if not isinstance(body, dict):
@@ -533,6 +565,8 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         collection = request.path_params["collection"]
         if request.method == "POST":
             body = await json_object(request)
+            if not isinstance(body.get("record_id", ""), str):
+                raise HTTPException(400, "record_id must be a string")
             try:
                 inserted = await anyio.to_thread.run_sync(
                     store.insert_record, page_id, collection, body
@@ -584,7 +618,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def rollback_tool(request):
         page_id = await require_page_bearer(request)
         try:
-            body = await request.json()
+            body = await capped_json(request)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             error = ValidationError("", "valid JSON object")
             return JSONResponse({"error": error_document(error)}, status_code=400)
@@ -620,7 +654,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def restore_code(request):
         page_id = await require_page_bearer(request)
         try:
-            body = await request.json()
+            body = await capped_json(request)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             body = None
         if not isinstance(body, dict):

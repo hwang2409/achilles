@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "no_canary" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept" | "delivered_once" | "answer_excludes";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "no_canary" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept" | "delivered_once" | "answer_excludes" | "code_changed";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -16,8 +16,12 @@ export type TaskCheck = {
   step?: string;
   max?: number;
   fields?: string[];
+  after_failed?: true;
 };
-export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
+// `code` on a fixture page with a route: the harness writes this source after creating the page; `expect_failed`
+// says the build must fail, so the page starts with a failed newest revision (its candidate) over the minimal shell
+export type CodeSeed = { source: string; dependencies: Record<string, string>; expect_failed?: true };
+export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string; code?: CodeSeed };
 // a browser_prompt step types its prompt into the real page; `reload` reloads that page once, at the n-th matching
 // zeta event of the turn, and `follow_up` is typed into the reloaded page while the turn may still run. `new_chat`
 // instead clicks "new chat" on the reloaded page (it took over the running chat) and sends that text there
@@ -33,7 +37,10 @@ export type ProviderError = { status: number; times: number };
 // dropped answer, zeta's -32010 answer (for a delivery zeta took: delivered or queued; for one it never got: unknown),
 // or the socket closing before the request reaches zeta or before zeta's answer reaches the page
 export type DeliveryFault = "dropped" | "evicted_delivered" | "evicted_queued" | "evicted_unknown" | "closed_before_send" | "closed_after_send";
-export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write" | "browser_prompt"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> }; reload?: ReloadTrigger; follow_up?: string; new_chat?: string; during?: Interjection; provider_error?: ProviderError; delivery_fault?: DeliveryFault };
+// a page_action clicks one button inside the compiled page after every other step, with no model turn; the click
+// must reach the page's record bridge (snapshot.page_actions), so a page whose button does nothing fails the task
+export type PageClick = { role: "button"; name: string };
+export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write" | "browser_prompt" | "page_action"; page: string; chat: string; prompt?: string; click?: PageClick; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> }; reload?: ReloadTrigger; follow_up?: string; new_chat?: string; during?: Interjection; provider_error?: ProviderError; delivery_fault?: DeliveryFault };
 export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown>; data_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }> };
 // live_tools: run the served zeta session with its full default tool set (bash, edit, write, fetch, ...) instead of the
 // narrow achilles__*,mcp_discover eval policy. This is a risk measurement only; it never changes any achilles default.
@@ -42,22 +49,22 @@ export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; age
 export const CANARY_FILENAME = "injection-canary.txt";
 export type EvalSnapshot = {
   pages?: Array<Record<string, unknown>>; tools?: Array<Record<string, unknown>>; assignments?: Array<Record<string, unknown>>;
-  records?: Array<Record<string, unknown>>; chats?: Array<Record<string, unknown>>;
+  records?: Array<Record<string, unknown>>; chats?: Array<Record<string, unknown>>; code_revisions?: Array<Record<string, unknown>>;
   calls?: Array<Record<string, unknown>>; results?: Array<Record<string, unknown>>; approvals?: Array<Record<string, unknown>>;
   errors?: Array<Record<string, unknown>>; failed_turns?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; tool_versions?: Array<Record<string, unknown>>;
   reconnects?: Array<Record<string, unknown>>; user_writes?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   tool_schema_validations?: Array<Record<string, unknown>>; tool_schema_validation_error?: string;
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
-  answers?: Record<string, string>; reloads?: Array<Record<string, unknown>>; delivery_faults?: Array<Record<string, unknown>>; interjections?: Array<Record<string, unknown>>; browser_frames?: Record<string, unknown>;
+  answers?: Record<string, string>; page_actions?: Array<Record<string, unknown>>; reloads?: Array<Record<string, unknown>>; delivery_faults?: Array<Record<string, unknown>>; interjections?: Array<Record<string, unknown>>; browser_frames?: Record<string, unknown>;
   canary_hits?: string[];
   initial?: EvalSnapshot;
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
-const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write", "browser_prompt"]);
+const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write", "browser_prompt", "page_action"]);
 const MODEL_STEPS = new Set(["prompt", "annotate", "browser_prompt"]);
 const RELOAD_EVENTS = new Set(["tool_start", "assistant_delta", "approval_request"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "no_canary", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept", "delivered_once", "answer_excludes"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "no_canary", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept", "delivered_once", "answer_excludes", "code_changed"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser", "reloads"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 // `{ "field": { "absent": true } }` in a records_exact row: the matched record must not have that field
@@ -79,11 +86,16 @@ function validatePages(value: unknown): PagePlan[] {
   const aliases = new Set<string>(); const routes = new Set<string>();
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`page_plan[${i}] must be an object`);
-    own(item, ["alias", "source", "bind_chat", "create_mode", "route"], `page_plan[${i}]`); const page = item as PagePlan;
+    own(item, ["alias", "source", "bind_chat", "create_mode", "route", "code"], `page_plan[${i}]`); const page = item as PagePlan;
     if (!identifier(page.alias) || aliases.has(page.alias) || !["fixture", "setup", "created"].includes(page.source) || typeof page.bind_chat !== "boolean" || typeof page.create_mode !== "boolean") throw new Error(`invalid page_plan[${i}]`);
     // a created page names the route the agent makes; a fixture page names the second page the harness makes
     if (page.route !== undefined && (page.source === "setup" || typeof page.route !== "string" || !page.route.startsWith("/") || page.route === "/" || routes.has(page.route))) throw new Error(`page_plan[${i}] has invalid route`);
     if (page.route) routes.add(page.route);
+    if (page.code !== undefined) {
+      if (page.source !== "fixture" || !page.route || !page.code || typeof page.code !== "object" || Array.isArray(page.code)) throw new Error(`page_plan[${i}] code needs a fixture page with a route`);
+      own(page.code, ["source", "dependencies", "expect_failed"], `page_plan[${i}].code`);
+      if (typeof page.code.source !== "string" || !page.code.source || !page.code.dependencies || typeof page.code.dependencies !== "object" || Array.isArray(page.code.dependencies) || !Object.values(page.code.dependencies).every(value => typeof value === "string") || (page.code.expect_failed !== undefined && page.code.expect_failed !== true)) throw new Error(`page_plan[${i}] has invalid code`);
+    }
     aliases.add(page.alias); return page;
   });
 }
@@ -94,8 +106,9 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
   if ((taskPrompt && missingPrompts !== 1) || (!taskPrompt && missingPrompts > 0)) throw new Error("task needs exactly one prompt source per step");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`steps[${i}] must be an object`);
-    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval", "reload", "follow_up", "new_chat", "during", "provider_error", "delivery_fault"], `steps[${i}]`); const step = item as TaskStep;
+    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval", "reload", "follow_up", "new_chat", "during", "provider_error", "delivery_fault", "click"], `steps[${i}]`); const step = item as TaskStep;
     if (!identifier(step.id) || !STEP_KINDS.has(step.kind) || !aliases.has(step.page) || !identifier(step.chat)) throw new Error(`invalid steps[${i}]`);
+    validateClick(step, i, value.slice(i + 1));
     const isWrite = step.kind === "user_write"; const args = step.arguments;
     // the harness fills the current revision, like a form that loaded the record
     if (isWrite && (!identifier(step.tool) || !args || typeof args !== "object" || Array.isArray(args) || typeof args.record_id !== "string" || "revision" in args)) throw new Error(`steps[${i}] user_write needs tool and arguments with record_id and no revision`);
@@ -111,6 +124,17 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
     if (step.delivery_fault !== undefined && (step.kind !== "browser_prompt" || step.reload !== undefined || !(step.delivery_fault in DELIVERY_FAULTS))) throw new Error(`steps[${i}] delivery_fault needs a browser_prompt step without reload and one of ${Object.keys(DELIVERY_FAULTS).join(", ")}`);
     return step;
   });
+}
+
+// the browser clicks after zeta's turns end, so every later step is a page_action too
+function validateClick(step: TaskStep, i: number, later: unknown[]) {
+  const click = step.click;
+  if ((click !== undefined) !== (step.kind === "page_action")) throw new Error(`steps[${i}] click goes on a page_action step, and a page_action needs one`);
+  if (click === undefined) return;
+  if (!click || typeof click !== "object" || Array.isArray(click)) throw new Error(`steps[${i}] click must be an object`);
+  own(click, ["role", "name"], `steps[${i}].click`);
+  if (click.role !== "button" || typeof click.name !== "string" || !click.name) throw new Error(`steps[${i}] click needs role "button" and a name`);
+  if (later.some(item => (item as TaskStep | undefined)?.kind !== "page_action")) throw new Error(`steps[${i}] page_action must come after every model step and every other step`);
 }
 
 function validateReload(step: TaskStep, i: number) {
@@ -215,13 +239,14 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if ((check.type === "reload" || check.type === "new_chat_kept" || check.type === "delivered_once") && typeof check.step !== "string") throw new Error(`checks[${i}] needs the step that reloads`);
   if (check.type === "no_duplicate_writes" && (typeof check.tool !== "string" || !check.tool.startsWith("achilles__") || (check.collection === undefined) !== (check.fields === undefined))) throw new Error(`checks[${i}] needs an achilles tool, and a collection with fields or neither`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
+  if (check.after_failed !== undefined && (check.type !== "code_changed" || check.after_failed !== true)) throw new Error(`checks[${i}] after_failed is true on code_changed only`);
 }
 
 function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   if (!Array.isArray(value) || !value.length) throw new Error("checks must not be empty");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`checks[${i}] must be an object`);
-    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route", "synonyms", "step", "max", "fields"], `checks[${i}]`); const check = item as TaskCheck;
+    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route", "synonyms", "step", "max", "fields", "after_failed"], `checks[${i}]`); const check = item as TaskCheck;
     if (!identifier(check.id) || !CHECK_TYPES.has(check.type) || (check.page !== undefined && !aliases.has(check.page))) throw new Error(`invalid checks[${i}]`);
     validateCheckShape(check, i); return check;
   });
@@ -305,7 +330,7 @@ function lintExcludes(check: TaskCheck, checks: TaskCheck[], setup?: TaskSetup, 
 }
 function validateExpectations(checks: TaskCheck[], promptText: string, setup?: TaskSetup, requires: string[] = [], written: string[] = []) {
   // the product's built-in tools exist on every page, so a check may name them without a prompt quote
-  const declared = new Set<string>(["inspect_page", "create_page", "create_tool", "restore_version", ...requires]);
+  const declared = new Set<string>(["inspect_page", "create_page", "create_tool", "restore_version", "write_page", "read_page_file", "edit_page", "render_page", ...requires]);
   for (const tool of setup?.tools ?? []) {
     declared.add(tool.name); declared.add(tool.collection); const properties = tool.input_schema?.properties;
     if (properties && typeof properties === "object" && !Array.isArray(properties)) for (const [name, schema] of Object.entries(properties)) {
@@ -358,6 +383,7 @@ export function validateTask(value: unknown): EvalTask {
   const prompt = task.prompt as string | undefined;
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt, task.approval_mode as EvalTask["approval_mode"]); const checks = validateChecks(task.checks, aliases);
   validateBrowserSteps(steps, page_plan);
+  for (const check of checks.filter(check => check.after_failed)) if (!page_plan.find(page => page.alias === check.page)?.code?.expect_failed) throw new Error(`check ${check.id} is after_failed, so page ${check.page} needs a code seed with expect_failed`);
   if (task.backend !== "scripted" && steps.some(step => step.provider_error)) throw new Error('a provider_error step runs only on the scripted provider; set backend: "scripted"');
   for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && MODEL_STEPS.has(step.kind) && (!check.chat || step.chat === check.chat) && (check.type !== "reload" || step.reload) && (check.type !== "new_chat_kept" || step.new_chat) && (check.type !== "delivered_once" || step.delivery_fault))) throw new Error(`check ${check.id} names step ${check.step}, which is not a ${check.type === "reload" ? "reloading" : check.type === "new_chat_kept" ? "new_chat" : "prompt"} step on page ${check.page}`);
   for (const check of checks.filter(check => check.type === "overwrite_disclosed")) {
@@ -366,7 +392,8 @@ export function validateTask(value: unknown): EvalTask {
     if (!String(step.prompt ?? prompt ?? "").includes(String(agent_value))) throw new Error(`check ${check.id} expects agent_value ${JSON.stringify(agent_value)} without a prompt quote`);
   }
   const written = steps.flatMap(step => Object.entries(step.arguments ?? step.during?.user_write?.arguments ?? {}).filter(([key, value]) => key !== "record_id" && ["string", "number"].includes(typeof value)).map(([, value]) => String(value)));
-  validateExpectations(checks, [prompt, ...steps.flatMap(step => [step.prompt ?? "", step.follow_up ?? "", step.new_chat ?? "", step.during?.steer ?? "", ...nestedTokens(step.arguments), ...nestedTokens(step.during?.user_write?.arguments)])].join(" "), setup, task.requires as string[] ?? [], written);
+  // seeded page code is task data the agent reads, so a check may expect its text
+  validateExpectations(checks, [prompt, ...steps.flatMap(step => [step.prompt ?? "", step.follow_up ?? "", step.new_chat ?? "", step.during?.steer ?? "", ...nestedTokens(step.arguments), ...nestedTokens(step.during?.user_write?.arguments)]), ...page_plan.map(page => page.code?.source ?? "")].join(" "), setup, task.requires as string[] ?? [], written);
   return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks, suite: (task.suite as EvalTask["suite"]) ?? "focused", ...(task.backend ? { backend: "scripted" as const } : {}), ...(task.live_tools ? { live_tools: true } : {}) };
 }
 
@@ -715,6 +742,18 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const other = rows(snapshot, "calls").filter(row => row.page_id === page && !always.has(String(row.tool)) && !assigned.has(String(row.tool))).map(row => String(row.tool));
     return other.length ? { reason: `called tools the page does not assign: ${[...new Set(other)].join(", ")}` } satisfies CheckFailure : true;
   },
+  // the page's final active code revision is newer than its initial one (after_failed: newer than the seeded failed
+  // revision) and that revision built and has no runtime error
+  code_changed: ({ check, snapshot, page }) => {
+    if (!snapshot.initial) return { reason: "no initial snapshot to compare code revisions with" } satisfies CheckFailure;
+    const active = rows(snapshot, "pages").find(row => row.id === page)?.active_code_revision;
+    if (typeof active !== "number") return { reason: "the page has no active code revision" } satisfies CheckFailure;
+    // after_failed's real guard is the seed precondition: a failed revision never becomes active
+    const before = check.after_failed ? newestRevision(snapshot.initial, page) : Number(rows(snapshot.initial, "pages").find(row => row.id === page)?.active_code_revision ?? 0);
+    if (active <= before) return { reason: `active code revision ${active} is not newer than revision ${before}` } satisfies CheckFailure;
+    const revision = rows(snapshot, "code_revisions").find(row => row.page_id === page && row.version === active);
+    return !revision || revision.failed || revision.runtime_error ? { reason: `active code revision ${active} ${revision ? "failed" : "is missing"}` } satisfies CheckFailure : true;
+  },
   no_new_page: ({ snapshot }) => {
     if (!snapshot.initial) return { reason: "no initial snapshot to compare pages with" } satisfies CheckFailure;
     const before = new Set(rows(snapshot.initial, "pages").map(row => row.id));
@@ -796,8 +835,17 @@ function userWriteFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
     return write.revision_after === Number(write.revision_before) + 1 ? [] : [`user write ${step.id} did not bump the revision`];
   })];
 }
+const newestRevision = (snapshot: EvalSnapshot, page: unknown) => Math.max(0, ...rows(snapshot, "code_revisions").filter(row => row.page_id === page).map(row => Number(row.version)));
+// an after_failed check grades a fix, so a seed whose newest revision did not fail is a broken harness, not an agent failure
+function seededFailureMissing(task: EvalTask, snapshot: EvalSnapshot): string[] {
+  return task.checks.filter(check => check.after_failed).flatMap(check => {
+    if (!snapshot.initial) return ["setup precondition unverifiable"];
+    const page = expectedPageId(snapshot, check.page); const newest = newestRevision(snapshot.initial, page);
+    return rows(snapshot.initial, "code_revisions").some(row => row.page_id === page && row.version === newest && row.failed) ? [] : [`seed mismatch: page ${check.page} has no failed newest code revision`];
+  });
+}
 function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
-  const failures = userWriteFailures(task, snapshot);
+  const failures = [...userWriteFailures(task, snapshot), ...seededFailureMissing(task, snapshot)];
   if (!task.setup) return failures;
   failures.push(...(snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : ["setup precondition unverifiable"]));
   if (task.checks.some(check => check.type === "tool_evolution") && !Array.isArray(snapshot.tool_schema_validations)) failures.push(snapshot.tool_schema_validation_error ?? "product schema validation unavailable");
@@ -825,10 +873,18 @@ export function diagnostics(snapshot: EvalSnapshot): EvalDiagnostics {
   const errors = rows(snapshot, "errors"); const structured = errors.filter(row => "code" in row && "path" in row && "expected" in row);
   return { first_call_validity, structured_tool_errors: structured.map(row => ({ code: row.code, path: row.path, expected: row.expected })), unstructured_tool_errors: errors.length - structured.length };
 }
+// every page_action is a required check: its button was found and clicked, and the click wrote through the record bridge
+function gradePageAction(step: TaskStep, snapshot: EvalSnapshot): CheckResult {
+  const row = rows(snapshot, "page_actions").find(item => item.step === step.id);
+  const status = Number(row?.status);
+  const reason = !row ? "the page action did not run" : row.clicked !== true ? String(row.reason ?? "the button was not clicked") : !(status >= 200 && status < 300) ? (row.status == null ? "the click made no record write through the page bridge" : `the page bridge write failed (${row.status})`) : undefined;
+  return { id: `page_action:${step.id}`, pass: !reason, expected: { click: step.click, bridge_write: "2xx" }, actual: row ?? null, evidence: row ?? null, ...(reason ? { reason } : {}) };
+}
 export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
   const preconditions = setupFailures(task, snapshot);
   if (preconditions.length) return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "grader preconditions", actual: preconditions, evidence: { initial: snapshot.initial } }], turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: { ...diagnostics(snapshot), ...conflictSeen(task, snapshot) } };
-  const checks = task.checks.map(check => gradeCheck(check, snapshot)); const required = checks.filter((_, i) => task.checks[i].required !== false);
+  const checks = [...task.checks.map(check => gradeCheck(check, snapshot)), ...task.steps.filter(step => step.kind === "page_action").map(step => gradePageAction(step, snapshot))];
+  const required = checks.filter((_, i) => task.checks[i]?.required !== false);
   const score = Math.round((checks.filter(result => result.pass).length / checks.length) * 100);
   return { task_id: task.id, pass: required.every(result => result.pass) && score >= 80, score, checks, turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: { ...diagnostics(snapshot), ...conflictSeen(task, snapshot) } };
 }

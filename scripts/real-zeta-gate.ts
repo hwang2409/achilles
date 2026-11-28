@@ -2892,11 +2892,32 @@ with _database() as db:
   });
   const unexpectedObserverReads = observerRequests.filter((method) => observerMutationMethods.has(method));
   if (unexpectedObserverReads.length) throw new Error(`observer websocket mutation leak: ${unexpectedObserverReads.join(", ")}`);
-  const expectedObserverReads = new Set(["hello", "session_history_and_subscribe", "session_history", "status", "session_settings"]);
+  const expectedObserverReads = new Set(["hello", "session_history_and_subscribe", "session_history", "status", "session_settings", "state_settings"]);
   if (!observerRequests.includes("hello") || !observerRequests.includes("session_history_and_subscribe")) throw new Error(`observer websocket read projection incomplete: ${observerRequests.join(", ")}`);
   if (observerRequests.some((method) => !expectedObserverReads.has(method))) throw new Error(`observer websocket unexpected read: ${observerRequests.join(", ")}`);
   if (observerHttp.some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer issued mutating HTTP request");
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageBefore) throw new Error("observer changed settings storage");
+  // an observer on a chat zeta does not have open (the home chat: zeta restarted with only this page's chat): zeta refuses
+  // its reads of that chat, so the tab shows no model and no auto-approve state, never zeta's new-chat default
+  const inactiveObserver = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  try {
+    const refusals: string[] = [];
+    const inactiveMethods = new Map<unknown, string>();
+    inactiveObserver.on("websocket", (socket) => {
+      socket.on("framesent", (event) => { try { const frame = JSON.parse(String(event.payload)) as { id?: unknown; method?: string; params?: { session_id?: unknown } }; if (frame.params?.session_id === first && frame.method) inactiveMethods.set(frame.id, frame.method); } catch { /* not json */ } });
+      socket.on("framereceived", (event) => { try { const frame = JSON.parse(String(event.payload)) as { id?: unknown; error?: unknown }; const method = inactiveMethods.get(frame.id); if (method && frame.error) refusals.push(method); } catch { /* not json */ } });
+    });
+    await inactiveObserver.goto(`${origin}/?chat=${first}`);
+    await gateWait.playwright(inactiveObserver.locator(".observer-banner"), "waitFor", { state: "visible" });
+    await waitFor(async () => refusals.length > 0, "zeta refused the observer's read of a chat it does not have open");
+    await inactiveObserver.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const shown = await inactiveObserver.evaluate(() => ({
+      model: document.querySelector('[data-part="composer-model"]')?.textContent ?? null,
+      autoApprove: document.querySelector('[data-write-surface="composer.auto-approve"]')?.getAttribute("aria-checked") ?? null,
+    }));
+    if (shown.model !== null || shown.autoApprove !== null) throw new Error(`observer on a chat zeta does not have open showed settings: ${JSON.stringify({ shown, refusals })}`);
+    console.log(`observer on a chat zeta does not have open: zeta refused ${[...new Set(refusals)].join(", ")}; no model, no auto-approve state`);
+  } finally { await inactiveObserver.close(); }
   if (screenshotDir) {
     const observerMarker = "prove chat";
     await setupMobileSheet(observerPage, 760);

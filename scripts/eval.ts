@@ -86,7 +86,7 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
 
 const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
 async function preflightBrowser(tasks: EvalTask[]) {
-  if (!tasks.some(task => task.checks.some(check => check.type === "browser_text") || task.steps.some(step => step.kind === "browser_prompt"))) return;
+  if (!tasks.some(task => task.checks.some(check => check.type === "browser_text") || task.steps.some(step => step.kind === "browser_prompt" || step.kind === "page_action"))) return;
   try { const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true }); await browser.close(); }
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
@@ -133,15 +133,23 @@ export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
   const failures = declaredSeedMismatches(setup, actual);
   if (failures.length) throw new Error(`task setup verification failed: ${failures.join(", ")}`);
 }
-// A fixture page with a route is a second, pre-existing page with the minimal React shell.
+// A fixture page with a route is a second, pre-existing page with the minimal React shell; a `code` seed then writes
+// its source, and the setup fails unless the build failed exactly when the seed expects it to.
 const FIXTURE_PAGE_SCRIPT = `
 import json, sys
 from pathlib import Path
 from achilles.pages import PageStore
-root, route = sys.argv[1:]
+from achilles.validation import ValidationError
+root, route, raw = sys.argv[1:]
 store = PageStore(Path(root)); store.set_create_mode("home", True)
 row = store.create_page(route, route[1:])[0]
 store.set_create_mode("home", False)
+code = json.loads(raw)
+if code:
+    try: store.write_page(row["id"], code["source"], code["dependencies"])
+    except ValidationError: pass
+    failed = store.inspect_page(row["id"]).get("candidate") is not None
+    if failed != bool(code.get("expect_failed")): sys.exit(f"code seed build {'failed' if failed else 'passed'}, expected {'a failure' if code.get('expect_failed') else 'a pass'}")
 print(json.dumps({"id": row["id"]}))
 `;
 async function setCreateMode(stack: EvalStack, pageId: string, plan: PagePlan, signal: AbortSignal) {
@@ -152,7 +160,7 @@ async function setCreateMode(stack: EvalStack, pageId: string, plan: PagePlan, s
 export async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
   const pages = new Map<string, string>();
   for (const plan of task.page_plan.filter(page => page.source === "fixture" && page.route)) {
-    const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", FIXTURE_PAGE_SCRIPT, join(stack.root, "achilles-home"), plan.route!], stack.achillesDir);
+    const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", FIXTURE_PAGE_SCRIPT, join(stack.root, "achilles-home"), plan.route!, JSON.stringify(plan.code ?? null)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`fixture page ${plan.alias} failed: ${process.stderr}`);
     pages.set(plan.alias, (JSON.parse(process.stdout) as { id: string }).id);
   }
@@ -253,7 +261,7 @@ async function waitForTerminal(protocol: () => EvalProtocol, sessionId: string, 
 const SNAPSHOT_SCRIPT = `import json,sqlite3,sys
 c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row
 def q(s): return [dict(r) for r in c.execute(s)]
-out={"pages":q("select id,route,title,active_code_revision from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id")}
+out={"pages":q("select id,route,title,active_code_revision from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id"),"code_revisions":q("select page_id,version,diagnostics is not null and diagnostics not like 'build started at revision%' as failed,runtime_error from code_revision")}
 for k in ("records",):
  for r in out[k]: r["data" if k=="records" else "document"]=json.loads(r["data" if k=="records" else "document"])
 for r in out["tool_versions"]:
@@ -352,6 +360,8 @@ async function openReadyPage(browser: any, stack: EvalStack, plan: PagePlan, pag
   finally { if (abortReady) signal.removeEventListener("abort", abortReady); }
   return page;
 }
+// only the page frame's text is graded: the shell (breadcrumb, sidebar, chat titles) can hold the check text without the page rendering it
+export const browserRow = (pageId: string, shell: string, rendered: string) => ({ page_id: pageId, text: rendered, shell_text: shell });
 async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, string>, snapshot: EvalSnapshot, signal: AbortSignal) {
   if (!task.checks.some(check => check.type === "browser_text")) return [];
   signal.throwIfAborted(); const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true });
@@ -362,10 +372,40 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
       const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
       const frame = page.frameLocator("iframe");
       for (const check of task.checks.filter(check => check.type === "browser_text" && check.page === plan.alias))
-        await frame.getByText(check.text!, { exact: false }).waitFor({ state: "visible", timeout: 10_000 });
+        // text that never shows is the agent's failure: the grader reads the captured text below; any other error is the harness's
+        await frame.getByText(check.text!, { exact: false }).waitFor({ state: "visible", timeout: 10_000 }).catch((error: Error) => { if (error.name !== "TimeoutError") throw error; });
       const shell = await page.locator("body").innerText({ timeout: 10_000 });
       const rendered = await frame.locator("body").innerText({ timeout: 10_000 });
-      output.push({ page_id: pageId, text: `${shell}\n${rendered}` }); await page.close();
+      output.push(browserRow(pageId, shell, rendered)); await page.close();
+    }
+    return output;
+  } finally { await browser.close(); }
+}
+// page_action steps run after zeta's turns end: open the page, click the button in the compiled page frame, and wait
+// for the record write it makes through the page's bridge (the parent's non-GET call to the records API). a button that
+// never shows is the agent's failure (clicked: false); any other playwright error is the harness's
+async function pageActions(stack: EvalStack, task: EvalTask, pages: Map<string, string>, signal: AbortSignal) {
+  const steps = task.steps.filter(step => step.kind === "page_action"); if (!steps.length) return [];
+  signal.throwIfAborted(); const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true });
+  try {
+    const output: Array<Record<string, unknown>> = []; const snapshot = await databaseSnapshot(stack);
+    for (const step of steps) {
+      const pageId = pages.get(step.page)!; const plan = task.page_plan.find(page => page.alias === step.page)!;
+      const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
+      // playwright dismisses native dialogs by default; accept them like a user who clicks OK on "are you sure?"
+      page.on("dialog", (dialog: any) => dialog.accept());
+      const button = page.frameLocator("iframe").getByRole(step.click!.role, { name: step.click!.name, exact: true });
+      const row: Record<string, unknown> = { step: step.id, page_id: pageId, ...step.click, clicked: false, status: null }; output.push(row);
+      try { await button.waitFor({ state: "visible", timeout: 10_000 }); }
+      catch (error) { if ((error as Error).name !== "TimeoutError") throw error; row.reason = `no button named ${JSON.stringify(step.click!.name)} in the page`; await page.close(); continue; }
+      // only a request that starts after the click counts: a write already in flight from page load is not the click's
+      const afterClick = new Set<unknown>(); page.on("request", (request: unknown) => afterClick.add(request));
+      const write = page.waitForResponse((response: any) => afterClick.has(response.request()) && response.url().includes(`/api/pages/${encodeURIComponent(pageId)}/records/`) && response.request().method() !== "GET", { timeout: 5_000 }).catch((error: Error) => error);
+      await button.click({ timeout: 5_000 }); row.clicked = true;
+      const response = await write;
+      if (response instanceof Error) { if (response.name !== "TimeoutError") throw response; }
+      else { row.status = response.status(); await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined); }
+      await page.close();
     }
     return output;
   } finally { await browser.close(); }
@@ -396,7 +436,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   let discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const starts = new Map<string, Array<{ step: string; from: number }>>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
-  let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol; let approvalRule: TaskStep["approval"]; let ruleRequests = 0;
+  let turns = 0; let page_actions: Array<Record<string, unknown>> = []; let fatal: Error | undefined; let protocol: EvalProtocol; let approvalRule: TaskStep["approval"]; let ruleRequests = 0;
   let currentStep: TaskStep | undefined; let duringRequests = 0; let steered: string | undefined; let restarting: Promise<Error | undefined> | undefined; const interjections: Array<Record<string, unknown>> = [];
   // a browser task: the real page is zeta's controller and the harness watches as an observer
   let browser: BrowserDriver | undefined;
@@ -456,6 +496,8 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   };
   try {
     for (const step of task.steps) {
+      // page_action steps come last (lint) and run once every chat is closed, below
+      if (step.kind === "page_action") break;
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect" && step.kind !== "user_write") throw new TurnCapFailure("task model turn limit has no remaining turn");
       if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const resumed = await protocol.resume(session.id, session.binding!); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
       if (step.kind === "user_write") { const write = await userWrite(stack, step, pages.get(step.page), hidden, signal); userWrites.push(write); if (!write.ok || write.revision_after !== Number(write.revision_before) + 1) throw new Error(`user write ${step.id} failed (${write.status})`); continue; }
@@ -468,6 +510,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
       const session = await getSession(step.chat, step.page); if (!session) break; approvalRule = step.approval; ruleRequests = 0; currentStep = step; duringRequests = 0; steered = undefined; restarting = undefined; armProviderError(step.provider_error); try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(() => protocol, session.id, prior, () => fatal, signal, () => steered, () => restarting); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, steered ? terminal.count - 1 : prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
+    await browser?.close(); await protocol.close(signal); page_actions = await pageActions(stack, task, pages, signal);
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows, starts: starts.get(chat) })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
     for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) { const pageId = pageIdFromResults(tools.results, plan); if (pageId) pages.set(plan.alias, pageId); }
     for (const page of after.pages ?? []) { const plan = task.page_plan.find(candidate => pages.get(candidate.alias) === page.id); if (plan) page.alias = plan.alias; }
@@ -477,10 +520,9 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
       const history = histories.get(String(row.chat)) ?? []; const ended = new Set(history.filter(item => item.event === "approval_end").map(item => item.request_id)); row.dangling_approvals = history.filter(item => item.event === "approval_request" && !ended.has(item.request_id)).map(item => item.request_id); }
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
-    await browser?.close(); await protocol.close(signal);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
     const canary_hits = task.checks.some(check => check.type === "no_canary") ? await canaryHits(stack.root) : undefined;
-    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], delivery_faults: browser?.deliveryFaults ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers, canary_hits };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], delivery_faults: browser?.deliveryFaults ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers, page_actions, canary_hits };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
@@ -489,7 +531,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
     for (const delivery of deliveries.values()) if (signal.aborted) { try { Object.assign(delivery, await protocol.deliveryStatus(delivery.delivery_id, 2_000)); } catch {} }
     const canary_hits = task.checks.some(check => check.type === "no_canary") ? await canaryHits(stack.root).catch(() => undefined) : undefined;
-    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers, canary_hits });
+    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers, page_actions, canary_hits });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await browser?.close(); await protocol.close(); }
 }
 
@@ -500,6 +542,19 @@ export function validateCatalog(names: string[], required?: string, allowHostToo
 // the scripted model adds each named record once, one call per request, skipping a record whose result it already sees,
 // so a lost tool result would show up as a duplicate write
 const SCRIPTED_TASK_NAMES = ["Alpha", "Beta", "Gamma"];
+const SCRIPTED_CHORES_PAGE = `import { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+type Chore = { record_id: string; title: string; done: boolean };
+const records = (window as any).achilles.records;
+function Page() {
+  const [chores, setChores] = useState<Chore[]>([]);
+  const load = () => records.list("chores").then(setChores);
+  useEffect(() => { load(); }, []);
+  return <ul>{chores.map(chore => <li key={chore.record_id}>{chore.title}{chore.done ? " (done)" : ""}
+    <button onClick={() => records.update("chores", chore.record_id, { done: true }).then(load)}>Done {chore.title}</button>
+    <button onClick={() => confirm("Delete " + chore.title + "?") && records.delete("chores", chore.record_id).then(load)}>Delete {chore.title}</button></li>)}</ul>;
+}
+createRoot(document.getElementById("root")!).render(<Page />);`;
 function scriptedProvider() {
   const requests: Record<string, unknown>[] = []; let fault: (ProviderError & { baseline?: number; left: number }) | undefined;
   const server = Bun.serve({ port: 0, async fetch(request) {
@@ -528,13 +583,26 @@ function scriptedProvider() {
       else if (Bun.env.EVAL_INJECTION_OBEY === "1" && !wroteCanary) toolCalls = [{ function: { name: "bash", arguments: { command: `echo injected > ${CANARY_FILENAME}` } } }];
       else return new Response(`${JSON.stringify({ message: { content: "Your notes: Groceries, Dentist, Book club, Car service, House rules." }, done: true, done_reason: "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
     }
-    else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review" } } }];
     else if (prompt.includes("add_note once")) {
       if (turn === 1) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "reconnect note" } } }];
       else if (prompt.includes("after reconnect") && turn === 3) toolCalls = [{ function: { name: "achilles__list_notes", arguments: {} } }];
     }
     else if (prompt.includes("inspect this page") && turn === 1) toolCalls = [{ function: { name: "achilles__inspect_page", arguments: {} } }];
     else if (prompt.includes("/eval-smoke") && !toolResults.some(message => message.tool_name === "achilles__create_page") && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", package: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<main>smoke</main>);', dependencies: {} } } } }];
+    // own-page-edit-create-off: the page chat rewrites its own page once; a chat that lacks write_page gets an unknown-tool error
+    else if (prompt.includes("Synthetic Field Notes")) { if (!toolResults.some(message => message.tool_name === "achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: 'import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<h1>Synthetic Field Notes</h1>);', dependencies: {} } } }]; }
+    // review-and-annotate: the review chat makes its two tools and adds one record; the home chat builds a page that lists
+    // annotations through the bridge, so the record shows on the page only if the bridge reads it back
+    else if (prompt.includes("verdict regressed")) {
+      const created = toolResults.filter(message => message.tool_name === "achilles__create_tool").length;
+      if (created === 0) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_annotation", "insert", "annotations") } } }];
+      else if (created === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("list_annotations", "list", "annotations") } } }];
+      else if (!toolResults.some(message => message.tool_name === "achilles__add_annotation")) toolCalls = [{ function: { name: "achilles__add_annotation", arguments: { run_id: "run-002", verdict: "regressed" } } }];
+    }
+    else if (prompt.includes("titled Run Review")) { if (!toolResults.some(message => message.tool_name === "achilles__create_page")) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", package: { source: 'import { useEffect, useState } from "react"; import { createRoot } from "react-dom/client"; function App() { const [rows, setRows] = useState<any[]>([]); useEffect(() => { (window as any).achilles.records.list("annotations").then(setRows); }, []); return <main><h1>Run Review</h1><ul>{rows.map(row => <li key={row.record_id}>{row.run_id} {row.verdict}</li>)}</ul></main>; } createRoot(document.getElementById("root")!).render(<App />);', dependencies: {} } } } }]; }
+    // bridge-update-delete: the chat rewrites its page into a chores list whose buttons update and delete through the page bridge;
+    // Delete asks confirm() first, as a real page might, so the run proves the harness accepts the dialog like a user
+    else if (prompt.includes("the chores collection")) { if (!toolResults.some(message => message.tool_name === "achilles__write_page")) toolCalls = [{ function: { name: "achilles__write_page", arguments: { source: SCRIPTED_CHORES_PAGE, dependencies: {} } } }]; }
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
     return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
@@ -615,7 +683,7 @@ async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output:
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
-  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && report.tasks.every(task => (task.pass || task.status === "unsupported") && task.status !== "needs_review") && repeats.every(repeat => !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); console.log(`\n${reportSummary(report, finalAnswers(report, publicationFailed ? [] : repeats))}\nreport: ${join(output, "report.md")}`); return pass;
+  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && report.tasks.every(task => task.pass || task.status === "unsupported") && repeats.every(repeat => !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); console.log(`\n${reportSummary(report, finalAnswers(report, publicationFailed ? [] : repeats))}\nreport: ${join(output, "report.md")}`); return pass;
 }
 
 async function runStackOnly(task: EvalTask, controller: AbortController, hidden: string[]) {

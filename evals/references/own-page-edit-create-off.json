@@ -1,0 +1,167 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "active_code_revision": 1
+      },
+      {
+        "id": "notes",
+        "alias": "notes",
+        "route": "/field-notes",
+        "active_code_revision": 2
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "notes",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "notes",
+        "version": 2,
+        "failed": 0,
+        "runtime_error": null
+      }
+    ],
+    "results": [
+      {
+        "page_id": "notes",
+        "chat_id": "notes-chat",
+        "tool": "achilles__write_page",
+        "success": true,
+        "data": {
+          "revision": 2
+        }
+      }
+    ],
+    "errors": [],
+    "browser": [
+      {
+        "page_id": "notes",
+        "text": "Synthetic Field Notes"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_code_revision": 1
+        },
+        {
+          "id": "notes",
+          "route": "/field-notes",
+          "title": "field-notes",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        },
+        {
+          "page_id": "notes",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "active_code_revision": 1
+      },
+      {
+        "id": "notes",
+        "alias": "notes",
+        "route": "/field-notes",
+        "active_code_revision": 1
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "notes",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      }
+    ],
+    "results": [
+      {
+        "page_id": "notes",
+        "chat_id": "notes-chat",
+        "tool": "achilles__write_page",
+        "success": false,
+        "data": "unknown tool: achilles__write_page"
+      }
+    ],
+    "errors": [
+      {
+        "page_id": "notes",
+        "chat_id": "notes-chat",
+        "tool": "achilles__write_page",
+        "message": "unknown tool: achilles__write_page"
+      }
+    ],
+    "browser": [
+      {
+        "page_id": "notes",
+        "text": ""
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_code_revision": 1
+        },
+        {
+          "id": "notes",
+          "route": "/field-notes",
+          "title": "field-notes",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        },
+        {
+          "page_id": "notes",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        }
+      ]
+    }
+  }
+}
