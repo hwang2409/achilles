@@ -15,6 +15,7 @@ import { gateHomeSettings } from "./gate-home-settings";
 import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
 import { gateParkedChats, parkArtifacts } from "./gate-park";
 import { attentionArtifacts, gateAttention } from "./gate-attention";
+import { gateGraceContinue, graceArtifacts } from "./gate-grace";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
@@ -77,7 +78,7 @@ for await (const file of new Bun.Glob("*.py").scan(resourceDir)) {
   for (const [, wire] of source.matchAll(/ResourceMethod\(\s*"([^"]+)",\s*Access\.CONTROLLER_WRITE\b/g)) protocolMutationMethods.add(wire!);
 }
 if (!protocolMutationMethods.size) throw new Error(`pinned zeta ${zetaRef} has no mutation declarations`);
-// zeta's MCP HTTP client gives a tool call 10 s (zeta src/zeta/mcp/http.py:70), so the first create_page build must not also pay the image pull
+// pull the page build image up front: the first create_page build then measures the build, not a cold pull, and missing docker fails here by name
 const buildImage = (await readFile(join(root, "src/achilles/page_build.py"), "utf8")).match(/^_BUILD_IMAGE = "([^"]+)"$/m)?.[1];
 if (!buildImage) throw new Error("src/achilles/page_build.py has no _BUILD_IMAGE");
 if ((await Bun.spawn(["docker", "image", "inspect", buildImage], { stdout: "ignore", stderr: "ignore" }).exited) !== 0 &&
@@ -445,6 +446,7 @@ try {
     await authPage.close();
   }
   await gateTwoChatsAtOnce(browser, origin, accountChatUrl);
+  await gateGraceContinue(browser, origin, screenshotDir);
   await stop(authZeta);
   await stop(authApp);
   if (process.env.ACCOUNTS_PROOF_ONLY === "1") {
@@ -3138,7 +3140,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts, ...parkArtifacts, ...attentionArtifacts, "park-new-chat-1440x900.png"],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts, ...mcpOAuthArtifacts, ...agentControlArtifacts, ...parkArtifacts, ...attentionArtifacts, ...graceArtifacts, "park-new-chat-1440x900.png"],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),

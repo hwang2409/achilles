@@ -27,12 +27,12 @@ function state(v: unknown) {
 
 function metadata(v: unknown) {
   if (!isObject(v) || !nonempty(v.session_id) || (v.project_id !== undefined && project(v.project_id) === undefined) ||
-      (v.in_use !== undefined && typeof v.in_use !== "boolean") ||
+      (v.in_use !== undefined && typeof v.in_use !== "boolean") || (v.resident !== undefined && typeof v.resident !== "boolean") ||
       (v.parent_session_id !== undefined && project(v.parent_session_id) === undefined) ||
       ["name", "model", "provider", "cwd", "first_message_preview"].some((key) => v[key] != null && typeof v[key] !== "string")) return;
   return { id: v.session_id, title: text(v.name) ?? text(v.first_message_preview) ?? v.session_id, preview: text(v.first_message_preview), project: project(v.project_id),
     model: text(v.model), provider: text(v.provider), cwd: text(v.cwd), created: date(v.created_at), updated: date(v.updated_at),
-    parent: project(v.parent_session_id), inUse: v.in_use === true };
+    parent: project(v.parent_session_id), inUse: v.in_use === true, resident: v.resident === true };
 }
 
 type SessionState = NonNullable<ReturnType<typeof state>>;
