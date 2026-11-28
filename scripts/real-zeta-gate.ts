@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CDPSession, Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
-import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact, storageDiff } from "./gate-diagnostics";
 import { gateAccountsPlace, gateCreatePlace, gateShell, gateStablePlace } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, gateTwoChatsAtOnce, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -3120,6 +3120,8 @@ with _database() as db:
   await restoredField.fill(restoredMutation);
   await restoredField.press("Enter");
   await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
+  // the queue drops the sent row on zeta's echo: snapshot after that, or the restore puts a stale in-flight row back
+  await gateWait.playwright(observerPage, "waitForFunction", () => !Object.keys(localStorage).some((key) => key.startsWith("achilles:unsent:")));
   const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   await observerPage.keyboard.press(appShortcut("Comma"));
   const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
@@ -3133,7 +3135,9 @@ with _database() as db:
   const settingsAfterRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   if (settingsAfterRestore === settingsBeforeRestore) throw new Error("restored controller settings did not write");
   await observerPage.evaluate((snapshot) => { localStorage.clear(); for (const [key, value] of Object.entries(JSON.parse(snapshot) as Record<string, string>)) localStorage.setItem(key, value); }, settingsBeforeRestore);
-  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== settingsBeforeRestore) throw new Error("restored controller settings did not restore reversibly");
+  // chromium lists localStorage in hash order, so a restore of the same keys can list them in another order: compare keys and values
+  const restoreDiff = storageDiff(settingsBeforeRestore, await observerPage.evaluate(() => JSON.stringify({ ...localStorage })));
+  if (restoreDiff) throw new Error(`restored controller settings did not restore reversibly:\n${redact(restoreDiff)}`);
   if (screenshotDir) {
     await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
