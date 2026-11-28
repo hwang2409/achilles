@@ -1752,3 +1752,23 @@ describe("branch from a user message", () => {
     });
   });
 });
+
+// A10: under 1280 px (Happy DOM's 1024 px window) the docked page chat is a sheet. the first send of a fresh page chat
+// creates its zeta session; the sheet the user opened to type it stays open, with focus in the composer.
+test("the first message of a fresh page chat keeps the narrow page chat sheet open", async () => {
+  expect(matchMedia("(width < 1280px)").matches).toBe(true);
+  await withApp("controller", { tool: insert, page: { unsupported_format: "this page has no compiled revision" } }, async (app, writes) => {
+    await click(select(app, ".page-chat-bar"));
+    const sheet = select(app, "#page-chat-sheet");
+    expect(sheet.getAttribute("role")).toBe("dialog");
+    const field = select(app, '[data-part="composer-field"] textarea');
+    await act(async () => { field.focus(); });
+    await change(field, "first fixture message");
+    await act(async () => { fireEvent.submit(field.closest("form")!); });
+    await waitFor(() => didWrite(writes, "send"));
+    for (let turn = 0; turn < 10; turn++) await act(async () => {});
+    expect(app.container.querySelector(".page-chat-sheet-closed") === null, "the first send closed the page chat sheet").toBe(true);
+    expect(select(app, "#page-chat-sheet").getAttribute("role")).toBe("dialog");
+    expect(document.activeElement?.closest("#page-chat-sheet #message-composer") ?? null, `focus: ${document.activeElement?.outerHTML.slice(0, 120)}`).not.toBeNull();
+  });
+});

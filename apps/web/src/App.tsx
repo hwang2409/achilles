@@ -364,7 +364,12 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
+  const sheetChat = useRef<{ pageId?: string; sessionId?: string }>({});
   useLayoutEffect(() => {
+    const previous = sheetChat.current;
+    sheetChat.current = { pageId: activePage?.id, sessionId: ready?.sessionId };
+    // a fresh chat's first send gives it its session: the sheet the user typed it in stays as it was
+    if (ready && !ready.continued && !previous.sessionId && previous.pageId === activePage?.id) return;
     const openContinuation = hasPageSurface && ready?.continued;
     setMobileChatOpen(!!openContinuation);
     setPageChatFocusRequest(openContinuation ? 1 : 0);
