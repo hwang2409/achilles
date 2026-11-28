@@ -75,6 +75,12 @@ for await (const file of new Bun.Glob("*.py").scan(resourceDir)) {
   for (const [, wire] of source.matchAll(/ResourceMethod\(\s*"([^"]+)",\s*Access\.CONTROLLER_WRITE\b/g)) protocolMutationMethods.add(wire!);
 }
 if (!protocolMutationMethods.size) throw new Error(`pinned zeta ${zetaRef} has no mutation declarations`);
+// zeta's MCP HTTP client gives a tool call 10 s (zeta src/zeta/mcp/http.py:70), so the first create_page build must not also pay the image pull
+const buildImage = (await readFile(join(root, "src/achilles/page_build.py"), "utf8")).match(/^_BUILD_IMAGE = "([^"]+)"$/m)?.[1];
+if (!buildImage) throw new Error("src/achilles/page_build.py has no _BUILD_IMAGE");
+if ((await Bun.spawn(["docker", "image", "inspect", buildImage], { stdout: "ignore", stderr: "ignore" }).exited) !== 0 &&
+  (await Bun.spawn(["docker", "pull", "--quiet", buildImage], { stdout: "ignore", stderr: "inherit" }).exited) !== 0)
+  throw new Error(`docker pull ${buildImage} failed: page builds need docker`);
 const temp = await mkdtemp(join(tmpdir(), "achilles-v3-"));
 const zetaHome = join(temp, "zeta-home");
 const achillesHome = join(temp, "achilles-home");
@@ -1399,8 +1405,13 @@ with _database() as db:
       `${error}\nbackend did not receive achilles__create_page catalog: ${await safeControl()}`,
     );
   });
+  const createStarted = performance.now();
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
+  // the scripted turn completes on any tool result, so a failed create must fail here, not later as a missing page link
+  const created = await fetch(`${origin}/api/pages/reading`);
+  if (!created.ok) throw new Error(`create_page did not create /reading (HTTP ${created.status}); backend catalog=${await safeControl()}`);
+  console.log(`create_page built /reading in ${Math.round(performance.now() - createStarted)} ms`);
   await gateWait.playwright(page.locator(".run-state, .page-chat-readouts").filter({ hasText: /^idle$/ }), "waitFor", { state: "attached", timeout: 20_000 });
   await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
   const pageSection = page.locator('.page-list[data-list-state="ready"]');
@@ -1420,14 +1431,11 @@ with _database() as db:
   const morePagesResponse = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
   await page.keyboard.press("Enter");
   await waitForListChange(".page-list", pagesBeforeMore, morePagesResponse, "show more pages keyboard continuation");
-  // the first link of the second batch: which seeded page that is depends on how many pages this run created before
-  const secondBatchPage = page.locator(".page-list a.pages-card").nth(pagesBeforeMore);
+  const secondBatchPage = page.locator('.page-list a[href^="/gate-page-27"]');
   await gateWait.playwright(secondBatchPage, "waitFor", { state: "visible", timeout: 20000 });
   await waitFor(async () => await secondBatchPage.evaluate((element) => document.activeElement === element), "focused first new page link");
-  const secondBatchPath = new URL((await secondBatchPage.getAttribute("href")) ?? "", origin).pathname;
-  if (!secondBatchPath.startsWith("/gate-page-")) throw new Error(`the second page batch starts at ${secondBatchPath}, not a seeded page`);
   await secondBatchPage.click();
-  await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === secondBatchPath);
+  await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === "/gate-page-27");
   await page.goto(`${origin}/pages`);
   await gateWait.playwright(pageSection, "waitFor");
   const readingLink = page.locator('.page-list a[href^="/reading"]');
