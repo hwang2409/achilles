@@ -232,7 +232,7 @@ function SessionDetail({ row, reader, view, chat, follow, continueSession }: {
           <p className="sessions-help" role="status">{!reader ? "connect to zeta to read the transcript" : mode.error ? readError(mode.error) : "checking transcript access…"}</p></>}
       <div className="sessions-collections"><CollectionView label="child agents" result={agents} /><CollectionView label="background tasks" result={tasks}
         // zeta lists and cancels a task only for the tab that holds its chat (run_work), never from this page
-        footer={chat && tasks.data?.items.some((item) => item.status === "running") && <a href={chatHref(chat)}>open the chat to cancel</a>} /></div>
+        footer={chat && tasks.data?.items.some((item) => item.status === "running") && <a className="sessions-attention-link" href={chatHref(chat)}>open the chat to cancel</a>} /></div>
     </>}
   </>;
 }

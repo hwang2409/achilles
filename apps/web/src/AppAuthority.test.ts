@@ -1535,6 +1535,9 @@ test("the chat header counts running background tasks and its list cancels one: 
     await act(async () => { emit(taskEvent); });
     const chip = await waitFor(() => { const found = tasksChip(app); expect(found).not.toBeNull(); return found!; });
     expect([chip.textContent, chip.getAttribute("aria-label")]).toEqual(["1 task", "1 task running in the background"]);
+    // the event feeds the list only: the transcript shows no row for it
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(select(app, '[data-part="timeline"]').textContent).not.toContain("background_task_updated");
     await click(chip);
     const dialog = await app.findByRole("dialog", { name: "background tasks in this chat" });
     const rows = () => [...dialog.querySelectorAll("li")].map((row) => [row.querySelector("code")?.textContent, row.querySelector(".chat-tasks-meta")?.textContent, row.querySelector("button")?.textContent ?? null]);
