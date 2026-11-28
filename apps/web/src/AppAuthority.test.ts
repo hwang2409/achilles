@@ -745,10 +745,9 @@ const rows: Record<WriteSurfaceId, Row> = {
       expect(control!.textContent).toBe('stop "Parked chat" and open new chat');
       expect(disabled(control!)).toBe(false);
       await waitFor(() => didWrite(writes.slice(before), "new_session"));
-      // the stopped chat first (resume, abort), then the refused swap again; the kept chat's reopen may resume before it
+      // the kept chat's reopen and the stop's resume of the stopped chat, its abort, then the refused swap again
       const order = writes.slice(before).filter((write) => ["resume", "abort", "new_session"].includes(write));
-      const abort = order.indexOf("abort");
-      expect(order.slice(abort - 1, abort + 2)).toEqual(["resume", "abort", "new_session"]);
+      expect(order.slice(0, 4)).toEqual(["resume", "resume", "abort", "new_session"]);
     }
   } },
   "approval.approve": approval("approve"),
