@@ -101,3 +101,30 @@ async def _partial_control_file_scenario(control: Path) -> None:
     finally:
         held.cancel()
         next_poll.cancel()
+
+
+def test_proof_servers_refuse_a_missing_or_real_zeta_home(monkeypatch, tmp_path):
+    import importlib.util
+
+    import pytest
+
+    spec = importlib.util.spec_from_file_location("proof_home", _SERVER.parent / "proof_home.py")
+    proof_home = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(proof_home)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("ZETA_PROOF_WORKTREE", str(tmp_path / "worktree"))
+    monkeypatch.delenv("ZETA_HOME")
+    with pytest.raises(RuntimeError, match="set ZETA_HOME to a temp dir"):
+        proof_home.private_proof_home()
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "home/.zeta"))
+    with pytest.raises(RuntimeError, match="never use ~/.zeta"):
+        proof_home.private_proof_home()
+    # a worktree of HOME must not let a case variant of ~/.zeta through
+    monkeypatch.setenv("ZETA_PROOF_WORKTREE", str(tmp_path / "home"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "home/.ZETA/run"))
+    with pytest.raises(RuntimeError, match="never use ~/.zeta"):
+        proof_home.private_proof_home()
+    monkeypatch.setenv("ZETA_PROOF_WORKTREE", str(tmp_path / "worktree"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    assert proof_home.private_proof_home() == (tmp_path / "zeta").resolve()
+    assert list(tmp_path.iterdir()) == []

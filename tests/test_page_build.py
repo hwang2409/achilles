@@ -11,12 +11,12 @@ import tempfile
 import threading
 from pathlib import Path
 
+import homes
 import pytest
 from starlette.testclient import TestClient
 
 import achilles.page_build as page_build
 import achilles.pages as pages_module
-from achilles import web
 from achilles.page_build import PageBuildError, build_page
 from achilles.pages import PageStore
 
@@ -472,7 +472,7 @@ def test_frame_does_not_wait_for_a_running_rebuild(monkeypatch, tmp_path: Path) 
 
     monkeypatch.setattr(page_build.subprocess, "Popen", held_popen)
     statuses: list[int] = []
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         running = threading.Thread(
             target=lambda: statuses.append(client.get("/api/pages/home/frame").status_code)
         )
@@ -497,7 +497,7 @@ def test_failed_rebuild_is_remembered_for_a_while(monkeypatch, tmp_path: Path) -
     calls, _ = _fake_containers(monkeypatch, _build_outputs(), exit_codes=(1, 1, 1))
     monkeypatch.setattr(page_build.shutil, "which", lambda _name: "/usr/bin/docker")
 
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         first = client.get("/api/pages/home/frame").status_code
         again = client.get("/api/pages/home/frame").status_code
         launched = len(calls)
@@ -518,7 +518,7 @@ def test_cross_site_frame_request_does_not_start_a_rebuild(monkeypatch, tmp_path
 
     # what <iframe src=.../frame> on another site, or the sandboxed frame's own reload, sends
     cross_site = {"sec-fetch-site": "cross-site", "sec-fetch-dest": "iframe"}
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         frame = client.get("/api/pages/home/frame", headers=cross_site)
     assert frame.status_code == 404
     assert calls == [], "another site must not start a docker rebuild"
@@ -651,7 +651,7 @@ def test_rebuilt_revision_keeps_lock_versions_and_digest(probe_root: Path, monke
     original = bundle.read_bytes()
     bundle.unlink()
 
-    with TestClient(web.create_app(), base_url="http://127.0.0.1") as client:
+    with TestClient(homes.app(), base_url="http://127.0.0.1") as client:
         frame = client.get("/api/pages/home/frame")
 
     assert frame.status_code == 200, frame.text

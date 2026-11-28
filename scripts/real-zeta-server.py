@@ -6,9 +6,9 @@ import asyncio
 import json
 import os
 import signal
-import tempfile
 from pathlib import Path
 
+from proof_home import private_proof_home
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
 from zeta.mcp.server_actor import MCPServerActor
 from zeta.protocol.types import MessageRole, TextContent, ToolCall
@@ -185,24 +185,6 @@ def write_control(path: Path, document: dict) -> None:
             temporary.unlink()
         except FileNotFoundError:
             pass
-
-
-def private_proof_home() -> Path:
-    raw = os.environ.get("ZETA_HOME")
-    worktree = os.environ.get("ZETA_PROOF_WORKTREE")
-    if not raw or not worktree:
-        raise RuntimeError("real-zeta proof requires explicit ZETA_HOME and ZETA_PROOF_WORKTREE")
-    home = Path(raw).resolve()
-    default = (Path.home() / ".zeta").resolve()
-    if home == default or home.is_relative_to(default):
-        raise RuntimeError("real-zeta proof must never use ~/.zeta or a child of it")
-    if (
-        not home.is_relative_to(Path(tempfile.gettempdir()).resolve())
-        and not home.is_relative_to(Path("/tmp").resolve())
-        and not home.is_relative_to(Path(worktree).resolve())
-    ):
-        raise RuntimeError("real-zeta proof ZETA_HOME must be under /tmp or the proof worktree")
-    return home
 
 
 def book_tool(name: str, operation: str, description: str) -> dict:
