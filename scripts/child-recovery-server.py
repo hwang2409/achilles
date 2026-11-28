@@ -6,7 +6,14 @@ from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
 from zeta.agent import resume_child, runner
-from zeta.protocol.types import ErrorInfo, Message, MessageRole, StreamEvent, StreamEventType, TextContent
+from zeta.protocol.types import (
+    ErrorInfo,
+    Message,
+    MessageRole,
+    StreamEvent,
+    StreamEventType,
+    TextContent,
+)
 from zeta.providers.completion import CompletionRun, IteratorProviderAttempt
 from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
@@ -17,7 +24,7 @@ async def _no_wait(_delay: float) -> None:
 
 
 class OfflineChildBackend:
-    """Fails every attempt with a retryable error until `online` exists, then answers once per turn."""
+    """Fails each attempt with a retryable error until `online` exists, then answers."""
 
     provider = "codex"
     model = "offline"
@@ -29,7 +36,8 @@ class OfflineChildBackend:
     async def _complete_once(self, messages, tool_schemas, token=None, *, probe=False):
         del messages, tool_schemas, token
         if not self.online.exists():
-            yield StreamEvent(StreamEventType.ERROR, error=ErrorInfo("server_error", "offline"), data={"retry_after": 1})
+            error = ErrorInfo("server_error", "offline")
+            yield StreamEvent(StreamEventType.ERROR, error=error, data={"retry_after": 1})
         elif probe:
             yield StreamEvent(StreamEventType.MESSAGE_UPDATE, delta="ok")
         else:
@@ -40,7 +48,7 @@ class OfflineChildBackend:
         return IteratorProviderAttempt(self._complete_once(messages, tool_schemas, token))
 
     def complete(self, messages, tool_schemas, *, control):
-        # no wait between attempts: the count-based retry budget runs out at once and zeta suspends the child
+        # no wait between attempts: the count-based retry budget runs out at once, so zeta suspends
         return CompletionRun(self, messages, tool_schemas, control=control, wait=_no_wait)
 
 
@@ -49,8 +57,12 @@ def make_server() -> ZetaServer:
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     advance(home, expected_epoch=0)
     child = OfflineChildBackend(cwd / "provider-online")
+
     # first run and a later resume of the same child both get the synthetic provider
-    runner.resolve_child_backend = resume_child.resolve_child_backend = lambda *_args, **_kwargs: (child, None)
+    def resolve(*_args, **_kwargs):
+        return child, None
+
+    runner.resolve_child_backend = resume_child.resolve_child_backend = resolve
     return ZetaServer(
         home=home,
         cwd=cwd,
