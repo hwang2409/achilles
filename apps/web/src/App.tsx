@@ -120,7 +120,8 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
-  const commands = useComposerCommands(client, chat, canWrite, draft);
+  // a refused command's text comes back only into an empty composer, so newer typing is never lost
+  const commands = useComposerCommands(client, chat, canWrite, draft, (text) => { if (!draftStore.get(sessionId)) draftStore.set(sessionId, text); });
   // a hold's end, or a swap that replaced the field the user typed in, gives focus back to this composer
   const editable = props.state !== "read-only";
   useLayoutEffect(() => { if (editable) returnFocusToComposer(slot.current?.querySelector<HTMLElement>(FIELD)); }, [editable]);
@@ -142,10 +143,10 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     fromNewChat,
     onActivity,
     questionWaiting,
-    onCommand: (command: Parameters<typeof commands.run>[0]) => {
+    onCommand: (command: Parameters<typeof commands.run>[0], text: string) => {
       const field = slot.current?.querySelector<HTMLElement>(FIELD);
       commandOpener.current = field ?? null;
-      return commands.run(command, commandOpener.current);
+      return commands.run(command, commandOpener.current, text);
     },
     commandOutput: commands.output && <CommandOutput commands={commands} opener={commandOpener.current} />,
     slashCommands: commands.slashList,

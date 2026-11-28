@@ -91,9 +91,95 @@ test("no command list (an older zeta) shows no menu", () => {
 test("a zeta that did not offer slash_list gets no list request and keeps the old refusal", () => {
   const requests: string[] = [];
   const client = { features: ["model_input_ids"], request: async (method: string) => { requests.push(method); return {}; } } as unknown as ZetaClient;
-  const { result } = renderHook(() => useComposerCommands(client, { id: "s1", title: "chat" }, true, "/"));
+  const { result } = renderHook(() => useComposerCommands(client, { id: "s1", title: "chat" }, true, "/", () => {}));
   expect(result.current.slashList).toBeNull();
-  act(() => { result.current.run({ name: "help", arg: "" }, null); });
+  act(() => { result.current.run({ name: "help", arg: "" }, null, "/help"); });
   expect(requests).toEqual([]);
   expect(result.current.output).toEqual({ text: "commands are not available here: /help. use // to send a literal slash.", error: true });
+});
+
+test("enter on an exact name runs that name, even when a longer name that starts with it is listed first", () => {
+  const c = mount([row("project-instructions", "edit AGENTS.md"), row("project", "show the project")]);
+  c.type("/project");
+  expect(c.selected()).toBe("/project");
+  c.key("Enter");
+  expect(c.ran).toEqual([{ name: "project", arg: "" }]);
+});
+
+type Reply = unknown | Error;
+function slashHook(replies: Record<string, Reply[]>, features = ["model_input_ids"]) {
+  const calls: [string, unknown][] = [];
+  const restored: string[] = [];
+  const client = {
+    features,
+    request: async (method: string, params: unknown) => {
+      calls.push([method, params]);
+      const reply = replies[method]?.shift();
+      if (reply instanceof Error) throw reply;
+      return reply;
+    },
+  } as unknown as ZetaClient;
+  const hook = renderHook(({ draft }) => useComposerCommands(client, { id: "s1", title: "chat" }, true, draft, (text) => restored.push(text), () => true), { initialProps: { draft: "" } });
+  const run = async (draft: string) => {
+    const parsed = /^\/(\S+)\s*([\s\S]*)$/.exec(draft)!;
+    await act(async () => { hook.result.current.run({ name: parsed[1]!, arg: parsed[2]!.trim() }, null, draft); });
+  };
+  return { hook, calls, restored, run, slashRuns: () => calls.filter(([method]) => method === "slash_run") };
+}
+
+const long = "/review  look at the parser,\n  then the tests ";
+
+test.each([
+  ["a busy refusal (a turn is running)", [new Error("a turn is already running")], "a turn is already running"],
+  ["an error reply", [{ kind: "error", text: "no such model" }], "no such model"],
+  ["a terminal-only command", [{ kind: "client_only", name: "review" }], "/review look at the parser,\n  then the tests runs only in the zeta terminal."],
+  ["an unknown command", [{ kind: "unknown", name: "review" }], "/review look at the parser,\n  then the tests is not a command. use // to send it as a message."],
+  ["a reply the page cannot read", [{ kind: "later" }], "zeta sent a reply this page cannot read."],
+])("%s shows the reason and gives back the exact draft", async (_name, reply, text) => {
+  const h = slashHook({ slash_run: reply });
+  await h.run(long);
+  expect(h.slashRuns()).toEqual([["slash_run", { session_id: "s1", text: "/review look at the parser,\n  then the tests" }]]);
+  expect(h.hook.result.current.output).toEqual({ text, error: true });
+  expect(h.restored).toEqual([long]);
+});
+
+test("output shows the text and keeps the draft cleared", async () => {
+  const h = slashHook({ slash_run: [{ kind: "output", text: "built-in commands:" }] });
+  await h.run("/help");
+  expect(h.hook.result.current.output).toEqual({ text: "built-in commands:", command: true });
+  expect(h.restored).toEqual([]);
+});
+
+test("model input goes out once by its id and keeps the draft cleared; a refused send gives the draft back", async () => {
+  const sent = slashHook({ slash_run: [{ kind: "model_input", input_id: "in-1", display_text: "/review x" }], send: [{ accepted: true, session_id: "s1" }] });
+  await sent.run("/review x");
+  expect(sent.calls.filter(([method]) => method === "send")).toEqual([["send", { session_id: "s1", input_id: "in-1" }]]);
+  expect(sent.hook.result.current.output).toBeNull();
+  expect(sent.restored).toEqual([]);
+
+  const refused = slashHook({ slash_run: [{ kind: "model_input", input_id: "in-2", display_text: "/review y" }], send: [{}] });
+  await refused.run("/review y");
+  expect(refused.hook.result.current.output).toEqual({ text: "zeta did not accept the command's message.", error: true });
+  expect(refused.restored).toEqual(["/review y"]);
+});
+
+test("a zeta without model input ids shows no menu and sends no request", async () => {
+  const h = slashHook({}, []);
+  h.hook.rerender({ draft: "/" });
+  expect(h.hook.result.current.slashList).toBeNull();
+  act(() => { h.hook.result.current.run({ name: "help", arg: "" }, null, "/help"); });
+  expect(h.calls).toEqual([]);
+  expect(h.hook.result.current.output).toEqual({ text: "commands are not available here: /help. use // to send a literal slash.", error: true });
+});
+
+test("a failed command list is read again on the next /", async () => {
+  const h = slashHook({ slash_list: [new Error("socket closed"), { commands: [row("help", "list commands")] }] });
+  await act(async () => { h.hook.rerender({ draft: "/" }); });
+  expect(h.hook.result.current.slashList).toEqual([]);
+  await act(async () => { h.hook.rerender({ draft: "/h" }); });
+  expect(h.calls.filter(([method]) => method === "slash_list")).toHaveLength(1);
+  await act(async () => { h.hook.rerender({ draft: "" }); });
+  await act(async () => { h.hook.rerender({ draft: "/" }); });
+  expect(h.calls.filter(([method]) => method === "slash_list")).toHaveLength(2);
+  expect(h.hook.result.current.slashList?.map((command) => command.name)).toEqual(["help"]);
 });
