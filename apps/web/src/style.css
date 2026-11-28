@@ -12,8 +12,8 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; overflow: hidden; }
-/* the app shell never rubber-bands or pulls to refresh; panes scroll inside it */
-html, body { overscroll-behavior: none; }
+/* the app shell never rubber-bands or pulls to refresh; panes scroll inside it. only the vertical axis, so trackpad swipe back and forward still work */
+html, body { overscroll-behavior-y: none; }
 body { margin: 0; }
 /* the scrim behind a modal dialog is a token (transparent today: no dimming) */
 ::backdrop { background: var(--g1-scrim); }
@@ -113,7 +113,8 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 :root[data-code-font]:not([data-code-font="system-mono"]) .main-pane [data-part="composer"] :is(textarea, .cm-editor) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 /* touch: text fields are 16px or more, so the phone does not zoom in when one takes focus */
 @media (pointer: coarse) {
-  :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), textarea, select),
+  /* html body: beats the bare-tag font reset, still loses to any class rule (the 20px rename fields keep their size) */
+  html body :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), textarea, select),
   .main-pane [data-part="composer"] :is(textarea, .cm-editor) { font-size: var(--g1-type-input); }
 }
 [data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: inherit; line-height: 20px; }

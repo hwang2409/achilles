@@ -48,6 +48,7 @@
         };
         new MutationObserver(syncThemeColor).observe(document.documentElement, { attributes: true, attributeFilter: ["data-achilles-theme"] });
         matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncThemeColor);
+        addEventListener("DOMContentLoaded", syncThemeColor);
         addEventListener("load", syncThemeColor);
       })();
     </script>

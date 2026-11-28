@@ -37,9 +37,10 @@
   --g1-danger-mark: light-dark(#E40014, #FF6568);
   --g1-danger: light-dark(#E40014, #FF6568);
   --g1-selection: var(--g1-fg);
-  /* modal dialogs: no dimming behind them for now (decision D4 is open) */
-  --g1-scrim: transparent;
 }
+
+/* the scrim behind modal dialogs: no dimming for now (decision D4 is open). declared on ::backdrop too, which does not inherit from :root in every engine */
+:root, ::backdrop { --g1-scrim: transparent; }
 
 :root, [data-achilles-theme] {
   --g1-font-ui: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
