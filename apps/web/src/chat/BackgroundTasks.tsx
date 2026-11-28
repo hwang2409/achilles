@@ -71,7 +71,7 @@ export function BackgroundTasks({ client, sessionId, list, opener, onClose }: {
     const node = dialog.current;
     node?.showModal();
     // the chip that opened the list goes away when nothing runs; focus then returns to the header's first action
-    return () => { node?.close(); (opener?.isConnected ? opener : document.querySelector<HTMLElement>(".chat-header .chat-actions button"))?.focus(); };
+    return () => { node?.close(); (opener?.isConnected ? opener : document.querySelector<HTMLElement>(".chat-header .chat-actions > button"))?.focus(); };
   }, []);
   const cancel = async (task: Task) => {
     if (!client || pending) return;
