@@ -7,7 +7,7 @@ import { retryAddressInUse, startEvalStack } from "./eval-stack";
 
 type ProcessRow = { pid: number; ppid: number; pgid: number; executable: string; command: string };
 function processRows() {
-  const result = Bun.spawnSync(["ps", "eww", "-axo", "pid=,ppid=,pgid=,comm=,command="], { stdout: "pipe" });
+  const result = Bun.spawnSync(["ps", "axeww", "-o", "pid=,ppid=,pgid=,comm=,command="], { stdout: "pipe" });
   return result.stdout.toString().split("\n").flatMap(line => {
     const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/); return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), executable: match[4], command: match[5] }] : [];
   });
@@ -22,11 +22,12 @@ function portClosed(port: number) {
 }
 
 const cases = [
-  { name: "success", target: "eval", env: { EVAL_SETUP_ONLY: "1" }, exit: "zero" },
-  { name: "SIGINT", target: "eval-stack", env: {}, signal: "SIGINT", exit: "nonzero" },
-  { name: "SIGTERM", target: "eval-stack", env: {}, signal: "SIGTERM", exit: "nonzero" },
-  { name: "task failure", target: "eval", env: { EVAL_FORCE_ERROR: "1" }, exit: "nonzero" },
-  { name: "startup failure", target: "eval", env: {}, exit: "nonzero" },
+  // `serves`: the scenario reaches a serve process, so its walk must record a port. make's EVAL_SETUP_ONLY skips eval.ts entirely, so success runs the full scripted task.
+  { name: "success", target: "eval", env: {}, exit: "zero", serves: true },
+  { name: "SIGINT", target: "eval-stack", env: {}, signal: "SIGINT", exit: "nonzero", serves: false },
+  { name: "SIGTERM", target: "eval-stack", env: {}, signal: "SIGTERM", exit: "nonzero", serves: true },
+  { name: "task failure", target: "eval", env: { EVAL_FORCE_ERROR: "1" }, exit: "nonzero", serves: true },
+  { name: "startup failure", target: "eval", env: {}, exit: "nonzero", serves: true },
 ] as const;
 
 test("eval lifecycle owner leaves no process group or port behind", async () => {
@@ -46,6 +47,9 @@ test("eval lifecycle owner leaves no process group or port behind", async () => 
       if (code === undefined) { timedOut = true; if (runnerPid) process.kill(runnerPid, "SIGKILL"); process.kill(child.pid!, "SIGKILL"); code = await Promise.race([exited, Bun.sleep(2000).then(() => undefined)]); }
       if (code === undefined) throw new Error(`${scenario.name} did not exit: ${Buffer.concat(output).toString()}`);
       if (scenario.signal) expect(sent, `${scenario.name} was not delivered`).toBe(true);
+      // an empty walk (for example a `ps` that fails on this platform) would make the survivor and port checks below vacuous
+      expect(seen.size, `${scenario.name} walk saw no stack process`).toBeGreaterThan(0);
+      if (scenario.serves) expect(ports.size, `${scenario.name} walk saw no serve port`).toBeGreaterThan(0);
       await Bun.sleep(200); const survivors = processRows().filter(row => row.command.includes(marker));
       expect(survivors.map(row => ({ pid: row.pid, pgid: row.pgid })), `${scenario.name} left marked processes alive`).toEqual([]);
       expect(timedOut, `${scenario.name} did not exit before its deadline`).toBe(false);
