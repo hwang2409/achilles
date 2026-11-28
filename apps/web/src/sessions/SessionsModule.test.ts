@@ -21,15 +21,15 @@ function unsentRead(reply: () => Response) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 const catalogTitles = () => [...screen.getByRole("region", { name: "session catalog" }).querySelectorAll(".sessions-rows strong")].map((node) => node.textContent);
 
-const state = (id: string, open: number) => ({ session_id: id, status: "idle", child_count: 0, background_count: 0, attention_open: open });
-function mount(open: Record<string, number>, path = "/", extra: Record<string, object> = {}, continueSession = async (_id: string) => null) {
+const state = (id: string, open: number, status = "idle") => ({ session_id: id, status, child_count: 0, background_count: 0, attention_open: open });
+function mount(open: Record<string, number>, path = "/", extra: Record<string, object> = {}, continueSession = async (_id: string) => null, status: Record<string, string> = {}) {
   const ids = Object.keys(open);
   const client = {
     features: ["list_sessions_paging", "state_read_v1"],
     request: async (method: string, params: { session_id?: string; collection?: string }) => {
       if (method === "list_sessions") return { sessions: ids.map((id) => ({ session_id: id, name: `synthetic ${id}`, project_id: null, ...extra[id] })), next_offset: null };
-      if (method === "state_sessions") return { items: ids.map((id) => state(id, open[id]!)), next_cursor: null };
-      if (method === "state_session") return { collection: params.collection, session: state(params.session_id!, open[params.session_id!]!), items: [], next_cursor: null };
+      if (method === "state_sessions") return { items: ids.map((id) => state(id, open[id]!, status[id])), next_cursor: null };
+      if (method === "state_session") return { collection: params.collection, session: state(params.session_id!, open[params.session_id!]!, status[params.session_id!]), items: [], next_cursor: null };
       if (method === "status") return { session: null };
       throw new Error(`unexpected ${method}`);
     },
@@ -72,6 +72,22 @@ test("a session held by another process keeps the owned notice", async () => {
   mount({ other: 0 }, "/sessions/other", { other: { in_use: true, resident: false } });
   const button = await screen.findByRole("button", { name: "continue in chat" });
   expect([button.hasAttribute("disabled"), !!(await screen.findByText(sessionOwned))]).toEqual([true, true]);
+});
+
+test("a session another zeta process holds reads open elsewhere, never running", async () => {
+  // zeta f5efa62d reports "unknown" for an idle tui or serve holder; achilles must not guess "running"
+  mount({ held: 0, free: 0 }, "/", { held: { in_use: true, resident: false } }, undefined, { held: "unknown", free: "unknown" });
+  const row = async (id: string) => (await screen.findByText(`synthetic ${id}`)).closest("a")!.querySelector(".sessions-state")!;
+  const held = await row("held");
+  expect([held.textContent, held.getAttribute("title"), held.getAttribute("data-status")])
+    .toEqual(["open elsewhere", "held by another zeta process (tui or serve)", "elsewhere"]);
+  expect((await row("free")).textContent).toBe("unknown");
+  expect(screen.getByRole("region", { name: "session catalog" }).textContent).not.toContain("running");
+  cleanup();
+  mount({ held: 0 }, "/sessions/held", { held: { in_use: true, resident: false } }, undefined, { held: "unknown" });
+  const tag = (await screen.findByText("open elsewhere", { selector: ".sessions-title .sessions-state" }));
+  expect(tag.getAttribute("title")).toBe("held by another zeta process (tui or serve)");
+  expect(screen.queryByText("running")).toBeNull();
 });
 
 test("a never-sent achilles chat is hidden from the catalog", async () => {

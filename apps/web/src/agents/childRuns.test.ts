@@ -60,7 +60,8 @@ test("replacement aborts pending history and releases late and active leases exa
 test("selected report changes mark history stale and automatically reread at most every catalog interval", async () => {
   let now = 0;
   const opened: ReturnType<typeof result>[] = [];
-  const owner = createChildRunsController(client, key, { now: () => now, attached: async () => "root", open: async () => {
+  const owner = createChildRunsController(client, key, { now: () => now, attached: async () => "root", open: async (_client, _key, options?: OpenChildRunOptions) => {
+    options?.onProgress?.({ messages: 1, complete: true, restart: 0 });
     const value = result(); opened.push(value); return value;
   } });
   try {
@@ -87,7 +88,7 @@ test.each([
   { name: "accepted clear affects only its form", reply: accepted, kept: "", message: "message accepted by zeta." },
   { name: "wrong run acknowledgment keeps draft", reply: { ...accepted, runId: "different" }, kept: "fixture", message: unknown },
   { name: "observer refusal keeps draft without dispatch", refusal: true, kept: "fixture", message: refused },
-  { name: "terminal error keeps draft and requires refresh", error: Object.assign(new Error("terminal"), { code: -32005 }), blocked: true, kept: "fixture", message: "the child is no longer available for follow-up. refresh the run before trying again." },
+  { name: "terminal error keeps draft and requires refresh", error: Object.assign(new Error("terminal"), { code: -32005 }), blocked: true, kept: "fixture", message: "this agent cannot take a message now." },
   { name: "socket loss keeps draft and never resends", error: new ZetaError("closed", 1006), kept: "fixture", message: unknown },
 ] as const)("child send: $name", async (row) => {
   let requests = 0;

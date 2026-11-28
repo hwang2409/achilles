@@ -195,3 +195,18 @@ test("a live row older than the report does not replace the report's step", asyn
     expect(reader.snapshot().report?.rows[0]).toMatchObject({ currentStep: "turn 2: reading", toolCount: 3, elapsedSeconds: 5 });
   } finally { reader.stop(); store.dispose(); }
 });
+
+test("the catalog reads accepts_send once per report and reuses it for continuation pages", async () => {
+  const live = (id: string) => ({ ...rich(id), status: "running" });
+  const { calls, reader } = setup(["agent_run_catalog_v1", "child_runs"], [
+    catalog([live("a:1")], "c1"),
+    { session: { session_id: "a" } },
+    { runs: [{ ...live("a:1"), accepts_send: false }, { ...live("a:2"), accepts_send: true }] },
+    catalog([live("a:2")]),
+  ]);
+  await reader.refresh();
+  await reader.more();
+  expect(calls.map(([method]) => method)).toEqual(["agent_run_catalog", "status", "child_run_list", "agent_run_catalog"]);
+  expect(reader.snapshot().report?.rows.map((row) => [row.runId, row.acceptsSend])).toEqual([["a:1", false], ["a:2", true]]);
+  reader.stop();
+});

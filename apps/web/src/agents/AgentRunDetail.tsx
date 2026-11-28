@@ -15,8 +15,9 @@ export const short = (id: string) => id.length > 12 ? `${id.slice(0, 7)}…${id.
 export const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
 // the transcript row's format: 19s, 1m 40s, 1h 2m
 export const duration = (seconds: number) => seconds < 60 ? `${Math.floor(seconds)}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
-// zeta's elapsed is wall time since start; under 1 s with no turn it reads as "0s", which says nothing
-export const elapsed = ({ elapsedSeconds, turnsUsed }: AgentRun) => elapsedSeconds === undefined || elapsedSeconds < 1 && !turnsUsed ? undefined : duration(elapsedSeconds);
+// zeta's elapsed is wall time since start; under 1 s with no turn it says nothing, and with a turn "0s" reads as no work
+export const elapsed = ({ elapsedSeconds, turnsUsed }: AgentRun) => elapsedSeconds === undefined || elapsedSeconds < 1 && !turnsUsed ? undefined
+  : elapsedSeconds < 1 ? "<1s" : duration(elapsedSeconds);
 // one page-wide 1 s clock for "retries in …": it runs only while a retrying row is shown, and never reads the network
 const ticks = new Set<() => void>();
 let tick: ReturnType<typeof setInterval> | undefined;
@@ -113,11 +114,14 @@ export function RunHistory({ client, row }: { client: ZetaClient; row: AgentRun 
   const seen = useRef(revision);
   useEffect(() => { void owner.refresh(); return () => owner.close(); }, [owner]);
   useEffect(() => { if (seen.current !== revision) { seen.current = revision; void owner.changed(); } }, [owner, revision]);
+  // zeta stores a child's task at spawn, so a running child's empty first read came before that write; a reread, a
+  // failed read, or any other state (suspended, idle, unknown) shows its final text instead of loading forever
+  const unwritten = (row.status === "running" || row.status === "finishing") && !!result.first && !result.warning && !!result.result && !result.progress?.messages;
   return <>
-    {result.loading && <ModuleState kind="loading" title="reading child history" />}
+    {(result.loading || unwritten) && <ModuleState kind="loading" title="reading child history" />}
     {result.warning && <p role="status">{result.warning}</p>}
     {result.stale && <p role="status">run changed · refresh to read the latest stored history</p>}
     {!result.limited && <button type="button" disabled={result.loading} onClick={() => void owner.refresh()}>refresh transcript</button>}
-    {result.result && (result.progress?.complete && result.progress.messages === 0 ? <p>{isTerminal(row.status) ? "no stored messages" : "no activity yet"}</p> : <div className="agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
+    {result.result && !unwritten && (result.progress?.complete && result.progress.messages === 0 ? <p>{isTerminal(row.status) ? "no stored messages" : "no activity yet"}</p> : <div className="agents-timeline"><RunProvider store={result.result.lease.store}><Timeline /></RunProvider></div>)}
   </>;
 }

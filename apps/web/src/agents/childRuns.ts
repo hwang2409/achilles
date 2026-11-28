@@ -24,6 +24,8 @@ type Snapshot = {
   stale?: boolean;
   warning?: string;
   limited?: boolean;
+  /** this owner's first opened read */
+  first?: boolean;
 };
 
 // Selected-history ownership adapted from gamma src/child-runs.ts at 6cd69671. No write or replay join.
@@ -34,6 +36,7 @@ export function createChildRunsController(
   let snapshot: Snapshot = {};
   let active: AbortController | undefined;
   let latestRead = -Infinity;
+  let opened = 0;
   const listeners = new Set<() => void>();
   const publish = (next: Snapshot) => { snapshot = next; listeners.forEach((listener) => listener()); };
   const release = () => {
@@ -68,7 +71,7 @@ export function createChildRunsController(
         if (current()) publish({ ...snapshot, warning: historyError(error) });
       });
       if (!current()) result.lease.release();
-      else publish({ result, progress, stale: snapshot.stale });
+      else publish({ result, progress, stale: snapshot.stale, first: ++opened === 1 });
     } catch (error) {
       if (current()) publish({ warning: historyError(error), limited: error instanceof ChildRunHistoryError && (error.kind === "owner_not_active" || error.kind === "not_negotiated") });
     }
@@ -78,7 +81,8 @@ export function createChildRunsController(
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     refresh,
     changed() {
-      if (!snapshot.loading && now() - latestRead >= AGENT_REFRESH_MS) return refresh();
+      // an empty read has nothing to keep: read again at once instead of asking for a refresh
+      if (!snapshot.loading && (now() - latestRead >= AGENT_REFRESH_MS || snapshot.result && !snapshot.progress?.messages)) return refresh();
       if (!snapshot.stale) publish({ ...snapshot, stale: true });
     },
     close() { release(); publish({}); },
