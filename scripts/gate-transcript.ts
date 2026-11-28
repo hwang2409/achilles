@@ -531,7 +531,7 @@ export async function gateTwoChatsAtOnce(browser: Browser, origin: string, other
     if (missing.length) throw new Error(`hello did not echo multi_controller for tab ${missing.join(", ")}`);
     console.log("two tabs: two chats sent at once, zeta ran both turns, each tab showed only its own reply, both hellos echoed multi_controller");
     await gateSameChatReadOnly(browser, a);
-    await gateBranchAcrossTabs(browser, a);
+    await gateBranchAcrossTabs(a);
   } finally { await Promise.all(tabs.map((tab) => tab.close())); }
 }
 

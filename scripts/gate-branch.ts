@@ -1,4 +1,4 @@
-import type { Browser, Page } from "playwright";
+import type { Page } from "playwright";
 
 const NOTE = "new branch continues after this message · files are not changed";
 const SAME_CHAT_NOTICE = "this chat is open or kept running in another tab. you can read it here.";
@@ -8,7 +8,7 @@ const SAME_CHAT_NOTICE = "this chat is open or kept running in another tab. you 
  * (`fork_message`) and both tabs show the new branch and "branch 2 of 2"; switching back (`switch_branch`) restores the
  * old transcript in both. tab A's chat already has the turns "together from a" and "after tab c joined".
  */
-export async function gateBranchAcrossTabs(browser: Browser, a: Page) {
+export async function gateBranchAcrossTabs(a: Page) {
   const wait = { timeout: 20_000 };
   const transcript = (tab: Page) => tab.locator(".transcript");
   const shows = async (tab: Page, text: string) => (await transcript(tab).getByText(text, { exact: true }).count()) > 0;
@@ -17,7 +17,8 @@ export async function gateBranchAcrossTabs(browser: Browser, a: Page) {
     for (const end = Date.now() + 20_000; Date.now() < end; await new Promise((done) => setTimeout(done, 100))) if (await check()) return;
     throw new Error(`branch step: ${label}`);
   };
-  const c = await browser.newPage();
+  // another tab of the same browser (a separate context is another browser: zeta tells it nothing about the change)
+  const c = await a.context().newPage();
   try {
     await c.goto(a.url());
     await c.getByText(SAME_CHAT_NOTICE, { exact: true }).waitFor(wait);
