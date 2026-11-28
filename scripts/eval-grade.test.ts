@@ -501,3 +501,58 @@ test("code seeds belong to fixture route pages, and after_failed needs a failing
   expect(() => validateTask({ ...base, page_plan: [{ ...base.page_plan[0], code: { source: "export {}", dependencies: {} } }] })).toThrow("needs a code seed with expect_failed");
   expect(() => validateTask({ ...base, checks: [{ id: "e", type: "no_error", page: "p", after_failed: true }] })).toThrow("after_failed is true on code_changed only");
 });
+
+const renderTask = { ...task, checks: [{ id: "rendered", type: "rendered_after_change", page: "p", text: "Synthetic Offline" }] } as never;
+const renderStatus = (results: Array<Record<string, unknown>>) => { try { return gradeReference(renderTask, { pages: [{ id: "page-1", alias: "p" }], results: results.map(row => ({ page_id: "page-1", chat_id: "chat-a", success: true, ...row })) }).status; } catch (error) { return String(error); } };
+const write = { tool: "achilles__write_page", data: { revision: 2 } };
+const render = (text: string, success = true) => ({ tool: "achilles__render_page", success, data: { ready: success, text } });
+
+test("rendered_after_change accepts a render of the new text after the last code write", () => {
+  expect(renderStatus([write, render("Synthetic Offline")]), "write, then render").toBe("pass");
+  expect(renderStatus([render("old"), { ...write, tool: "achilles__edit_page" }, render("old"), render("big Synthetic Offline badge")]), "a later render shows it").toBe("pass");
+});
+
+test("rendered_after_change rejects a render before the last build, a text mismatch, or a failed render", () => {
+  expect(renderStatus([write, render("Synthetic Offline"), { ...write, data: { revision: 3 } }]), "rendered before the last build").toBe("agent_fail");
+  expect(renderStatus([write, render("Synthetic Online")]), "render text mismatch").toBe("agent_fail");
+  expect(renderStatus([write, render("Synthetic Offline", false)]), "the render was not ready").toBe("agent_fail");
+  expect(renderStatus([render("Synthetic Offline")]), "no code write").toBe("agent_fail");
+  expect(renderStatus([{ ...write, success: false }, render("Synthetic Offline")]), "the write failed").toBe("agent_fail");
+});
+
+test("rendered_after_change ignores a write and render on another page", () => {
+  expect(renderStatus([{ ...write, page_id: "page-2" }, { ...render("Synthetic Offline"), page_id: "page-2" }]), "only another page was written and rendered").toBe("agent_fail");
+});
+
+test("rendered_after_change needs text", () => {
+  expect(() => validateTask({ ...task, checks: [{ id: "rendered", type: "rendered_after_change", page: "p" }] })).toThrow("needs text");
+});
+
+const clickStep = (id: string, name: string) => ({ id, kind: "page_action", page: "p", chat: "chat-a", click: { role: "button", name } });
+const actionTask = { ...task, steps: [...task.steps, clickStep("done-alpha", "Done Alpha")] };
+
+test("page_action steps come after every other step and name one button", () => {
+  expect(validateTask(actionTask).steps[1].click).toEqual({ role: "button", name: "Done Alpha" });
+  expect(() => validateTask({ ...actionTask, steps: [clickStep("done-alpha", "Done Alpha"), ...task.steps] })).toThrow("page_action must come after every model step");
+  expect(() => validateTask({ ...actionTask, steps: [...actionTask.steps, { id: "w", kind: "user_write", page: "p", chat: "form", tool: "update_x", arguments: { record_id: "a" } }] })).toThrow("page_action must come after every model step");
+  expect(() => validateTask({ ...actionTask, steps: [...task.steps, { ...clickStep("c", "Go"), click: undefined }] })).toThrow("a page_action needs one");
+  expect(() => validateTask({ ...actionTask, steps: [...task.steps, { ...clickStep("c", "Go"), click: { role: "link", name: "Go" } }] })).toThrow('click needs role "button"');
+  expect(() => validateTask({ ...task, steps: [{ ...task.steps[0], click: { role: "button", name: "Go" } }] })).toThrow("click goes on a page_action step");
+});
+
+test("a page_action passes only when its click wrote through the page bridge", () => {
+  const graded = (row?: Record<string, unknown>) => gradeTask(actionTask as never, { pages: [{ id: "home", alias: "p" }], ...(row ? { page_actions: [row] } : {}) });
+  const row = { step: "done-alpha", page_id: "home", role: "button", name: "Done Alpha", clicked: true, status: 200 };
+  expect(graded(row).pass, "the click updated a record").toBe(true);
+  const failures = [
+    [undefined, "the page action did not run"],
+    [{ ...row, clicked: false, status: null, reason: 'no button named "Done Alpha" in the page' }, 'no button named "Done Alpha" in the page'],
+    [{ ...row, status: null }, "the click made no record write through the page bridge"],
+    [{ ...row, status: 409 }, "the page bridge write failed (409)"],
+  ] as const;
+  for (const [actual, reason] of failures) {
+    const result = graded(actual);
+    expect(result.pass, reason).toBe(false);
+    expect(result.checks.find(check => check.id === "page_action:done-alpha")?.reason).toBe(reason);
+  }
+});

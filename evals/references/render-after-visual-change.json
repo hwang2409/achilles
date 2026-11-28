@@ -1,0 +1,164 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "active_code_revision": null
+      },
+      {
+        "id": "status",
+        "alias": "status",
+        "route": "/status",
+        "active_code_revision": 2
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "status",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "status",
+        "version": 2,
+        "failed": 0,
+        "runtime_error": null
+      }
+    ],
+    "results": [
+      {
+        "page_id": "status",
+        "chat_id": "status-chat",
+        "tool": "achilles__write_page",
+        "success": true,
+        "data": {
+          "revision": 2
+        }
+      },
+      {
+        "page_id": "status",
+        "chat_id": "status-chat",
+        "tool": "achilles__render_page",
+        "success": true,
+        "data": {
+          "ready": true,
+          "text": "Synthetic Offline"
+        }
+      }
+    ],
+    "errors": [],
+    "browser": [
+      {
+        "page_id": "status",
+        "text": "Synthetic Offline"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "home",
+          "active_code_revision": null
+        },
+        {
+          "id": "status",
+          "route": "/status",
+          "title": "status",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "status",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "active_code_revision": null
+      },
+      {
+        "id": "status",
+        "alias": "status",
+        "route": "/status",
+        "active_code_revision": 2
+      }
+    ],
+    "code_revisions": [
+      {
+        "page_id": "status",
+        "version": 1,
+        "failed": 0,
+        "runtime_error": null
+      },
+      {
+        "page_id": "status",
+        "version": 2,
+        "failed": 0,
+        "runtime_error": null
+      }
+    ],
+    "results": [
+      {
+        "page_id": "status",
+        "chat_id": "status-chat",
+        "tool": "achilles__write_page",
+        "success": true,
+        "data": {
+          "revision": 2
+        }
+      },
+      {
+        "page_id": "status",
+        "chat_id": "status-chat",
+        "tool": "achilles__render_page",
+        "success": true,
+        "data": {
+          "ready": true,
+          "text": ""
+        }
+      }
+    ],
+    "errors": [],
+    "browser": [
+      {
+        "page_id": "status",
+        "text": "Synthetic Offline"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "home",
+          "active_code_revision": null
+        },
+        {
+          "id": "status",
+          "route": "/status",
+          "title": "status",
+          "active_code_revision": 1
+        }
+      ],
+      "code_revisions": [
+        {
+          "page_id": "status",
+          "version": 1,
+          "failed": 0,
+          "runtime_error": null
+        }
+      ]
+    }
+  }
+}

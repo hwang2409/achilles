@@ -1,0 +1,65 @@
+{
+  "id": "bridge-update-delete",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 10,
+  "setup": {
+    "tools": [],
+    "records": [
+      { "id": "alpha", "collection": "chores", "data": { "title": "Alpha", "done": false } },
+      { "id": "beta", "collection": "chores", "data": { "title": "Beta", "done": false } },
+      { "id": "gamma", "collection": "chores", "data": { "title": "Gamma", "done": false } }
+    ]
+  },
+  "steps": [
+    {
+      "id": "rewrite",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "rewrite this page to list the chores collection. each row has a button labeled 'Done <title>' that sets done to true, and a button labeled 'Delete <title>' that deletes the chore."
+    },
+    {
+      "id": "done-alpha",
+      "kind": "page_action",
+      "page": "home",
+      "chat": "home-chat",
+      "click": { "role": "button", "name": "Done Alpha" }
+    },
+    {
+      "id": "delete-beta",
+      "kind": "page_action",
+      "page": "home",
+      "chat": "home-chat",
+      "click": { "role": "button", "name": "Delete Beta" }
+    }
+  ],
+  "checks": [
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "home",
+      "value": [
+        { "title": "Alpha", "done": true },
+        { "title": "Gamma", "done": false }
+      ]
+    },
+    {
+      "id": "changed",
+      "type": "code_changed",
+      "page": "home"
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "home"
+    }
+  ]
+}
