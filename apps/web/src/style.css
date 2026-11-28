@@ -6,18 +6,23 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
   color: var(--fulcrum-fg);
   background: var(--fulcrum-bg);
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; overflow: hidden; }
+/* the app shell never rubber-bands or pulls to refresh; panes scroll inside it */
+html, body { overscroll-behavior: none; }
 body { margin: 0; }
-/* dialogs sit flat on the page: no dimming behind them */
-::backdrop { background: none; }
+/* the scrim behind a modal dialog is a token (transparent today: no dimming) */
+::backdrop { background: var(--g1-scrim, transparent); }
 /* one size for body text, one for titles */
 h1, h2, h3, h4 { font-size: var(--g1-type-title); }
 small { font-size: inherit; }
 button, input, textarea, select { color: inherit; font: inherit; }
+/* a tap acts at once: no double-tap zoom wait on controls */
+:where(a, button, input, textarea, select, summary, label, [role="button"], [role="option"]) { touch-action: manipulation; }
 /* bare <code> otherwise falls back to the browser's Courier */
 code { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 /* code faces are spaced for code: the UI tracking never reaches them */
@@ -42,8 +47,11 @@ button, input, textarea, select { border-radius: var(--g1-radius-control); }
   background: var(--g1-bg);
   border: var(--g1-border-width) solid var(--g1-control-border);
 }
-:where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
-:is(.primary, .ui-button-primary):hover { background-color: color-mix(in srgb, var(--g1-primary) 88%, var(--g1-primary-text)); }
+/* hover only where a real pointer hovers: on touch a tapped control must not keep the tint */
+@media (hover: hover) and (pointer: fine) {
+  :where(button, .ui-button):where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
+  :is(.primary, .ui-button-primary):hover { background-color: color-mix(in srgb, var(--g1-primary) 88%, var(--g1-primary-text)); }
+}
 [data-part="composer"] [data-part="composer-field"] textarea:focus-visible,
 [data-part="composer"] .cm-content:focus-visible { outline: none; box-shadow: none; }
 :where(button, input, textarea, select):is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: .65; }
@@ -97,6 +105,11 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-ui-font, var(--g1-font-ui)); font-size: var(--achilles-ui-size, 14px); }
 :root[data-code-font]:not([data-code-font="system-mono"]) .main-pane [data-part="composer"] :is(textarea, .cm-editor) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+/* touch: text fields are 16px or more, so the phone does not zoom in when one takes focus */
+@media (pointer: coarse) {
+  :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), textarea, select),
+  .main-pane [data-part="composer"] :is(textarea, .cm-editor) { font-size: var(--g1-type-input); }
+}
 [data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: inherit; line-height: 20px; }
 [data-part="composer-queued"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 2px 8px; border-left: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
 [data-part="composer-queued-label"] { flex: none; color: var(--fulcrum-accent); }
@@ -125,7 +138,7 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 [data-part="composer"] [data-part="composer-image"] button[data-part="composer-image-remove"] {
   position: absolute; top: -6px; right: -6px; width: 20px; min-width: 0; height: 20px; min-height: 0; padding: 0;
   border: 1px solid var(--fulcrum-border); border-radius: var(--g1-radius-control); background: var(--fulcrum-bg, var(--g1-bg)); color: var(--fulcrum-fg);
-  font-size: 14px; line-height: 1; transition-property: scale; transition-duration: 120ms;
+  font-size: 14px; line-height: 1; transition-property: scale; transition-duration: var(--g1-dur-press); transition-timing-function: var(--g1-ease-out);
 }
 /* the visible dot stays small; its hit area is 40px */
 [data-part="composer"] [data-part="composer-image"] button[data-part="composer-image-remove"]::after { content: ""; position: absolute; inset: -10px; }
@@ -260,7 +273,7 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 :where(img) { outline: 1px solid light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.1)); outline-offset: -1px; }
 /* press feedback: a button shrinks a little while pressed. rows, nav links, and full-width bars stay still: a wide row
    that shrinks looks like it moves. the timeline keeps fulcrum's plain look (no press scale) */
-:where(button, .ui-button, a.primary) { transition-property: scale; transition-duration: 120ms; transition-timing-function: ease-out; }
+:where(button, .ui-button, a.primary) { transition-property: scale; transition-duration: var(--g1-dur-press); transition-timing-function: var(--g1-ease-out); }
 :where(button, .ui-button, a.primary):where(:not(:disabled, [aria-disabled="true"], .new-chat, .list-head, .drawer-scrim, .page-chat-bar, .chat-row-rename, .agents-row, .td-agent-row, .td-turn-row, .td-span-row, .projects-entry, .load-older, [role="option"], [data-part="timeline"] *)):active { scale: var(--g1-press-scale); }
 /* hit areas: small controls reach 40px or more without growing what you see */
 .chat-header button { position: relative; }

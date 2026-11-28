@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" />
     <script>
       (() => {
         const defaults = { v: 1, theme: "auto", uiFont: "geist", codeFont: "system-mono", size: 15, density: "comfortable", vim: false, autoApproveDefault: true };
@@ -39,6 +40,15 @@
         document.documentElement.style.setProperty("--achilles-ui-tracking", uiFonts[settings.uiFont][1]);
         document.documentElement.style.setProperty("--achilles-code-font", codeFonts[settings.codeFont]);
         document.documentElement.style.setProperty("--achilles-ui-size", settings.size + "px");
+        // the browser bar takes the page canvas (--g1-bg on :root), and follows every theme change and the system scheme
+        const themeColor = document.querySelector('meta[name="theme-color"]');
+        const syncThemeColor = () => {
+          const color = getComputedStyle(document.documentElement).backgroundColor;
+          if (color && color !== "rgba(0, 0, 0, 0)") themeColor.content = color;
+        };
+        new MutationObserver(syncThemeColor).observe(document.documentElement, { attributes: true, attributeFilter: ["data-achilles-theme"] });
+        matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncThemeColor);
+        addEventListener("load", syncThemeColor);
       })();
     </script>
     <title>achilles</title>
