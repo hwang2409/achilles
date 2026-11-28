@@ -26,13 +26,13 @@ const account = (name: string, used: number, reset: string, { read = old, error 
 });
 
 // `control.hold` keeps the next account_list in flight; `control.fail` makes it throw.
-function mount(accounts: unknown[]) {
+function mount(accounts: unknown[], started: unknown = { state: "succeeded" }) {
   const requests: unknown[] = [];
   const control = { hold: null as Promise<void> | null, fail: false };
   const client = { features: [ACCOUNT_LIST_IDLE_FEATURE], authority: "controller", onClose: () => () => {},
     request: async (method: string, params: unknown) => {
       requests.push({ method, params });
-      if (method === "login_start") return { state: "succeeded" };
+      if (method === "login_start") return started;
       await control.hold;
       if (control.fail) throw new Error("synthetic read failure");
       return { revision: "a".repeat(64), data: { accounts } };
@@ -51,6 +51,7 @@ test("a window whose reset passed says so with how long ago it was read, a muted
   mount([account("passed", 100, "2026-11-15T04:00:00Z")]);
   const passed = await row("passed");
   expect(windowLine(passed)).toBe("Reset passed · last read 14 days ago");
+  expect(passed.getByText(/% used$/).textContent).toBe("Was 100% used");
   expect(passed.getByText("14 days ago").getAttribute("title")).toBe(at.format(Date.parse(old)));
   expect(passed.getByText("14 days ago").getAttribute("datetime")).toBe(new Date(old).toISOString());
   expect(passed.queryByText(/resets/i)).toBeNull();
@@ -106,16 +107,25 @@ test("no row shows Available together with a full or stale bar", async () => {
   expect(screen.getAllByText("Available")).toHaveLength(1);
 });
 
-test("a usage refresh that failed on sign-in says so, with the reason and a sign-in action", async () => {
-  mount([account("orchard", 0, "2026-12-09T10:59:00Z", { error: "authentication failed; log in again", provider: "codex", read: "2026-11-09T15:59:00Z" })]);
+const orchardRow = () => account("orchard", 0, "2026-12-09T10:59:00Z", { error: "authentication failed; log in again", provider: "codex", read: "2026-11-09T15:59:00Z" });
+// The auth error reads as one status, one read-time line, and one sign-in action; zeta's "log in" wording never shows.
+async function expectSignInExpired(orchard: ReturnType<typeof within>) {
+  expect(orchard.getByText("Sign-in expired").className).toBe("account-availability");
+  expect(orchard.getByRole("heading").closest("li")!.textContent).not.toMatch(/log in|authentication failed|refresh failed/i);
+  expect(windowLine(orchard)).toBe(`Resets ${at.format(Date.parse("2026-12-09T10:59:00Z"))} · last read 18 days ago`);
+  expect(orchard.getByRole("button", { name: "Sign in again to codex:orchard" }).textContent).toBe("Sign in again");
+}
+
+test("a usage refresh that failed on sign-in says so once, with the read time and a sign-in action", async () => {
+  mount([orchardRow()]);
   const orchard = await row("orchard", "codex");
   expect(orchard.queryByText(/^available$/i)).toBeNull();
-  expect(orchard.getByText("Sign-in expired").className).toBe("account-availability");
-  expect(orchard.getByText(/^Usage refresh failed/).textContent).toBe("Usage refresh failed: authentication failed; log in again");
-  expect(windowLine(orchard)).toBe(`Resets ${at.format(Date.parse("2026-12-09T10:59:00Z"))} · last read 18 days ago`);
+  // m-4: the action sits with the status, not in a row of its own (casing checked below)
+  expect(orchard.getByRole("button", { name: /^sign in again to codex:orchard$/i }).parentElement!.className).toBe("account-identity");
+  await expectSignInExpired(orchard);
   expect(orchard.getByRole("meter").closest(".account-window")!.getAttribute("data-stale")).toBe("true");
-  fireEvent.click(orchard.getByRole("button", { name: "sign in again to codex:orchard" }));
-  const dialog = await screen.findByRole("dialog", { name: "review browser sign-in" });
+  fireEvent.click(orchard.getByRole("button", { name: "Sign in again to codex:orchard" }));
+  const dialog = await screen.findByRole("dialog", { name: "Review browser sign-in" });
   expect(dialog.textContent).toContain("start browser sign-in for codex:orchard");
   expect(dialog.textContent).toContain("signed in, but zeta reports authentication failed");
 });
@@ -175,18 +185,42 @@ test("a failed wake read keeps the rows and says it could not refresh", async ()
   await waitFor(() => expect(screen.queryByText(/Could not refresh accounts/)).toBeNull(), { timeout: 500 });
 });
 
-test("after a good sign-in from this page, the row drops zeta's older auth error from its label", async () => {
+test("another usage refresh error keeps its line next to the status", async () => {
+  mount([account("busy", 10, "2026-12-09T10:59:00Z", { error: "rate limited; retry later", read: recent })]);
+  const busy = await row("busy");
+  expect(busy.getByText(/^Usage refresh failed/).textContent).toBe("Usage refresh failed: rate limited; retry later");
+  expect(busy.getByText("Available")).toBeTruthy();
+});
+
+test("after a good sign-in from this page, the row drops zeta's older auth error from its label and its lines", async () => {
   const { login } = mount([account("orchard", 0, "2026-12-09T10:59:00Z", { error: "authentication failed; log in again", provider: "codex", read: "2026-11-09T15:59:00Z" })]);
   const orchard = await row("orchard", "codex");
   expect(orchard.getByText("Sign-in expired")).toBeTruthy();
   await login.start({ provider: "codex", account: "codex:orchard" });
   // zeta's re-read catalog still carries the error: only a usage refresh rewrites it
-  await waitFor(() => expect(screen.getByText(/^signed in/)).toBeTruthy(), { timeout: 500 });
+  await waitFor(() => expect(screen.getByText(/^signed in at/i)).toBeTruthy(), { timeout: 500 });
   const list = within(screen.getByRole("list", { name: "Model accounts" }));
   const after = within(list.getByRole("heading", { name: "codex:orchard" }).closest("li")!);
   expect(after.getByText("Signed in", { selector: ".account-availability" })).toBeTruthy();
   expect(after.queryByText("Sign-in expired")).toBeNull();
-  expect(after.queryByRole("button", { name: "sign in again to codex:orchard" })).toBeNull();
+  expect(after.queryByRole("button", { name: "Sign in again to codex:orchard" })).toBeNull();
+  // the label and the lines come from one status, so no red auth line stays under "Signed in"
+  expect(list.getByRole("listitem").textContent).not.toMatch(/log in|authentication failed|refresh failed/i);
+});
+
+// Only a succeeded sign-in to this same account hides zeta's auth error.
+const otherSignIns: [string, unknown, { provider: "codex"; account: string }][] = [
+  ["a failed sign-in", { state: "failed", error: { code: "login_failed" } }, { provider: "codex", account: "codex:orchard" }],
+  ["a cancelled sign-in", { state: "cancelled" }, { provider: "codex", account: "codex:orchard" }],
+  ["a sign-in to another account", { state: "succeeded" }, { provider: "codex", account: "codex:other" }],
+];
+for (const [name, started, target] of otherSignIns) test(`${name} does not hide the auth error`, async () => {
+  const { login } = mount([orchardRow()], started);
+  await row("orchard", "codex");
+  await login.start(target);
+  await waitFor(() => expect(login.snapshot() && "at" in login.snapshot()!).toBe(true), { timeout: 500 });
+  const list = within(await screen.findByRole("list", { name: "Model accounts" }));
+  await expectSignInExpired(within(list.getByRole("heading", { name: "codex:orchard" }).closest("li")!));
 });
 
 test("arriving on the page moves focus to its title", async () => {

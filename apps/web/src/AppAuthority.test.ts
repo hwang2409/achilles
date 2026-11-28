@@ -395,21 +395,21 @@ const browserLogin = (cancel: boolean): Row => {
     const locations: string[] = [];
     window.open = (() => ({ opener: window, closed: false, close() {}, location: { replace: (url: string) => locations.push(url) } })) as typeof window.open;
     try {
-      await click(await app.findByRole("button", { name: "sign in to claude" }));
-      const dialog = app.getByRole("dialog", { name: "review browser sign-in" });
+      await click(await app.findByRole("button", { name: "Sign in to Claude" }));
+      const dialog = app.getByRole("dialog", { name: "Review browser sign-in" });
       expect(writes).toEqual([]);
       expect(disabled(dialog.querySelector('button[type="submit"]')!)).toBe(true);
       await click(dialog.querySelector('input[type="checkbox"]')!);
       await click(dialog.querySelector('button[type="submit"]')!);
       didWrite(writes, "login_start");
-      expect(app.getByText("waiting for your browser")).toBeTruthy();
+      expect(app.getByText("Waiting for your browser")).toBeTruthy();
       expect(locations).toEqual([sentinel]);
       if (cancel) {
         await click(select(app, tag("accounts.login-cancel")));
         expect(writes).toEqual(["login_start"]);
         await click(app.getByRole("group").querySelector(".confirmation-primary")!);
         expect(writes).toEqual(["login_start", "login_cancel"]);
-        expect(app.getByText(/^signed in at/)).toBeTruthy();
+        expect(app.getByText(/^Signed in at/)).toBeTruthy();
         expect(requests.filter(method => method === "account_list")).toHaveLength(2);
         expect(requests.filter(method => method !== "status" && !method.includes(" ")).at(-1)).toBe("account_list");
       }

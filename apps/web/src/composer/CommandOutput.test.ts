@@ -32,4 +32,7 @@ test("/accounts hints come from the shared account status", () => {
   expect(hint("codex:orchard")).toBe("Sign-in expired");
   expect(hint("anthropic:spare")).toBe("Needs sign-in");
   expect(hint("anthropic:default")).toBe("Current");
+  // sentence case: the current account has no switch button
+  expect(screen.getAllByRole("button", { name: /^switch to /i }).map(button => [button.getAttribute("aria-label"), button.textContent]))
+    .toEqual([["Switch to codex:default", "Switch"], ["Switch to codex:orchard", "Switch"], ["Switch to anthropic:spare", "Switch"]]);
 });

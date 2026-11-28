@@ -5,7 +5,7 @@
 .account-identity p { display: flex; gap: 4px 12px; flex-wrap: wrap; margin: 6px 0 0; }
 .account-identity p, .account-usage p, .account-window[data-stale="true"] > div { color: var(--fulcrum-muted); }
 [data-tone="warn"] .account-availability { color: var(--g1-warn); }
-.account-usage { display: grid; gap: 8px; }
+.account-usage { display: grid; gap: 8px; align-content: start; }
 .account-usage p { margin: 0; }
 [data-tone="danger"] .account-availability, .account-usage .account-refresh-failed { color: var(--fulcrum-danger); }
 .account-window { display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
@@ -24,6 +24,7 @@
 
 .account-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .account-action { width: fit-content; max-width: 100%; text-align: start; }
+.account-identity .account-action { margin-top: var(--g1-space-3); }
 .account-login { max-width: 40rem; margin-block: 24px; padding: 16px; border: 1px solid var(--fulcrum-border); border-inline-start: 2px solid var(--fulcrum-accent); overflow-wrap: anywhere; }
 .account-login:is([data-state="failed"], [data-state="blocked"], [data-state="unknown"]) { border-inline-start-color: var(--fulcrum-danger); }
 .account-login[data-state="succeeded"] { border-inline-start-color: var(--fulcrum-warn); }
