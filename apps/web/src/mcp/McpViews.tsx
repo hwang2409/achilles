@@ -3,6 +3,7 @@ import { ModuleState } from "../surface/ModuleState";
 import { OBSERVER_READ_REASON } from "../zeta";
 import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { mcpScopes, type McpReads, type McpRow, type McpScope } from "./mcpReads";
+import type { McpTestResult } from "./mcpOwner";
 
 const LIST = connectionsRoute.path;
 const labels = {
@@ -13,6 +14,9 @@ const statusOf = (row: McpRow) => row.status === "configured" && !row.trusted ? 
 const transportOf = (row: McpRow) => row.config.transport === "stdio" ? "local command"
   : row.config.transport === "streamable-http" ? "remote HTTP" : "not available";
 const detailPath = (row: McpRow) => `${LIST}/${row.scope}/${encodeURIComponent(row.name)}`;
+// The one place that decides "not loaded" vs a known count. mcp_server_list is a disk view: its tool_count is
+// always 0 at zeta f5efa62d, so only a test in this tab knows the count. read a known list count here once zeta sends one.
+const knownToolCount = (tested: McpTestResult | null) => tested?.status === "ok" ? tested.toolCount : null;
 
 type Snapshot = NonNullable<ReturnType<McpReads["snapshot"]>>;
 type ViewProps = {
@@ -55,8 +59,8 @@ export function ConnectionList({ snapshot, scope, selectScope, activeScope, row,
   </section>;
 }
 
-export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, detailList, project, go, failure, children }: ViewProps & {
-  heading: Ref<HTMLHeadingElement>; detailList: Snapshot[McpScope] | null | undefined; project: boolean; children: ReactNode;
+export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, detailList, project, go, failure, tested, children }: ViewProps & {
+  heading: Ref<HTMLHeadingElement>; detailList: Snapshot[McpScope] | null | undefined; project: boolean; tested: McpTestResult | null; children: ReactNode;
 }) {
   return <section className="mcp-detail" aria-label="connection detail">
     {!offline && detailOpen && <a className="mcp-back" href={surfaceHref(LIST)} onClick={(event) => go(event, LIST)}>‹ back to connections</a>}
@@ -66,7 +70,7 @@ export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, d
         : detailOpen ? <h2 ref={heading} tabIndex={-1}>connection detail</h2> : null}
       {children}
     </header>
-    {row ? <ConnectionFields row={row} /> : detailOpen && (detailList && "failure" in detailList ? failure(detailList.failure, project)
+    {row ? <ConnectionFields row={row} tools={knownToolCount(tested)} /> : detailOpen && (detailList && "failure" in detailList ? failure(detailList.failure, project)
       : <ModuleState kind="empty" title="connection not found" detail="choose a connection from the list" />)}
   </section>;
 }
@@ -76,7 +80,7 @@ function Status({ row }: { row: McpRow }) {
   return <span className="mcp-status" data-status={status}>{labels[status]}</span>;
 }
 
-function ConnectionFields({ row }: { row: McpRow }) {
+function ConnectionFields({ row, tools }: { row: McpRow; tools: number | null }) {
   const config = row.config;
   return <>
     <div className="mcp-rule"><h3>Configuration</h3></div>
@@ -96,8 +100,9 @@ function ConnectionFields({ row }: { row: McpRow }) {
         <dt>client secret</dt><dd>{config.oauth.secretProvided ? "provided (redacted)" : "not provided"}</dd>
       </>}
     </dl>
-    <div className="mcp-rule"><h3>Tools ({row.toolCount})</h3></div>
-    {row.toolCount === 0 && <ModuleState kind="empty" title="No tools reported" detail="Zeta has not reported any tools for this connection." />}
+    <div className="mcp-rule"><h3>{tools === null ? "Tools" : `Tools (${tools})`}</h3></div>
+    {tools === null ? <ModuleState kind="empty" title="tools not loaded" detail="test connection lists its tools" />
+      : tools === 0 && <ModuleState kind="empty" title="No tools reported" detail="Zeta has not reported any tools for this connection." />}
   </>;
 }
 

@@ -10,7 +10,7 @@ export type Account = {
   available: boolean;
   current: boolean;
   default: boolean;
-  usage: { freshness: "now" | "stale" | "usage unknown"; refreshFailed: boolean; windows: UsageWindow[] } | null;
+  usage: { freshness: "now" | "stale" | "usage unknown"; refreshFailed: boolean; capturedAt: number | null; windows: UsageWindow[] } | null;
 };
 
 export type AccountCatalog = { revision: string | null; accounts: Account[] };
@@ -39,11 +39,10 @@ function usage(value: unknown): NonNullable<Account["usage"]> {
   if (freshness !== "now" && freshness !== "stale" && freshness !== "usage unknown") throw unreadable();
   if (error !== null && (typeof error !== "string" || !safeUsageErrors.has(error))) throw unreadable();
   const refreshFailed = error !== null;
-  if (snapshot === null && freshness === "usage unknown") return { freshness, refreshFailed, windows: [] };
+  if (snapshot === null && freshness === "usage unknown") return { freshness, refreshFailed, capturedAt: null, windows: [] };
   const { version, captured_at, source, windows } = record(snapshot);
   if (freshness === "usage unknown" || version !== 1 || (source !== "usage_endpoint" && source !== "provider_error") || !Array.isArray(windows) || !windows.length) throw unreadable();
-  isoTime(captured_at);
-  return { freshness, refreshFailed, windows: windows.map((value): UsageWindow => {
+  return { freshness, refreshFailed, capturedAt: isoTime(captured_at), windows: windows.map((value): UsageWindow => {
     const { kind, used_percent, window_minutes, resets_at } = record(value);
     if (kind !== "five_hour" && kind !== "seven_day" && kind !== "primary") throw unreadable();
     if (typeof used_percent !== "number" || !Number.isFinite(used_percent) || used_percent < 0 || used_percent > 100) throw unreadable();

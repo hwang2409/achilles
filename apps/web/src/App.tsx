@@ -28,6 +28,7 @@ import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT_LABEL } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { HistoryDialog } from "./page/HistoryDialog";
+import { ArchivedBar, PageCrumbMenu } from "./page/PageArchive";
 import { PageFrame } from "./page/PageFrame";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, returnFocusToComposer, userTyping, useModalFocus } from "./keyboard";
@@ -304,6 +305,8 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const [followRequest, setFollowRequest] = useState(0);
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
   const completedCreatePages = useRef(new Set<string>());
+  // a rename, archive, or restore: read the open page again, and the page list behind Pages, search, and the palette
+  const pageChanged = () => { void active.refreshPage(); setPageRefreshNonce((current) => current + 1); };
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const { narrow, open: mobileChatOpen, setOpen: setMobileChatOpen } = usePageChatSheet();
   const mobilePageChat = narrow && hasPageSurface;
@@ -497,6 +500,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const content = <>
     {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
     {ready && agents?.sessionId === ready.sessionId && <ChatAgents key={ready.sessionId} client={client} store={store} sessionId={ready.sessionId} title={title} controls={childControls} send={childSend} readOnly={chatCanWrite ? undefined : chatReadOnlyReason} initialRun={agents.run} opener={agents.opener} onClose={() => setAgents(null)} />}
+    {activePage?.archived_at && <ArchivedBar key={activePage.id} page={activePage} onChanged={pageChanged} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
@@ -542,7 +546,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
     workspace: landing ? undefined : { canWrite, serverForcesAsk, createMode },
-    header: !landing && activePage && <ChatHeader page={activePage} docked={hasPageSurface} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onRenameRefused={ready?.controlledElsewhere ? refuseRename : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} onAgents={ready ? (opener) => setAgents({ sessionId: ready.sessionId, opener }) : undefined} />,
+    header: !landing && activePage && <ChatHeader page={activePage} docked={hasPageSurface} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onRenameRefused={ready?.controlledElsewhere ? refuseRename : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} onAgents={ready ? (opener) => setAgents({ sessionId: ready.sessionId, opener }) : undefined} onPageChanged={pageChanged} />,
     children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} client={client} /> : content,
   });
 }
@@ -693,7 +697,7 @@ function StableText({ text, reserve }: { text: string; reserve: string[] }) {
   return <span className="stable-text"><span>{text}</span>{reserve.filter((other) => other !== text).map((other) => <span key={other} aria-hidden="true">{other}</span>)}</span>;
 }
 
-function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, onRenameRefused, onHistory, onAgents }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; onRenameRefused?: () => void; onHistory: (opener: HTMLElement | null) => void; onAgents?: (opener: HTMLElement | null) => void }) {
+function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, onRenameRefused, onHistory, onAgents, onPageChanged }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; onRenameRefused?: () => void; onHistory: (opener: HTMLElement | null) => void; onAgents?: (opener: HTMLElement | null) => void; onPageChanged: () => void }) {
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
   const startRename = () => { if (!onRename) return onRenameRefused?.(); if (sessionId) rename.start(title === "new chat" ? "" : title, (value) => onRename(sessionId, value)); };
@@ -724,7 +728,7 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRenam
     : <strong ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   const routeLabel = page.route === "/" ? "Home" : page.title;
   const agents = onAgents && <button type="button" onClick={(event) => onAgents(event.currentTarget)}>Agents</button>;
-  if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions">{agents}<button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
+  if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {page.id === "home" ? routeLabel : <PageCrumbMenu page={page} onChanged={onPageChanged} />}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions">{agents}<button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
   return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span>{agents}<button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
 }
 

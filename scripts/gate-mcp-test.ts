@@ -141,6 +141,8 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
     await holder.goto(`${origin}/`, opts);
     await holder.getByRole("button", { name: "new chat", exact: true }).waitFor(opts);
     const tab = await open("stdio");
+    // mcp_server_list's tool_count is a disk view, not a probe: before a test the page shows no count.
+    await tab.getByText("tools not loaded", { exact: true }).waitFor(opts);
     let confirm = await review(tab, "starts the configured local child process");
     // every tab is its own zeta controller, next to an open chat tab; the review itself sends nothing.
     if (!feature || methods.length || roles.join() !== "controller") throw new Error("probe opened without feature, not as a controller, or sent during review");
@@ -150,6 +152,7 @@ export async function gateMcpTest(browser: Browser, origin: string, home: string
     await capture(tab, mcpTestArtifacts[0]!);
     await confirm.click(opts);
     await tab.getByText("1 tool (last test in this tab)", { exact: true }).waitFor(opts);
+    await tab.getByRole("heading", { name: "Tools (1)", exact: true }).waitFor(opts);
     await reaped("stdio");
     await capture(tab, mcpTestArtifacts[3]!);
     await tab.close();

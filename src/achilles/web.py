@@ -216,6 +216,7 @@ def create_app() -> Starlette:
                     "route",
                     "title",
                     "zeta_session_id",
+                    "archived_at",
                 )
             }
             | {
@@ -376,15 +377,47 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
             raise HTTPException(400, "limit must be an integer") from exc
         if not 1 <= limit <= 200:
             raise HTTPException(400, "limit must be between 1 and 200")
+        archived = request.query_params.get("archived", "0")
+        if archived not in ("0", "1"):
+            raise HTTPException(400, "archived must be 0 or 1")
         try:
             rows, cursor = await anyio.to_thread.run_sync(
-                store.pages, limit, _parse_page_cursor(request.query_params.get("before"))
+                store.pages,
+                limit,
+                _parse_page_cursor(request.query_params.get("before")),
+                archived == "1",
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return JSONResponse(
             {"pages": rows, "next": _page_cursor(*cursor) if cursor is not None else None}
         )
+
+    async def patch_page(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        body = await json_object(request)
+        if not body or not set(body) <= {"title", "archived"}:
+            raise HTTPException(400, "provide only title or archived")
+        title = body.get("title")
+        if "title" in body:
+            if not isinstance(title, str) or not title.strip():
+                raise HTTPException(400, "title must be a non-blank string")
+            if len(title) > 200:
+                raise HTTPException(400, "title must be at most 200 characters")
+            title = _text(title.strip())
+        archived = body.get("archived")
+        if "archived" in body and not isinstance(archived, bool):
+            raise HTTPException(400, "archived must be a boolean")
+        try:
+            row = await anyio.to_thread.run_sync(
+                store.update_page, request.path_params["id"], title, archived
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "page not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return JSONResponse({key: row[key] for key in ("id", "route", "title", "archived_at")})
 
     async def chats(request):
         if not _same_origin(request):
@@ -735,6 +768,7 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
                 record,
                 methods=["PATCH", "DELETE"],
             ),
+            Route("/api/pages/{id}", patch_page, methods=["PATCH"]),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),

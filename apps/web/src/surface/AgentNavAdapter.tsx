@@ -19,6 +19,7 @@ export type PageLink = {
   create_mode: boolean;
   chat_count: number;
   created_by_route: string | null;
+  archived_at?: string | null;
 };
 
 export type Chat = {
