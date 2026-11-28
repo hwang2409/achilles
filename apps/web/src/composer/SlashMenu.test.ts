@@ -7,6 +7,7 @@ import { RunProvider } from "@fulcrum/react";
 import type { SlashCommandInfo, ZetaClient } from "@fulcrum/zeta";
 import { PlainComposer } from "./PlainComposer";
 import { useComposerCommands } from "./ComposerCommands";
+import { getSettings, updateSettings } from "../settings";
 
 afterEach(cleanup);
 
@@ -126,6 +127,37 @@ function slashHook(replies: Record<string, Reply[]>, features = ["model_input_id
   };
   return { hook, calls, restored, run, slashRuns: () => calls.filter(([method]) => method === "slash_run") };
 }
+
+test("the menu leaves out /project-instructions and keeps every other command in the server's order", async () => {
+  const h = slashHook({ slash_list: [{ commands: [row("help", "list commands"), row("project-instructions", "open or create private project instructions in your editor"), row("vim", "show or change vim mode"), row("project", "show the project")] }] });
+  await act(async () => { h.hook.rerender({ draft: "/" }); });
+  expect(h.hook.result.current.slashList?.map((command) => command.name)).toEqual(["help", "vim", "project"]);
+});
+
+test("/vim toggles achilles' vim mode without slash_run; /vim on and off set it; other commands still go to zeta", async () => {
+  const before = getSettings().vim;
+  try {
+    updateSettings({ vim: false });
+    const h = slashHook({ slash_run: [{ kind: "output", text: "session status" }] });
+    let ran = false;
+    await act(async () => { ran = h.hook.result.current.run({ name: "vim", arg: "" }, null, "/vim"); });
+    expect([ran, getSettings().vim]).toEqual([true, true]);
+    await h.run("/vim");
+    expect(getSettings().vim).toBe(false);
+    await h.run("/vim on");
+    await h.run("/vim on");
+    expect(getSettings().vim).toBe(true);
+    await h.run("/vim off");
+    expect(getSettings().vim).toBe(false);
+    await act(async () => { ran = h.hook.result.current.run({ name: "vim", arg: "maybe" }, null, "/vim maybe"); });
+    expect([ran, getSettings().vim, h.hook.result.current.output]).toEqual([false, false, { text: "use /vim, /vim on, or /vim off.", error: true }]);
+    expect(h.slashRuns()).toEqual([]);
+    await h.run("/status");
+    expect(h.slashRuns()).toEqual([["slash_run", { session_id: "s1", text: "/status" }]]);
+  } finally {
+    updateSettings({ vim: before });
+  }
+});
 
 const long = "/review  look at the parser,\n  then the tests ";
 
