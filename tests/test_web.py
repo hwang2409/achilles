@@ -1819,7 +1819,7 @@ def test_render_runner_failure_is_a_plain_error_and_kills_its_group(
     for _ in range(100):  # SIGKILL is delivered asynchronously
         try:
             os.killpg(group, 0)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):  # macOS: EPERM when only zombies remain
             break
         time.sleep(0.05)
     else:
