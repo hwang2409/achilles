@@ -8,6 +8,7 @@ import { surfaceHref } from "./routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import type { ParkedRow } from "../zeta/parked";
 import { rowState } from "../zeta/rowState";
+import { useChatNotifications } from "../notify";
 
 export type PageLink = {
   id: string;
@@ -172,6 +173,8 @@ export function useAgentNavAdapter({ parked = [], sessionId, waiting, canWrite, 
     }, (item) => item.session_id, setChatList, 50, 200);
   }
   const chats = chatList.items ?? [];
+  // shortcut: notifications follow the first page without a search (recentChats); a search pauses them until it clears
+  useChatNotifications(recentChats);
   const loading = chatList.items === null && !chatList.error;
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 200); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { setActiveResult(0); }, [search]);

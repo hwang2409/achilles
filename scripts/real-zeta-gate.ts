@@ -17,6 +17,7 @@ import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls"
 import { childRecoveryArtifacts, gateChildRecovery } from "./gate-child-recovery";
 import { gateParkedChats, parkArtifacts } from "./gate-park";
 import { attentionArtifacts, gateAttention } from "./gate-attention";
+import { gateNotifications } from "./gate-notify";
 import { gateGraceContinue, graceArtifacts } from "./gate-grace";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
@@ -589,6 +590,10 @@ with _database() as db:
   const attentionZeta = await readDiscovery(attentionDiscovery);
   await gateAttention(browser, origin, { ...attentionZeta, url: `ws://127.0.0.1:${attentionZeta.port}` }, screenshotDir);
   await stop(attentionServer);
+  // browser notifications on chat rows another tab writes; its synthetic chats are dropped after, as above
+  const notifyChats = await gateNotifications(browser, origin, waitFor);
+  const dropNotifyChats = start("uv", ["run", "python", "-c", "import sys; from achilles.web import _database; db=_database(); db.executemany('DELETE FROM chat WHERE session_id=?', [(id,) for id in sys.argv[1:]]); db.commit(); db.close()", ...notifyChats], env);
+  if (!(await waitForExit(dropNotifyChats, 10_000)) || dropNotifyChats.exitCode !== 0) throw new Error(`notify chat cleanup exited ${dropNotifyChats.exitCode}`);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
