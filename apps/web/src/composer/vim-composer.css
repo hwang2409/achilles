@@ -46,7 +46,7 @@
 .vim-guidance [data-part="composer-status"] { flex: 1; min-width: 0; }
 .vim-guidance [data-part="composer-hint"] { display: block; white-space: nowrap; }
 
-[data-part="composer"] .vim-mode-chip { flex: none; min-width: 6ch; height: 24px; padding-inline: 6px; border-radius: 12px; background: var(--g1-hover); color: var(--g1-muted); font-size: 12px; line-height: 24px; text-align: center; }
+[data-part="composer"] .vim-mode-chip { flex: none; min-width: 6ch; height: 24px; padding-inline: 6px; border-radius: var(--g1-radius-control); background: var(--g1-hover); color: var(--g1-muted); font-size: 12px; line-height: 24px; text-align: center; }
 .vim-composer:not([data-focused]) .cm-fat-cursor,
 .vim-composer:not([data-focused]) .cm-cursor { display: none; }
 .vim-pending {

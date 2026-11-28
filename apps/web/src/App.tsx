@@ -32,7 +32,7 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, returnFocusToComposer, userTyping, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { backoff, supportsFeature, supportsRequest, type Connection, type ConnectionState } from "./zeta";
+import { backoff, historyImageLoader, supportsFeature, supportsRequest, type Connection, type ConnectionState } from "./zeta";
 import { IMAGE_FEATURE, IMAGE_REQUEST } from "./composer/images";
 import { TOO_MANY_CHATS } from "./zeta/session";
 import { parkedRows, subscribeParked } from "./zeta/parked";
@@ -273,6 +273,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
   const activeStore = store ?? emptyStore;
+  const loadMedia = useMemo(() => historyImageLoader(client), [client]);
   const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
     const state = store.getState();
     const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
@@ -526,7 +527,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
       : busyPage ? <>{hasSurface(busyPage.page) && <PageSurface page={busyPage.page} credential={busyPage.credential} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
-      : <RunProvider store={activeStore}>
+      : <RunProvider store={activeStore} loadMedia={loadMedia}>
         <div className={hasPageSurface ? "page-view docked" : "page-view"}>
         {hasPageSurface && <PageSurface page={activePage} credential={(ready ?? empty)!.credential} />}
         <div className={`page-chat${hasPageSurface ? " page-chat-docked" : ""}${pageChatSheetClosed ? " page-chat-sheet-closed" : ""}`}>

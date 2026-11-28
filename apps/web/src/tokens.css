@@ -10,7 +10,7 @@
   --g1-selected: color-mix(in srgb, var(--g1-fg) 8%, transparent);
   --g1-hover: color-mix(in srgb, var(--g1-fg) 3%, transparent);
   --g1-rule: var(--g1-border);
-  --g1-border: #E5E5E5;
+  --g1-border: #E0E0E0;
   --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg)); /* 3:1 on the surface as well as the canvas */
   --g1-fg: #0A0A0A;
   --g1-fg-2: var(--g1-fg);
@@ -37,9 +37,11 @@
   --g1-leading-chat: 1.5;
   --g1-type-title: 20px;
   --g1-weight-title: 600;
-  --g1-radius-container: 10px;
-  --g1-radius-chat: 14px;
-  --g1-radius-control: 8px;
+  /* firm edges: one radius scale, 4px at most. the dot radius is only for round status marks and knobs */
+  --g1-radius-container: 4px;
+  --g1-radius-chat: 4px;
+  --g1-radius-control: 2px;
+  --g1-radius-dot: 50%;
   --g1-control-height: 32px;
   --g1-icon-height: 28px;
   --g1-touch-height: 44px;
@@ -65,8 +67,9 @@
   --g1-page-padding: var(--g1-space-6) var(--g1-page-gutter);
   --g1-list-row-height: 52px;
   --g1-content-max: 736px;
-  --g1-shadow-xs: 0 1px 2px rgb(0 0 0 / .05);
-  --g1-shadow-floating: 0 10px 24px rgb(0 0 0 / .18);
+  /* the 1px border carries the edge; the floating shadow is short and tight, not a soft glow */
+  --g1-shadow-floating: 0 4px 8px -4px rgb(0 0 0 / .2);
+  --g1-press-scale: .96;
 }
 
 [data-achilles-theme="g1-dark"] {
@@ -80,7 +83,7 @@
   --g1-selected: color-mix(in srgb, var(--g1-fg) 10%, transparent);
   --g1-hover: color-mix(in srgb, var(--g1-fg) 4%, transparent);
   --g1-rule: var(--g1-border);
-  --g1-border: rgb(255 255 255 / .07);
+  --g1-border: rgb(255 255 255 / .1);
   --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg));
   --g1-fg: #F0F0F0;
   --g1-fg-2: var(--g1-fg);
@@ -111,7 +114,7 @@
     --g1-selected: color-mix(in srgb, var(--g1-fg) 10%, transparent);
     --g1-hover: color-mix(in srgb, var(--g1-fg) 4%, transparent);
     --g1-rule: var(--g1-border);
-    --g1-border: rgb(255 255 255 / .07);
+    --g1-border: rgb(255 255 255 / .1);
     --g1-control-border: color-mix(in srgb, var(--g1-fg) 53%, var(--g1-bg));
     --g1-fg: #F0F0F0;
     --g1-fg-2: var(--g1-fg);

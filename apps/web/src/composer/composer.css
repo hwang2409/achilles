@@ -1,4 +1,4 @@
-/* orca's composer: one rounded box whose border, fill, and height never change on focus, typing, or vim mode.
+/* orca's composer: one firm box whose border, fill, and height never change on focus, typing, or vim mode.
    --g1-panel is the canvas in light and the raised surface in dark, so 60% of it gives orca's fill in both themes
    (light: the canvas; dark: about fg 4% over the canvas). */
 .main-pane [data-part="composer"] {
@@ -8,9 +8,8 @@
   padding: 6px;
   container-type: inline-size;
   border: 1px solid color-mix(in srgb, var(--g1-fg) 10%, transparent);
-  border-radius: 23px; /* concentric with the 32px round send button: 16 + 6 padding + 1 border */
+  border-radius: var(--g1-radius-container); /* the 6px padding is wider than the corner, so the controls inside take the small control radius */
   background: color-mix(in srgb, var(--g1-panel) 60%, var(--g1-bg));
-  box-shadow: var(--g1-shadow-xs);
 }
 /* the top inset lives on the field, not in the textarea, so a scrolled draft clips 4px below the border, not on it */
 .main-pane [data-part="composer-field"] { min-height: 48px; }
@@ -28,12 +27,12 @@
 .main-pane [data-part="composer-bar"] { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 0 0 8px; }
 .main-pane [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--fulcrum-muted); font-size: inherit; line-height: 16px; white-space: nowrap; overflow: hidden; }
 .main-pane [data-part="composer-hint"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; font-size: calc(var(--achilles-ui-size, var(--g1-type-chat)) - 1px); }
-/* send, steer, queue, and stop are one 32px round button with a centered icon; the word stays in the DOM for gates
+/* send, steer, queue, and stop are one 32px square button with a centered icon; the word stays in the DOM for gates
    and find-in-page, the aria-label names it. */
 .main-pane [data-part="composer"] :is([data-part="composer-submit"], [data-part="composer-stop"]) {
   position: relative; flex: none;
   width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0;
-  border: 1px solid; border-radius: 50%;
+  border: 1px solid; border-radius: var(--g1-radius-control);
   font-size: 0; opacity: 1;
 }
 /* the icon is centered on the whole button, so the hidden word cannot push it off center */
@@ -60,8 +59,7 @@
 [data-part="composer-mode-item"] { display: contents; }
 [data-part="composer"] [data-part="composer-mode"] {
   position: relative; display: inline-flex; flex: none; align-items: center; gap: 6px; height: 24px; min-height: 24px; padding: 0 8px;
-  /* a pill: 11px from the card's bottom edge, so 12px keeps it concentric with the card's 23px corner */
-  border: 1px solid transparent; border-radius: 12px; background: transparent;
+  border: 1px solid transparent; border-radius: var(--g1-radius-control); background: transparent;
   color: var(--g1-muted); font-size: 12px; line-height: 1; white-space: nowrap;
   transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
@@ -77,7 +75,7 @@
 }
 /* a switch held still (a read-only tab, or a reason) looks held, not live */
 [data-part="composer"] [data-part="composer-mode"][aria-disabled="true"]:not([aria-busy="true"]) { opacity: .5; cursor: not-allowed; }
-[data-part="composer-mode-dot"] { flex: none; width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1px currentColor; }
+[data-part="composer-mode-dot"] { flex: none; width: 6px; height: 6px; border-radius: var(--g1-radius-dot); box-shadow: inset 0 0 0 1px currentColor; }
 [aria-checked="true"] > [data-part="composer-mode-dot"] { background: currentColor; }
 [data-part="composer-mode-note"] { color: var(--g1-muted); font-size: 12px; white-space: nowrap; }
 [data-part="composer-mode-note"][data-tone="danger"] { color: var(--fulcrum-danger); }
@@ -100,7 +98,7 @@
 }
 
 @media (max-width: 760px), (max-height: 500px) {
-  .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: calc(12px + env(safe-area-inset-bottom)); border-radius: 29px; /* the 44px button: 22 + 7 */ }
+  .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .main-pane [data-part="composer"] :is([data-part="composer-submit"], [data-part="composer-stop"]) { min-width: 44px; min-height: 44px; }
   .main-pane [data-part="composer"] [data-part="composer-mode"] { height: 44px; min-height: 44px; }
   .main-pane [data-part="composer"] [data-part="composer-mode"]::after { display: none; }
