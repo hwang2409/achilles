@@ -77,7 +77,7 @@ test("the token layer names type, weight, motion, stacking, state strength and t
     "--g1-hover": "light-dark(color-mix(in srgb, var(--g1-fg) 7%, transparent), color-mix(in srgb, var(--g1-fg) 8%, transparent))",
     "--g1-selected": "color-mix(in srgb, var(--g1-fg) 12%, transparent)",
     "--g1-selected-bar": "var(--g1-selection-width) solid var(--g1-selection)",
-    "--g1-muted-on-selected": "light-dark(#5C5C5C, #B3B3B3)",
+    "--g1-muted-on-selected": "light-dark(#5C5C5C, #BABABA)",
     "--g1-scrim": "transparent",
   });
 });
@@ -107,11 +107,14 @@ test("muted text in a selected row reads at 4.5:1 or more on the selected fill, 
   const ratios = ([0, 1] as const).flatMap((side) => {
     const fg = channel(sides("--g1-fg")[side]);
     const share = percents[side] ?? percents[0];
-    return ["--g1-bg", "--g1-bg-subtle", "--g1-sidebar"].map((surface) => {
-      const fill = channel(sides(surface)[side]).map((v, i) => share * fg[i] + (1 - share) * v);
+    const sidebar = channel(sides("--g1-sidebar")[side]);
+    // the sidebar's chat-group card (shell.css --chat-group-fill): light 60% canvas over the sidebar, dark 4% text over it
+    const card = side === 0 ? channel(sides("--g1-bg")[0]).map((v, i) => 0.6 * v + 0.4 * sidebar[i]) : sidebar.map((v, i) => 0.04 * fg[i] + 0.96 * v);
+    return [channel(sides("--g1-bg")[side]), channel(sides("--g1-bg-subtle")[side]), sidebar, card].map((surface) => {
+      const fill = surface.map((v, i) => share * fg[i] + (1 - share) * v);
       return Math.round(contrast(channel(muted[side]), fill) * 100) / 100;
     });
   });
   expect(ratios.filter((ratio) => ratio < 4.5)).toEqual([]);
-  expect(ratios).toEqual([5.14, 4.73, 4.73, 6.28, 5.15, 4.81]);
+  expect(ratios).toEqual([5.14, 4.73, 4.73, 4.97, 6.78, 5.57, 5.2, 4.66]);
 });
