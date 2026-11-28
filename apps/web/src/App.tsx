@@ -46,6 +46,7 @@ import "./style.css";
 import { continuationNotification } from "./chat/continuation";
 import "./chat/continuation.css";
 import { withChildRecovery } from "./chat/ChildRecoveryNotice";
+import { BranchActionContext, BranchFromHere, BranchSwitcher, useBranches } from "./chat/branches";
 import "./shell.css";
 import "./chat/transcript.css";
 import "./composer/composer.css";
@@ -78,11 +79,12 @@ const renderers: Renderers = { notification: withChildRecovery(ChatNotification)
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
 // inside the reply that is still streaming. it shows here once delivery settles (a drop its turn did not read stays
 // hidden while it goes out again as a new message, which then takes over this row).
-function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
+function UserRow({ id, queued, onForked }: { id: string; queued: ReadonlySet<string>; onForked: () => void }) {
   const item = useItem(id);
   const event = item?.type === "user" && item.event.type === "user_message" ? item.event : undefined;
   if (event?.mode === "steer" && event.delivery_id && queued.has(event.delivery_id)) return null;
-  return <Fallback id={id} />;
+  if (!event || event.text_omitted) return <Fallback id={id} />;
+  return <div className="user-turn"><Fallback id={id} /><BranchFromHere rowId={id} onForked={onForked} /></div>;
 }
 
 const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
@@ -302,6 +304,11 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   const refreshKey = `${completedTurns}:${completedTools}:${restores}`;
   const previousRefreshKey = useRef(refreshKey);
   const waiting = Number(approvalCount);
+  const branches = useBranches(client, ready?.sessionId ?? null, store, completedTurns, turn === "running");
+  // zeta forks and switches only an idle chat this tab holds
+  const branchOff = !chatCanWrite ? heldElsewhere ? "branch it in the tab that has this chat." : chatReadOnlyReason
+    : turn === "running" || waiting ? "wait for this turn to finish." : null;
+  const branchAction = useMemo(() => branches.supported && ready ? { fork: branches.fork, disabledReason: branchOff ?? (branches.pending ? "branching…" : null) } : null, [branches.supported, branches.fork, ready, branchOff, branches.pending]);
   const [followRequest, setFollowRequest] = useState(0);
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
   const completedCreatePages = useRef(new Set<string>());
@@ -414,7 +421,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
   const recovery = ready && client ? { id: authErrorId ?? "", client, chat: { id: ready.sessionId, title: ready.title }, sessionId: ready.sessionId, login: accountLogin, canWrite: chatCanWrite, onNewChat: active.newChat } : null;
-  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} took={tookControl} disabledReason={!chatCanWrite ? heldElsewhere ? "approve it in the tab that has this chat." : chatReadOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!chatCanWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!chatCanWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
+  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} onForked={() => setPageChatFocusRequest((value) => value + 1)} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} took={tookControl} disabledReason={!chatCanWrite ? heldElsewhere ? "approve it in the tab that has this chat." : chatReadOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!chatCanWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!chatCanWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasPageSurface ? "Ask about this page" : "Message Zeta";
@@ -525,7 +532,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
         {hasPageSurface && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${pageChatSheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "Page chat"} state={state} stateLabel={stateLabel}
           onSelect={active.selectChat} newChat={newPageChatReason ? undefined : active.newChat} newReason={canWrite ? newPageChatReason : undefined}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={chatCanWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><ToolDisclosure sessionId={ready.sessionId} cwd={ready.cwd}><SubAgentNavigationProvider value={agentNavigation}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></SubAgentNavigationProvider></ToolDisclosure></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={chatCanWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><BranchActionContext.Provider value={branchAction}><ToolDisclosure sessionId={ready.sessionId} cwd={ready.cwd}><SubAgentNavigationProvider value={agentNavigation}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></SubAgentNavigationProvider></ToolDisclosure></BranchActionContext.Provider></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
@@ -533,6 +540,7 @@ export function AgentSurface({ connection, childControls, childSend, client, con
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "auto" });
         }} aria-label="jump to latest" title="jump to latest"><span data-jump-label="full">jump to latest</span><span data-jump-label="compact" aria-hidden="true">↓</span></button></div>}
         </section>
+        {ready && branches.note && <p className="branch-note" role={branches.note.failed ? "alert" : "status"} data-failed={branches.note.failed ? "" : undefined}>{branches.note.text}</p>}
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={chatCanWrite && settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} chat={ready ? { id: ready.sessionId, title } : null} canWrite={chatCanWrite} controls={composerModes} />
         </div>
         </div>
@@ -546,7 +554,8 @@ export function AgentSurface({ connection, childControls, childSend, client, con
   return renderShell({ current: place, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
     newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
     workspace: landing ? undefined : { canWrite, serverForcesAsk, createMode },
-    header: !landing && activePage && <ChatHeader page={activePage} docked={hasPageSurface} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onRenameRefused={ready?.controlledElsewhere ? refuseRename : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} onAgents={ready ? (opener) => setAgents({ sessionId: ready.sessionId, opener }) : undefined} onPageChanged={pageChanged} />,
+    header: !landing && activePage && <ChatHeader page={activePage} docked={hasPageSurface} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} onRename={!chatCanWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onRenameRefused={ready?.controlledElsewhere ? refuseRename : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} onAgents={ready ? (opener) => setAgents({ sessionId: ready.sessionId, opener }) : undefined} onPageChanged={pageChanged}
+      branch={ready && branches.supported && <BranchSwitcher branches={branches.branches} disabledReason={branchOff} pending={branches.pending} onSelect={branches.select} />} />,
     children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} client={client} /> : content,
   });
 }
@@ -697,7 +706,7 @@ function StableText({ text, reserve }: { text: string; reserve: string[] }) {
   return <span className="stable-text"><span>{text}</span>{reserve.filter((other) => other !== text).map((other) => <span key={other} aria-hidden="true">{other}</span>)}</span>;
 }
 
-function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, onRenameRefused, onHistory, onAgents, onPageChanged }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; onRenameRefused?: () => void; onHistory: (opener: HTMLElement | null) => void; onAgents?: (opener: HTMLElement | null) => void; onPageChanged: () => void }) {
+function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRename, onRenameRefused, onHistory, onAgents, onPageChanged, branch }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; stateLabel: string; onRename?: (sessionId: string, title: string) => void; onRenameRefused?: () => void; onHistory: (opener: HTMLElement | null) => void; onAgents?: (opener: HTMLElement | null) => void; onPageChanged: () => void; branch?: ReactNode }) {
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
   const startRename = () => { if (!onRename) return onRenameRefused?.(); if (sessionId) rename.start(title === "new chat" ? "" : title, (value) => onRename(sessionId, value)); };
@@ -728,8 +737,8 @@ function ChatHeader({ page, docked, sessionId, title, state, stateLabel, onRenam
     : <strong ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   const routeLabel = page.route === "/" ? "Home" : page.title;
   const agents = onAgents && <button type="button" onClick={(event) => onAgents(event.currentTarget)}>Agents</button>;
-  if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {page.id === "home" ? routeLabel : <PageCrumbMenu page={page} onChanged={onPageChanged} />}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions">{agents}<button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
-  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span>{agents}<button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
+  if (docked) return <header className="chat-header"><div className="chat-heading"><span className="page-crumb" title={routeLabel}>Pages <span aria-hidden="true">/</span> {page.id === "home" ? routeLabel : <PageCrumbMenu page={page} onChanged={onPageChanged} />}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions">{branch}{agents}<button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
+  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel}</span><span aria-hidden="true">/</span>{titleNode}</div><div className="chat-actions"><span className={`run-state state-${state}`} role="status" hidden={state === "idle"}>{stateLabel}</span>{branch}{agents}<button type="button" onClick={(event) => onHistory(event.currentTarget)}>History</button></div></header>;
 }
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {

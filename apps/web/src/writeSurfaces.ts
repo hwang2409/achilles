@@ -59,6 +59,8 @@ export const WRITE_SURFACE = {
   passiveTitle: "passive.title",
   passiveAttachment: "passive.attachment",
   passiveRepair: "passive.repair",
+  chatBranchFrom: "chat.branch-from",
+  chatBranchSwitch: "chat.branch-switch",
 } as const;
 
 export type WriteSurfaceId = (typeof WRITE_SURFACE)[keyof typeof WRITE_SURFACE];
@@ -78,6 +80,7 @@ export const WRITE_SURFACES: readonly WriteSurfaceMetadata[] = [
   ["pageChatNew", "http-and-websocket", "visible"], ["composerAutoApprove", "websocket", "visible"], ["composerCreateMode", "http-and-websocket", "visible"],
   ["settingsTheme", "storage", "visible", "browser-only"], ["settingsUiFont", "storage", "visible", "browser-only"], ["settingsCodeFont", "storage", "visible", "browser-only"], ["settingsSize", "storage", "visible", "browser-only"], ["settingsDensity", "storage", "visible", "browser-only"], ["settingsVim", "storage", "visible", "browser-only"], ["settingsNotify", "storage", "visible", "browser-only"], ["settingsAutoApprove", "storage-and-shared-default", "visible"], ["settingsReset", "storage-and-shared-default", "visible"], ["settingsTelemetry", "websocket", "visible"],
   ["passiveLastState", "persistence", "passive"], ["passiveFirstMessage", "persistence", "passive"], ["passiveTitle", "persistence", "passive"], ["passiveAttachment", "persistence", "passive"], ["passiveRepair", "persistence", "passive"],
+  ["chatBranchFrom", "websocket", "visible"], ["chatBranchSwitch", "websocket", "visible"],
 ].map(([key, channel, visibility, observer]) => ({ id: WRITE_SURFACE[key as keyof typeof WRITE_SURFACE], channel: channel as WriteSurfaceMetadata["channel"], visibility: visibility as WriteSurfaceMetadata["visibility"], observer: observer as WriteSurfaceMetadata["observer"] }));
 
 export const writeSurfaceIds: readonly WriteSurfaceId[] = WRITE_SURFACES.map(({ id }) => id);

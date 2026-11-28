@@ -16,7 +16,7 @@ beforeEach(() => { sessionStorage.clear(); });
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "mcp_auth_status", "agent_run_catalog", "list_sessions", "state_sessions", "state_session"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "mcp_auth_status", "agent_run_catalog", "list_sessions", "state_sessions", "state_session", "session_tree"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route).
@@ -37,7 +37,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
   const originalFetch = globalThis.fetch;
   const OriginalSocket = globalThis.WebSocket;
   const oldSettings = getSettings();
-  const keys = [SETTINGS_KEY, pendingKey, "achilles-pending-create-modes", "achilles:unsent:session", "achilles:unsent:new:page"];
+  const keys = [SETTINGS_KEY, pendingKey, "achilles-pending-create-modes", "achilles:unsent:session", "achilles:unsent:new:page", "achilles:branch-order:session"];
   const oldStorage = keys.map((key) => localStorage.getItem(key));
   keys.forEach((key) => localStorage.removeItem(key));
   if (options.pending) localStorage.setItem(pendingKey, pendingRecord);
@@ -702,6 +702,43 @@ test("/agents is read-only: no agent write surface, and a run says where to cont
   });
 });
 
+// a chat with two user turns; `fork_message` from the first turn leaves only it, `switch_branch` to "leaf-1" restores both
+const branchRows = [
+  { id: "u1", role: "user", content: [{ type: "text", text: "first question" }] },
+  { id: "a1", role: "assistant", content: [{ type: "text", text: "first reply" }] },
+  { id: "u2", role: "user", content: [{ type: "text", text: "second question" }] },
+  { id: "a2", role: "assistant", content: [{ type: "text", text: "second reply" }] },
+];
+const BRANCH_REQUESTS = ["session_tree", "fork_message", "switch_branch"];
+function branchChat(extra: { status?: object; branched?: boolean } = {}) {
+  // like zeta: branches are listed in head entry order, and a switch re-anchors the target leaf under a new, newest id
+  const server = { forked: Boolean(extra.branched), heads: extra.branched ? [{ id: "leaf-1", label: "second question", forked: false }, { id: "leaf-2", label: "first question", forked: true }] : [{ id: "leaf-1", label: "second question", forked: false }], next: 3, calls: [] as { method: string; params: Record<string, unknown> }[] };
+  const status = extra.status ?? { session: { session_id: "session" }, state: "idle" };
+  const tree = () => ({ result: { branches: server.heads.map((head) => ({ id: head.id, label: head.label, depth: server.heads.length > 1 ? 1 : 0, current: head.forked === server.forked })) } });
+  const record = (method: string, params: Record<string, unknown>) => { server.calls.push({ method, params }); };
+  const options: Options = { attached: true, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: BRANCH_REQUESTS } } }),
+    session_history_and_subscribe: () => ({ result: { messages: server.forked ? branchRows.slice(0, 1) : branchRows, next_before: null, status } }),
+    session_tree: tree,
+    fork_message: (params) => { record("fork_message", params); server.forked = true; server.heads.push({ id: `leaf-${server.next++}`, label: "first question", forked: true }); return tree(); },
+    switch_branch: (params) => {
+      record("switch_branch", params);
+      const target = server.heads.find((head) => head.id === params.head_id)!;
+      server.forked = target.forked;
+      server.heads = [...server.heads.filter((head) => head !== target), { ...target, id: `leaf-${server.next++}` }];
+      return tree();
+    },
+  } };
+  return { server, options };
+}
+const branchFrom = async (app: RenderResult, text: string) => {
+  const bubble = await app.findByText(text, { selector: ".transcript *" });
+  const control = bubble.closest(".user-turn")?.querySelector<HTMLElement>(tag("chat.branch-from")) ?? null;
+  expect(control, `branch from here under "${text}"`).not.toBeNull();
+  return control;
+};
+const chip = (app: RenderResult) => app.container.querySelector<HTMLElement>(".branch-chip");
+
 const rows: Record<WriteSurfaceId, Row> = {
   "accounts.login": browserLogin(false),
   "accounts.login-cancel": browserLogin(true),
@@ -955,6 +992,21 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(getSettings().vim).toBe(true);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!).vim).toBe(true);
     expect(writes).toEqual([]);
+  } },
+  "chat.branch-from": { kind: "visible", options: branchChat().options, check: async (app, authority, writes) => {
+    const control = await branchFrom(app, "first question");
+    expect(control, "branch from here").not.toBeNull();
+    expect(disabled(control!)).toBe(authority === "observer");
+    await click(control!);
+    if (authority === "controller") didWrite(writes, "fork_message");
+  } },
+  "chat.branch-switch": { kind: "visible", options: branchChat({ branched: true }).options, check: async (app, authority, writes) => {
+    await waitFor(() => expect(chip(app)?.getAttribute("aria-label")).toBe("branch 2 of 2"));
+    await click(chip(app)!);
+    const other = select(app, `.branch-list ${tag("chat.branch-switch")}:not([aria-current])`);
+    expect(disabled(other)).toBe(authority === "observer");
+    await click(other);
+    if (authority === "controller") didWrite(writes, "switch_branch");
   } },
 };
 
@@ -1523,5 +1575,101 @@ test("a slash command refused during a turn gives its exact text back, but never
     expect(field().value).toBe("newer text");
     expect(writes.filter((write) => write === "slash_run")).toHaveLength(2);
     expect(writes).not.toContain("send");
+  });
+});
+
+describe("branch from a user message", () => {
+  const transcript = (app: RenderResult) => app.container.querySelector(".transcript")!.textContent ?? "";
+  test("forks at the message, reloads the transcript, says files are not changed, and switching back restores it", async () => {
+    const { server, options } = branchChat();
+    await withApp("controller", options, async (app, writes) => {
+      const control = await branchFrom(app, "first question");
+      expect(control?.textContent).toBe("branch from here");
+      expect(chip(app)).toBeNull();
+      await click(control!);
+      expect(server.calls).toEqual([{ method: "fork_message", params: { session_id: "session", message_id: "u1" } }]);
+      await waitFor(() => expect(transcript(app)).not.toContain("second question"));
+      expect(transcript(app)).toContain("first question");
+      expect(chip(app)?.getAttribute("aria-label")).toBe("branch 2 of 2");
+      expect(app.getByText("new branch continues after this message · files are not changed").getAttribute("role")).toBe("status");
+      const field = select(app, '[data-part="composer-field"] textarea') as HTMLTextAreaElement;
+      await waitFor(() => expect(document.activeElement).toBe(field));
+      expect(field.value).toBe("");
+      expect(app.container.textContent).not.toContain("edit");
+
+      await click(chip(app)!);
+      expect(chip(app)!.getAttribute("aria-expanded")).toBe("true");
+      const listed = [...app.container.querySelectorAll(".branch-list button")].map((row) => [row.textContent, row.getAttribute("aria-current")]);
+      expect(listed).toEqual([["branch 1second question", null], ["branch 2first question", "true"]]);
+      await click(select(app, '.branch-list button:not([aria-current])'));
+      expect(server.calls.at(-1)).toEqual({ method: "switch_branch", params: { session_id: "session", head_id: "leaf-1" } });
+      await waitFor(() => expect(transcript(app)).toContain("second reply"));
+      expect(chip(app)?.getAttribute("aria-label")).toBe("branch 1 of 2");
+      expect(app.container.querySelector(".branch-list")).toBeNull();
+      expect(document.activeElement).toBe(chip(app));
+      // zeta re-anchored branch 1 under a new id and lists it last; achilles keeps its number
+      expect(server.heads.map((head) => head.id)).toEqual(["leaf-3", "leaf-4"]);
+      await click(chip(app)!);
+      expect([...app.container.querySelectorAll(".branch-list button")].map((row) => [row.textContent, row.getAttribute("aria-current")])).toEqual([["branch 1second question", "true"], ["branch 2first question", null]]);
+      expect(writes.filter((write) => write === "fork_message" || write === "switch_branch")).toEqual(["fork_message", "switch_branch"]);
+    });
+  });
+
+  test("another tab of this browser that moves the chat to another branch reloads this tab's transcript and chip", async () => {
+    const { server, options } = branchChat();
+    await withApp("controller", options, async (app) => {
+      await app.findByText("second question", { selector: ".transcript *" });
+      server.forked = true;
+      server.heads.push({ id: "leaf-9", label: "first question", forked: true });
+      const other = new BroadcastChannel("achilles:branches");
+      try {
+        other.postMessage("someone-else");
+        other.postMessage("session");
+        await waitFor(() => expect(transcript(app)).not.toContain("second question"));
+        await waitFor(() => expect(chip(app)?.getAttribute("aria-label")).toBe("branch 2 of 2"));
+      } finally { other.close(); }
+      expect(server.calls).toEqual([]);
+    });
+  });
+
+  test("a message sent from this tab reads its entry id from zeta again before it forks", async () => {
+    const { server, options } = branchChat();
+    let saved = false;
+    const rpc = { ...options.rpc!, session_history_and_subscribe: () => ({ result: { messages: saved ? [...branchRows.slice(0, 2), { ...branchRows[2], delivery_id: "d1" }] : branchRows.slice(0, 2), next_before: null, status: { session: { session_id: "session" }, state: "idle" } } }) };
+    await withApp("controller", { ...options, rpc }, async (app, _writes, _requests, emit) => {
+      await app.findByText("first reply", { selector: ".transcript *" });
+      await act(async () => { emit({ jsonrpc: "2.0", method: "event", params: { event: "user_message", session_id: "session", text: "second question", mode: "send", delivery_id: "d1" } }); });
+      saved = true;
+      await click((await branchFrom(app, "second question"))!);
+      await waitFor(() => expect(server.calls).toEqual([{ method: "fork_message", params: { session_id: "session", message_id: "u2" } }]));
+    });
+  });
+
+  test("a running turn holds both actions with a reason and sends nothing", async () => {
+    const { server, options } = branchChat({ branched: true, status: { session: { session_id: "session" }, state: "running" } });
+    await withApp("controller", options, async (app, writes) => {
+      const control = await branchFrom(app, "first question");
+      expect(disabled(control!)).toBe(true);
+      expect(control!.getAttribute("title")).toBe("wait for this turn to finish.");
+      await click(control!);
+      await waitFor(() => expect(chip(app)?.getAttribute("aria-label")).toBe("branch 2 of 2"));
+      await click(chip(app)!);
+      const other = select(app, '.branch-list button:not([aria-current])');
+      expect(disabled(other)).toBe(true);
+      expect(app.getByText("wait for this turn to finish.")).toBeTruthy();
+      await click(other);
+      expect(server.calls).toEqual([]);
+      expect(writes.filter((write) => write === "fork_message" || write === "switch_branch")).toEqual([]);
+    });
+  });
+
+  test("a zeta that does not list fork_message shows no branch action", async () => {
+    const { options } = branchChat();
+    const { hello: _, ...rpc } = options.rpc!;
+    await withApp("controller", { ...options, rpc }, async (app) => {
+      const bubble = await app.findByText("first question", { selector: ".transcript *" });
+      expect(bubble.closest(".user-turn")?.querySelector(tag("chat.branch-from")) ?? null).toBeNull();
+      expect(chip(app)).toBeNull();
+    });
   });
 });
