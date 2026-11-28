@@ -162,3 +162,15 @@ export const redactArtifact = (line: string, secrets: readonly string[] = [], ho
       match.slice(key.length).includes("[redacted]") ? match : quote ? `${key}${quote}[redacted]${quote}` : `${key}[redacted]`);
   return home.length > 1 ? text.split(home).join("~") : text;
 };
+
+/** key-level diff of two `JSON.stringify({ ...localStorage })` dumps, for a failed restore check; "" if only key order differs */
+export function storageDiff(before: string, after: string, limit = 200): string {
+  const [a, b] = [before, after].map((dump) => JSON.parse(dump) as Record<string, string>);
+  const cut = (value: string) => value.length > limit ? `${value.slice(0, limit)}...` : value;
+  const lines = [
+    ...Object.keys(a).filter((key) => !(key in b)).map((key) => `only before: ${key}=${cut(a[key])}`),
+    ...Object.keys(b).filter((key) => !(key in a)).map((key) => `only after: ${key}=${cut(b[key])}`),
+    ...Object.keys(a).filter((key) => key in b && a[key] !== b[key]).map((key) => `changed: ${key}: ${cut(a[key])} -> ${cut(b[key])}`),
+  ];
+  return lines.join("\n");
+}

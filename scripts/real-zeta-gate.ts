@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CDPSession, Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
-import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact, storageDiff } from "./gate-diagnostics";
 import { gateAccountsPlace, gateCreatePlace, gateShell, gateStablePlace } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, gateTwoChatsAtOnce, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -3120,20 +3120,28 @@ with _database() as db:
   await restoredField.fill(restoredMutation);
   await restoredField.press("Enter");
   await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
-  const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
-  await observerPage.keyboard.press(appShortcut("Comma"));
-  const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
-  if (await restoredVim.count()) {
-    const before = await restoredVim.getAttribute("aria-checked");
-    await restoredVim.click();
-    await gateWait.playwright(observerPage, "waitForFunction", (expected) => localStorage.getItem("achilles-settings")?.includes(`\"vim\":${expected}`), before !== "true");
-    await waitFor(async () => await restoredVim.getAttribute("aria-checked") !== before, "restored vim toggle");
-    await restoredVim.click();
+  // GATE_RESTORE_REPEAT=N runs this snapshot/toggle/restore/compare block N times on the same page (a flake repro knob; off by default)
+  const restoreRounds = Number(process.env.GATE_RESTORE_REPEAT ?? 1);
+  const restoreFailures: string[] = [];
+  for (let round = 0; round < restoreRounds; round += 1) {
+    const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+    if (round === 0) await observerPage.keyboard.press(appShortcut("Comma"));
+    const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
+    if (await restoredVim.count()) {
+      const before = await restoredVim.getAttribute("aria-checked");
+      await restoredVim.click();
+      await gateWait.playwright(observerPage, "waitForFunction", (expected) => localStorage.getItem("achilles-settings")?.includes(`\"vim\":${expected}`), before !== "true");
+      await waitFor(async () => await restoredVim.getAttribute("aria-checked") !== before, "restored vim toggle");
+      await restoredVim.click();
+    }
+    const settingsAfterRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+    if (settingsAfterRestore === settingsBeforeRestore) throw new Error("restored controller settings did not write");
+    await observerPage.evaluate((snapshot) => { localStorage.clear(); for (const [key, value] of Object.entries(JSON.parse(snapshot) as Record<string, string>)) localStorage.setItem(key, value); }, settingsBeforeRestore);
+    const settingsRestored = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+    if (settingsRestored !== settingsBeforeRestore) restoreFailures.push(`round ${round}: ${storageDiff(settingsBeforeRestore, settingsRestored) || "key order only"}`);
   }
-  const settingsAfterRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
-  if (settingsAfterRestore === settingsBeforeRestore) throw new Error("restored controller settings did not write");
-  await observerPage.evaluate((snapshot) => { localStorage.clear(); for (const [key, value] of Object.entries(JSON.parse(snapshot) as Record<string, string>)) localStorage.setItem(key, value); }, settingsBeforeRestore);
-  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== settingsBeforeRestore) throw new Error("restored controller settings did not restore reversibly");
+  if (restoreRounds > 1) console.log(`restore repeat: ${restoreFailures.length} of ${restoreRounds} rounds did not restore reversibly`);
+  if (restoreFailures.length) throw new Error(`restored controller settings did not restore reversibly:\n${redact(restoreFailures.join("\n"))}`);
   if (screenshotDir) {
     await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
