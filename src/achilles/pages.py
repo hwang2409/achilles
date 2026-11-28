@@ -354,43 +354,63 @@ def block_model_backup(database: Path) -> Path:
     return Path(str(database) + ".pre-block-model-v3.backup")
 
 
+def archive_backup(database: Path) -> Path:
+    """Where the v4 -> v5 migration (page.archived_at) saves the v4 database."""
+    return Path(str(database) + ".pre-archive-v4.backup")
+
+
+def _backup_once(db: sqlite3.Connection, backup: Path) -> None:
+    """Copy the database to `backup` unless it exists, atomically, before a migration writes."""
+    if backup.exists():
+        return
+    # a unique name per process, so two first opens cannot collide on one temporary file
+    fd, temporary = tempfile.mkstemp(prefix=f".{backup.name}.", suffix=".tmp", dir=backup.parent)
+    os.close(fd)
+    created = False
+    try:
+        destination = sqlite3.connect(temporary)
+        try:
+            db.backup(destination)
+        finally:
+            destination.close()
+        # link, never replace: a racing first open may already have migrated, and its
+        # copy would overwrite the real old-version backup with a migrated one
+        os.link(temporary, backup)
+        created = True
+    except FileExistsError:
+        pass
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    if created:
+        directory = os.open(backup.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        print(f"Achilles database backup: {backup}")
+
+
 def _drop_block_model(db: sqlite3.Connection, database: Path) -> None:
     """Migrate v1-v3 to v4: back up the database once, then drop the block layout model."""
-    backup = block_model_backup(database)
-    if not backup.exists():
-        # a unique name per process, so two first opens cannot collide on one temporary file
-        fd, temporary = tempfile.mkstemp(
-            prefix=f".{backup.name}.", suffix=".tmp", dir=backup.parent
-        )
-        os.close(fd)
-        created = False
-        try:
-            destination = sqlite3.connect(temporary)
-            try:
-                db.backup(destination)
-            finally:
-                destination.close()
-            # link, never replace: a racing first open may already have migrated, and its
-            # copy would overwrite the real v3 backup with a v4 one
-            os.link(temporary, backup)
-            created = True
-        except FileExistsError:
-            pass
-        finally:
-            Path(temporary).unlink(missing_ok=True)
-        if created:
-            directory = os.open(backup.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-            print(f"Achilles database backup: {backup}")
+    _backup_once(db, block_model_backup(database))
     db.execute("BEGIN IMMEDIATE")
-    if db.execute("PRAGMA user_version").fetchone()[0] != 4:
+    # a racing open may have migrated past v4 already
+    if db.execute("PRAGMA user_version").fetchone()[0] in (1, 2, 3):
         if "active_layout_version" in {row[1] for row in db.execute("PRAGMA table_info(page)")}:
             db.execute("ALTER TABLE page DROP COLUMN active_layout_version")
         db.execute("DROP TABLE IF EXISTS layout_version")
         db.execute("PRAGMA user_version = 4")
+    db.commit()
+
+
+def _add_archived_at(db: sqlite3.Connection, database: Path) -> None:
+    """Migrate v4 to v5: back up the database once, then add page.archived_at."""
+    _backup_once(db, archive_backup(database))
+    db.execute("BEGIN IMMEDIATE")
+    if db.execute("PRAGMA user_version").fetchone()[0] == 4:
+        if "archived_at" not in {row[1] for row in db.execute("PRAGMA table_info(page)")}:
+            db.execute("ALTER TABLE page ADD COLUMN archived_at TEXT")
+        db.execute("PRAGMA user_version = 5")
     db.commit()
 
 
@@ -405,17 +425,21 @@ class PageStore:
         self.block_model_backup = block_model_backup(self._database)
         db = self._connect()
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2, 3, 4):
+        if version not in (0, 1, 2, 3, 4, 5):
+            db.close()
             raise RuntimeError(f"unsupported Achilles database version: {version}")
         if version in (1, 2, 3):
+            # the v3 backup already holds everything; archived_at is added below with the rest
             _drop_block_model(db, self._database)
+        elif version == 4:
+            _add_archived_at(db, self._database)
         db.executescript("""
         CREATE TABLE IF NOT EXISTS page (
           id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
           zeta_session_id TEXT, active_code_revision INTEGER,
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT,
-          created_by_page_id TEXT REFERENCES page(id)
+          created_by_page_id TEXT REFERENCES page(id), archived_at TEXT
         );
         CREATE TABLE IF NOT EXISTS code_revision (
           page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
@@ -465,6 +489,7 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
         ensure_column(db, "page", "active_code_revision", "INTEGER")
+        ensure_column(db, "page", "archived_at", "TEXT")
         ensure_column(db, "code_revision", "resolved_dependencies", "TEXT NOT NULL DEFAULT '{}'")
         ensure_column(db, "code_revision", "lockfile", "TEXT NOT NULL DEFAULT ''")
         ensure_column(db, "code_revision", "build_report", "TEXT NOT NULL DEFAULT '{}'")
@@ -492,7 +517,7 @@ class PageStore:
         db.execute(
             "INSERT OR IGNORE INTO chat(session_id,page_id,created_at,updated_at) SELECT zeta_session_id,id,created_at,updated_at FROM page WHERE zeta_session_id IS NOT NULL"  # noqa: E501
         )
-        db.execute("PRAGMA user_version = 4")
+        db.execute("PRAGMA user_version = 5")
         db.commit()
         db.close()
         self._chmod_db()
@@ -827,21 +852,44 @@ class PageStore:
             raise KeyError(page_id)
         return row
 
+    def update_page(
+        self, page_id: str, title: str | None = None, archived: bool | None = None
+    ) -> sqlite3.Row:
+        """Renames and archives or restores a page. Archive only hides it: nothing is deleted."""
+        if archived and page_id == "home":
+            raise ValueError("home cannot be archived")
+        with self.transaction() as db:
+            if title is not None:
+                db.execute("UPDATE page SET title=? WHERE id=?", (title, page_id))
+            if archived is not None:
+                # archiving twice keeps the first time
+                db.execute(
+                    "UPDATE page SET archived_at=CASE WHEN ? THEN COALESCE(archived_at, ?) END "
+                    "WHERE id=?",
+                    (archived, now(), page_id),
+                )
+            row = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
+        if row is None:
+            raise KeyError(page_id)
+        return row
+
     def pages(
-        self, limit: int = 200, before: tuple[str, str] | None = None
+        self, limit: int = 200, before: tuple[str, str] | None = None, archived: bool = False
     ) -> tuple[list[dict[str, Any]], tuple[str, str] | None]:
+        """The live pages, or with `archived` only the archived ones."""
         with self._connect() as db:
             # stable order (home, then newest created): a setting toggle never moves navigation
-            where = ""
+            clauses = ["p.archived_at IS NOT NULL" if archived else "p.archived_at IS NULL"]
             parameters: list[Any] = []
             if before is not None:
                 created_at, page_id = before
-                where = "WHERE p.id<>'home'"
+                clauses.append("p.id<>'home'")
                 if page_id != "home":
-                    where += " AND (p.created_at < ? OR (p.created_at = ? AND p.id < ?))"
+                    clauses.append("(p.created_at < ? OR (p.created_at = ? AND p.id < ?))")
                     parameters.extend((created_at, created_at, page_id))
+            where = "WHERE " + " AND ".join(clauses)
             rows = db.execute(
-                "SELECT p.id,p.route,p.title,p.created_at,p.updated_at,p.create_mode,"
+                "SELECT p.id,p.route,p.title,p.created_at,p.updated_at,p.create_mode,p.archived_at,"
                 "creator.route AS created_by_route,COUNT(c.session_id) AS chat_count "
                 "FROM page p LEFT JOIN page creator ON creator.id=p.created_by_page_id "
                 "LEFT JOIN chat c ON c.page_id=p.id "
@@ -862,6 +910,7 @@ class PageStore:
                 "create_mode": bool(row["create_mode"]),
                 "chat_count": row["chat_count"],
                 "created_by_route": row["created_by_route"],
+                "archived_at": row["archived_at"],
             }
             for row in page_rows
         ], next_cursor

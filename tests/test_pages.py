@@ -40,7 +40,7 @@ def test_old_chat_table_defaults_to_chat_purpose(tmp_path) -> None:
     assert store.chat("old-chat").get("purpose") == "chat"
     assert store.chats(1)[0]["purpose"] == "chat"
     with store.transaction() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
 
 
 def test_old_audit_table_gains_actor_and_record_id(tmp_path) -> None:
@@ -207,7 +207,7 @@ def test_old_database_migrates_in_place_with_backup_and_non_page_data(tmp_path, 
     assert capsys.readouterr().out.strip() == f"Achilles database backup: {backup}"
     assert backup.is_file()
     with sqlite3.connect(database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
         assert (
             db.execute("SELECT name FROM sqlite_master WHERE name='layout_version'").fetchone()
             is None
@@ -236,6 +236,8 @@ def test_old_database_migrates_in_place_with_backup_and_non_page_data(tmp_path, 
     assert capsys.readouterr().out == ""
     with sqlite3.connect(backup) as db:
         assert db.execute("SELECT document FROM layout_version").fetchone() is not None
+    # the v3 backup already holds everything, so the v1-v3 path writes no second backup
+    assert not Path(str(database) + ".pre-archive-v4.backup").exists()
 
 
 def test_migration_after_another_process_migrated_is_a_no_op(monkeypatch, tmp_path):
@@ -254,10 +256,128 @@ def test_migration_after_another_process_migrated_is_a_no_op(monkeypatch, tmp_pa
         racing.close()
 
     with sqlite3.connect(database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
     with sqlite3.connect(backup) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 3, "v3 backup was overwritten"
     assert [path.name for path in tmp_path.iterdir() if path.name.endswith(".tmp")] == []
+
+
+_KEPT_TABLES = ("page", "page_record", "code_revision", "tool", "tool_version", "chat", "audit")
+
+
+def _row_counts(database: Path) -> dict[str, int]:
+    with sqlite3.connect(database) as db:
+        return {
+            table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in _KEPT_TABLES
+        }
+
+
+def _v4_database(root: Path) -> Path:
+    """A v4 home: today's schema without page.archived_at, holding records and versions."""
+    PageStore(root)
+    database = root / "achilles.sqlite3"
+    with sqlite3.connect(database) as db:
+        if "archived_at" in {row[1] for row in db.execute("PRAGMA table_info(page)")}:
+            db.execute("ALTER TABLE page DROP COLUMN archived_at")
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) "
+            "VALUES('reading','/reading','reading','t','t')"
+        )
+        db.executemany(
+            "INSERT INTO page_record(page_id,collection,record_id,version,document,"
+            "created_at,updated_at) VALUES('reading','books',?,1,'{}','t','t')",
+            [(f"book-{index}",) for index in range(3)],
+        )
+        db.executemany(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,created_at) "
+            "VALUES('reading',?,'export default 1','{}','t')",
+            [(1,), (2,)],
+        )
+        db.execute("INSERT INTO chat VALUES('chat-1','reading','kept','t','t',NULL,'chat',0,1,0,NULL)")
+        db.execute("PRAGMA user_version = 4")
+    return database
+
+
+def test_v4_database_migrates_to_v5_with_a_backup_and_keeps_every_row(tmp_path, capsys):
+    database = _v4_database(tmp_path)
+    capsys.readouterr()
+    before = _row_counts(database)
+    backup = Path(str(database) + ".pre-archive-v4.backup")
+
+    PageStore(tmp_path)
+
+    assert capsys.readouterr().out.strip() == f"Achilles database backup: {backup}"
+    assert backup.is_file(), "the v4 -> v5 migration wrote no backup"
+    with sqlite3.connect(backup) as db:
+        # the backup is the database as it was before any v5 write
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert "archived_at" not in {row[1] for row in db.execute("PRAGMA table_info(page)")}
+    assert _row_counts(backup) == before
+    with sqlite3.connect(database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert db.execute("SELECT archived_at FROM page WHERE id='reading'").fetchone() == (None,)
+    assert _row_counts(database) == before
+    assert not Path(str(database) + ".pre-block-model-v3.backup").exists()
+
+    written = backup.stat().st_mtime_ns
+    PageStore(tmp_path)
+    assert capsys.readouterr().out == "", "the second start migrated or backed up again"
+    assert backup.stat().st_mtime_ns == written
+    assert _row_counts(database) == before
+    assert [path.name for path in tmp_path.iterdir() if path.name.endswith(".tmp")] == []
+
+
+def test_fresh_database_starts_at_v5_without_a_backup(tmp_path, capsys):
+    PageStore(tmp_path)
+    database = tmp_path / "achilles.sqlite3"
+    with sqlite3.connect(database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert "archived_at" in {row[1] for row in db.execute("PRAGMA table_info(page)")}
+    assert capsys.readouterr().out == ""
+    assert sorted(path.name for path in tmp_path.glob("*.backup")) == []
+
+
+def test_newer_database_is_refused_before_any_write(tmp_path):
+    database = tmp_path / "achilles.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE page (id TEXT PRIMARY KEY)")
+        db.execute("PRAGMA user_version = 6")
+    content = database.read_bytes()
+    with pytest.raises(RuntimeError, match="unsupported Achilles database version: 6"):
+        PageStore(tmp_path)
+    assert database.read_bytes() == content
+    assert sorted(path.name for path in tmp_path.glob("*.backup")) == []
+
+
+def test_archive_hides_a_page_and_restore_returns_it_with_its_rows(tmp_path):
+    database = _v4_database(tmp_path)
+    store = PageStore(tmp_path)
+    before = _row_counts(database)
+
+    renamed = store.update_page("reading", title="books")
+    assert renamed["title"] == "books"
+    store.update_page("reading", archived=True)
+    assert [page["id"] for page in store.pages()[0]] == ["home"]
+    archived = store.pages(archived=True)[0]
+    assert [(page["id"], page["title"]) for page in archived] == [("reading", "books")]
+    first = archived[0]["archived_at"]
+    assert first
+    store.update_page("reading", archived=True)
+    assert store.page("reading")["archived_at"] == first, "archiving twice moved the time"
+    assert _row_counts(database) == before
+
+    store.update_page("reading", archived=False)
+    assert [page["id"] for page in store.pages()[0]] == ["home", "reading"]
+    assert store.pages(archived=True)[0] == []
+    assert store.page("reading")["archived_at"] is None
+    assert _row_counts(database) == before
+
+    with pytest.raises(ValueError, match="home cannot be archived"):
+        store.update_page("home", archived=True)
+    assert store.page("home")["archived_at"] is None
+    with pytest.raises(KeyError):
+        store.update_page("missing", title="x")
 
 
 def test_create_write_inspect_history_and_restore_code(built, tmp_path):
