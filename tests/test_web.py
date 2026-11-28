@@ -966,6 +966,50 @@ def test_records_reject_a_missing_or_invalid_json_body(tmp_path: Path) -> None:
     assert client.get("/api/pages/home/records/books", headers=own).json() == [book.json()]
 
 
+def test_runtime_error_rejects_a_bad_revision_and_keeps_the_first_error(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO code_revision(page_id,version,source,dependencies,digest,created_at)"
+            " VALUES(?,?,?,?,?,?)",
+            ("home", 1, "source", "{}", "d1", "2025-01-01"),
+        )
+        db.execute("UPDATE page SET active_code_revision=1 WHERE id='home'")
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = TestClient(
+        web.create_app(),
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 1234),
+        raise_server_exceptions=False,
+    )
+    url = "/api/pages/home/runtime-error"
+    for revision in ("one", None, True):
+        response = client.post(url, headers=own, json={"revision": revision, "error": "x"})
+        assert response.status_code == 400, (revision, response.status_code)
+    # an error loop posts again and again; the first error is the cause and stays
+    for error in ("first cause", "loop 1", "loop 2"):
+        assert (
+            client.post(url, headers=own, json={"revision": 1, "error": error}).status_code == 200
+        )
+    assert store.page_code("home")["runtime_error"] == "first cause"
+
+
+def test_bridge_insert_rejects_a_non_string_record_id_and_a_huge_body(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = TestClient(web.create_app(), base_url="http://127.0.0.1")
+    url = "/api/pages/home/records/books"
+    for record_id in (7, ["a"], {"a": 1}, True):
+        response = client.post(url, headers=own, json={"record_id": record_id})
+        assert response.status_code == 400, (record_id, response.status_code)
+    huge = json.dumps({"title": "x" * 2 * 1024 * 1024}).encode()  # past the 1 MiB cap
+    assert client.post(url, headers=own, content=huge).status_code == 413
+    # a chunked body has no content-length; the cap still stops it
+    chunked = client.post(url, headers=own, content=iter([huge[:1024], huge[1024:]]))
+    assert chunked.status_code == 413
+    assert client.get(url, headers=own).json() == []
+
+
 def test_http_restores_follow_create_mode(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     with store.transaction() as db:

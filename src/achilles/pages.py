@@ -1574,9 +1574,11 @@ class PageStore:
             raise
 
     def set_runtime_error(self, page_id: str, revision: int, error: str) -> None:
+        # keep the first error: it is the cause, and an error loop then writes nothing more
         with self.transaction() as db:
             db.execute(
-                "UPDATE code_revision SET runtime_error=? WHERE page_id=? AND version=?",
+                "UPDATE code_revision SET runtime_error=? "
+                "WHERE page_id=? AND version=? AND runtime_error IS NULL",
                 (error[:4000], page_id, revision),
             )
 

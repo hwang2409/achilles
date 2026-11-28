@@ -23,6 +23,7 @@ from .pages import CHAT_PURPOSES, ChatChanged, PageStore, RecordExists
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
 
+MAX_JSON_BODY = 1024 * 1024  # page bridge writes and shell requests are small JSON objects
 EMPTY_PAGE = (
     "this page has no compiled revision. ask the agent in page chat to build it with write_page."
 )
@@ -319,11 +320,11 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
     async def runtime_error(request):
         page_id = await require_page_bearer(request)
         body = await json_object(request)
+        revision = body.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int):
+            raise HTTPException(400, "revision must be an integer")
         await anyio.to_thread.run_sync(
-            store.set_runtime_error,
-            page_id,
-            int(body.get("revision", 0)),
-            str(body.get("error", "runtime error")),
+            store.set_runtime_error, page_id, revision, str(body.get("error", "runtime error"))
         )
         return JSONResponse({"ok": True})
 
@@ -539,8 +540,13 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         return await page_bearer(request)
 
     async def json_object(request) -> dict:
+        raw = b""
+        async for chunk in request.stream():  # stop reading at the cap, even for a chunked body
+            raw += chunk
+            if len(raw) > MAX_JSON_BODY:
+                raise HTTPException(413, f"body must be at most {MAX_JSON_BODY} bytes")
         try:
-            body = await request.json()
+            body = json.loads(raw)
         except ValueError:  # bad JSON, or a body that is not UTF-8
             body = None
         if not isinstance(body, dict):
@@ -552,6 +558,8 @@ addEventListener('unhandledrejection',event=>parent.postMessage({{...identity,ru
         collection = request.path_params["collection"]
         if request.method == "POST":
             body = await json_object(request)
+            if not isinstance(body.get("record_id", ""), str):
+                raise HTTPException(400, "record_id must be a string")
             try:
                 inserted = await anyio.to_thread.run_sync(
                     store.insert_record, page_id, collection, body
