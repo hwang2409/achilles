@@ -896,6 +896,15 @@ class PageStore:
             ).fetchall()
         return [chat_row(row) for row in rows]
 
+    def unsent_chat_ids(self) -> list[str]:
+        # the complement of the `chats()` rule: what the sidebar hides unless the caller names it
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT c.session_id FROM chat c JOIN page p ON p.id=c.page_id "
+                "WHERE NOT c.message_sent ORDER BY c.session_id"
+            ).fetchall()
+        return [row["session_id"] for row in rows]
+
     def approval_count(self) -> int:
         with self._connect() as db:
             return int(

@@ -1416,6 +1416,29 @@ def test_chat_list_includes_a_chat_only_after_its_first_message(tmp_path: Path) 
         assert client.patch("/api/chats/sent", json=body).status_code == 400
 
 
+def test_unsent_chat_ids_are_the_chats_the_sidebar_hides(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("notes", "/notes", "notes", "2025-01-01", "2025-01-01"),
+        )
+    client = chat_client()
+    for page, session_id in (("home", "sent"), ("home", "ran"), ("home", "draft")):
+        client.post(f"/api/pages/{page}/chats", json={"session_id": session_id})
+    client.post("/api/pages/notes/chats", json={"session_id": "page-draft"})
+    client.patch("/api/chats/sent", json={"first_message": "hello"})
+    client.patch("/api/chats/ran", json={"last_state": "running"})
+    unsent = client.get("/api/chats/unsent")
+    listed = {row["session_id"] for row in client.get("/api/chats").json()["chats"]}
+    assert (unsent.status_code, unsent.text) == (200, '{"session_ids":["draft","page-draft"]}')
+    assert listed == {"sent", "ran"}
+    client.patch("/api/chats/draft", json={"first_message": "now sent"})
+    assert client.get("/api/chats/unsent").json() == {"session_ids": ["page-draft"]}
+    foreign = {"host": "127.0.0.1:5190", "origin": "http://evil.test"}
+    assert client.get("/api/chats/unsent", headers=foreign).status_code == 403
+
+
 def test_a_chat_whose_turn_ran_is_listed_without_its_first_message_record() -> None:
     client = chat_client()
     for session_id in ("ran", "draft"):
