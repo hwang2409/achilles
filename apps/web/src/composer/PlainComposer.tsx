@@ -16,6 +16,7 @@ import {
 } from "./useComposerDelivery";
 import { ComposerHint } from "./hint";
 import { useSlashMenu } from "./SlashMenu";
+import { usePathCompletion } from "./pathCompletion";
 
 // send while the composer is held: shown, and off
 export const HeldSend = () => <button type="button" data-part="composer-submit" aria-label="send message" disabled>send</button>;
@@ -41,9 +42,17 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
   const slash = useSlashMenu(id, model.draft, props.slashCommands, edit, submit);
+  const caret = useRef<number | null>(null);
+  const paths = usePathCompletion(props.completePaths, (value, at) => { caret.current = at; edit(value); });
+  useLayoutEffect(() => {
+    if (caret.current === null || !input.current) return;
+    input.current.setSelectionRange(caret.current, caret.current);
+    caret.current = null;
+  });
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (slash.onKeyDown(event)) return;
+    // the two lists cannot both be open: slash needs a draft of only `/name`, a path token needs `@` after a space
+    if (slash.onKeyDown(event) || paths.onKeyDown(event)) return;
     if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
       cancel();
@@ -100,6 +109,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       aria-busy={model.sending || model.stopping || undefined}
       onSubmit={onFormSubmit}
     >
+      {!readOnly && paths.list(() => input.current)}
       {!readOnly && <QueuedMessages model={model} onRetry={(id) => { retry(id); focusInput(); }} onRestore={(id) => { restore(id); focusInput(); }} onCancel={(id) => { cancel(id); focusInput(); }} />}
       <div data-part="composer-field" data-value={model.draft}>
         <textarea
@@ -109,9 +119,13 @@ export function PlainComposer(props: ComposerAdapterProps) {
           placeholder={placeholder}
           aria-label={label}
           aria-describedby={readOnly ? undefined : `${id}-hint ${id}-message`}
-          {...(readOnly ? {} : slash.field)}
           readOnly={readOnly}
-          onChange={readOnly ? undefined : (event) => edit(event.target.value)}
+          {...(readOnly ? {} : paths.fieldProps)}
+          // after the path props: they set aria-controls even when closed, so the open slash menu must win
+          {...(readOnly ? {} : slash.field)}
+          onChange={readOnly ? undefined : (event) => { edit(event.target.value); paths.sync(event.target); }}
+          onSelect={readOnly ? undefined : (event) => paths.sync(event.currentTarget)}
+          onBlur={paths.close}
           onKeyDown={readOnly ? undefined : onKeyDown}
         />
       </div>

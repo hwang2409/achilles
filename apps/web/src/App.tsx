@@ -12,7 +12,7 @@ import { Approval, Fallback, Message, Notification, RunProvider, SubAgentNavigat
 import { ChatAgents } from "./agents/ChatAgents";
 import type { ChildControls } from "./agents/childControls";
 import type { ChildSendOwner } from "./agents/childSend";
-import type { ZetaClient } from "@fulcrum/zeta";
+import { completePath, type ZetaClient } from "@fulcrum/zeta";
 import type { RenderShell } from "./surface/SurfaceRouter";
 import { chatHref, titleOf, useAgentNavAdapter, type Chat } from "./surface/AgentNavAdapter";
 import { surfaceHref, approvalIntent, chatsRoute, createRoute, pagesRoute, type SurfaceRoute } from "./surface/routes";
@@ -32,7 +32,7 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, returnFocusToComposer, userTyping, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
+import { backoff, supportsFeature, supportsRequest, type Connection, type ConnectionState } from "./zeta";
 import { TOO_MANY_CHATS } from "./zeta/session";
 import { parkedRows, subscribeParked } from "./zeta/parked";
 import { keepRowWrites, subscribeRowWrites, verifyChatStates } from "./zeta/rowState";
@@ -110,6 +110,11 @@ const FIELD = 'textarea[aria-label="message"], [role="textbox"]';
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite, controls }: { controls?: ReactNode; client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps & { held?: boolean }; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const commandOpener = useRef<HTMLElement | null>(null);
+  const chatId = chat?.id;
+  // zeta advertises path_complete only to a controller that negotiated path_completion
+  const completePaths = useMemo(() => (canWrite && client && chatId && supportsRequest(client, "path_complete")
+    ? (text: string, signal: AbortSignal) => completePath(client, chatId, text, { signal })
+    : undefined), [canWrite, client, chatId]);
   const draft = useSyncExternalStore(
     (listener) => {
       const unsubscribeConfirm = draftStore.subscribeConfirm(sessionId, listener);
@@ -151,6 +156,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     commandOutput: commands.output && <CommandOutput commands={commands} opener={commandOpener.current} />,
     slashCommands: commands.slashList,
     controls,
+    completePaths,
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
