@@ -71,8 +71,8 @@ export async function gateChildRecovery(browser: Browser, origin: string, discov
     }, "suspended child row with its retry time");
     await row.click();
     await agents.locator(".agents-run-head", { hasText: "gives up at" }).waitFor();
-    // a child paused before its first turn has no honest elapsed time, and its history read ends
-    if (/elapsed at last refresh/.test(await agents.locator(".agents-run-head").innerText())) throw new Error("a child that never ran a turn shows an elapsed time");
+    // zeta's elapsed is wall time since start; a child with no turn yet never shows "0s", and its history read ends
+    if (/elapsed at last refresh\s+0s/.test(await agents.locator(".agents-run-head").innerText())) throw new Error("a child that never ran a turn shows 0s elapsed");
     await agents.locator('.agents-activity [data-state="loading"]').waitFor({ state: "detached" });
     if (await agents.locator(".agents-composer").count()) throw new Error("a suspended child offers the message box");
     if (await agents.locator('[data-write-surface="agents.cancel"]').count() !== 1) throw new Error("a suspended child has no cancel");
