@@ -9,6 +9,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
+from proof_home import private_proof_home
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
 from zeta.attention_records import AttentionStore
 from zeta.core.session import SessionManager
@@ -57,7 +58,7 @@ def backend() -> FakeBackend:
 
 
 def make_server() -> ZetaServer:
-    home = Path(os.environ["ZETA_HOME"])
+    home = private_proof_home()
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     advance(home, expected_epoch=0)
     seed(home, cwd)

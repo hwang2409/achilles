@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 import uvicorn
+from homes import require_test_homes
 from starlette.testclient import TestClient
 
 import achilles.mcp_server as mcp_server
@@ -21,12 +22,6 @@ import achilles.web as web
 from achilles.mcp_server import _remove_connection
 from achilles.pages import PageStore
 from achilles.tools import bundle_digest, validate_bundle
-
-
-@pytest.fixture(autouse=True)
-def isolated_homes(monkeypatch, tmp_path):
-    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
-    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
 
 
 def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_path: Path) -> None:
@@ -577,11 +572,42 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
 
 
 def chat_client() -> TestClient:
+    require_test_homes()
     return TestClient(
         web.create_app(),
         client=("127.0.0.1", 1234),
         headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"},
     )
+
+
+@pytest.mark.parametrize(
+    "achilles, zeta",
+    [
+        (None, "tmp/zeta"),
+        ("home/.local/share/achilles", "tmp/zeta"),
+        ("/achilles-outside-temp", "tmp/zeta"),
+        ("tmp/achilles", None),
+        ("tmp/achilles", "home/.zeta"),
+    ],
+)
+def test_chat_client_refuses_a_real_home_before_opening_it(
+    monkeypatch, tmp_path: Path, achilles: str | None, zeta: str | None
+) -> None:
+    # HOME points at a fake home, so the real ~/.local/share/achilles and ~/.zeta stay untouched
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    for name, value in (("ACHILLES_HOME", achilles), ("ZETA_HOME", zeta)):
+        if value is None:
+            monkeypatch.delenv(name)
+        else:
+            monkeypatch.setenv(name, value if value.startswith("/") else str(tmp_path / value))
+    try:
+        chat_client()
+        message = ""
+    except (RuntimeError, OSError) as error:
+        message = str(error)
+    assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == []
+    name = "ZETA_HOME" if achilles == "tmp/achilles" else "ACHILLES_HOME"
+    assert f"set {name} to a temp dir; run through pytest" in message
 
 
 def test_page_index_is_safe_bounded_and_origin_protected(tmp_path: Path) -> None:
