@@ -44,7 +44,7 @@ export async function gateMcpWrites(browser: Browser, origin: string, home: stri
   async function capture(tab: Page, name?: string) {
     for (const id of await settings(tab).locator("[data-write-surface]").evaluateAll((items) => items.map((item) => item.getAttribute("data-write-surface")!))) ids.add(id);
     const surface = await tab.evaluate(() => JSON.stringify([document.documentElement.outerHTML, location.href, document.cookie,
-      { ...localStorage }, { ...sessionStorage }]));
+      ...[localStorage, sessionStorage].map((store) => Object.entries(store))]));
     if (canaries.some((secret) => surface.includes(secret) || [...consoleText, ...errors].some((line) => line.includes(secret)))) throw new Error("MCP config canary escaped redaction");
     const fits = await tab.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
     if (!fits) throw new Error("MCP layout overflows the viewport");
