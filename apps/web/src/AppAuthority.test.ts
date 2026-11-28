@@ -729,14 +729,26 @@ const rows: Record<WriteSurfaceId, Row> = {
       expect(Boolean(app.container.querySelector(tag("busy.retry")))).toBe(false);
       await keydown(select(app, '[data-part="composer"]'), "Enter");
     } else {
-      const control = await waitFor(() => select(app, tag("busy.retry")), { timeout: 4000 });
-      expect(control.textContent).toBe('stop "Parked chat" and open new chat');
-      expect(disabled(control)).toBe(false);
-      const before = writes.length;
-      await click(control);
+      // click the notice the moment it shows, before React's queued effects run (a slow machine): the stop must still run
+      let control: HTMLElement | null = null;
+      let before = 0;
+      const observer = new MutationObserver(() => {
+        const shown = app.container.querySelector<HTMLElement>(tag("busy.retry"));
+        if (!shown || control) return;
+        control = shown;
+        observer.disconnect();
+        before = writes.length;
+        fireEvent.click(shown);
+      });
+      observer.observe(app.container, { childList: true, subtree: true });
+      try { await waitFor(() => expect(control).not.toBeNull(), { timeout: 4000 }); } finally { observer.disconnect(); }
+      expect(control!.textContent).toBe('stop "Parked chat" and open new chat');
+      expect(disabled(control!)).toBe(false);
       await waitFor(() => didWrite(writes.slice(before), "new_session"));
-      // the stopped chat first (resume, abort), then the refused swap again; the new chat's own resume follows
-      expect(writes.slice(before).filter((write) => ["resume", "abort", "new_session"].includes(write)).slice(0, 3)).toEqual(["resume", "abort", "new_session"]);
+      // the stopped chat first (resume, abort), then the refused swap again; the kept chat's reopen may resume before it
+      const order = writes.slice(before).filter((write) => ["resume", "abort", "new_session"].includes(write));
+      const abort = order.indexOf("abort");
+      expect(order.slice(abort - 1, abort + 2)).toEqual(["resume", "abort", "new_session"]);
     }
   } },
   "approval.approve": approval("approve"),

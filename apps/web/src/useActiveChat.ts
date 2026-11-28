@@ -1,6 +1,7 @@
 import { shellHeaders } from "./shell";
 import { continueChatIntent, newChatIntent } from "./surface/routes";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 import { ZetaError, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
 import { findChat, titleOf, type Chat } from "./surface/AgentNavAdapter";
 import { continuationNotification, sessionMissing } from "./chat/continuation";
@@ -693,10 +694,17 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const refused = useCallback(async (token: number, retry: BusyChat["retry"], refusal: Refusal) => {
     const attempt = swap.current?.retry === retry ? swap.current : null;
     if (attempt) setSwap(null);
+    // the kept chat stays on screen; its lease went with the attempt (and a stop may have left zeta another chat
+    // attached), so it is opened again: zeta takes back its own parked chat, never refused. one sync commit shows the
+    // notice and runs the reopen's attach effect, so no click on the notice can take the attempt's dropped token
+    const show = (update: () => void) => flushSync(() => {
+      update();
+      if (attempt?.kept) { setSelectedId(attempt.kept); setRouteRefresh((value) => value + 1); }
+    });
     if (refusal.kind === "busy") {
       const chat = refusal.sessionId ? await findChat(refusal.sessionId).catch(() => null) : null;
       if (!owner.current.current(token)) return;
-      applyActive(token, { kind: "busy", busy: { sessionId: refusal.sessionId, chat, retry } });
+      show(() => applyActive(token, { kind: "busy", busy: { sessionId: refusal.sessionId, chat, retry } }));
     } else {
       const attached = client ? await refreshParked(client).catch(() => null) : null;
       // status lists the parked chats oldest first; a parked_limit refusal's list has no set order and adds the closing ones
@@ -706,12 +714,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       const targetId = attempt ? null : retry === "attach" ? selectedFromUrl() : null;
       const [target, ...chats] = await Promise.all([targetId ? findChat(targetId).catch(() => null) : attempt?.target ?? null, ...order.map((id) => findChat(id).catch(() => null))]);
       if (!owner.current.current(token)) return;
-      settleStop(attached, order, refusal.kind === "resident");
-      applyActive(token, { kind: "busy", busy: { sessionId: null, chat: null, retry, limit: refusal.kind, target, parked: order.map((id, at) => ({ sessionId: id, chat: chats[at] ?? null, finishing: !rows.includes(id) })) } });
+      show(() => {
+        settleStop(attached, order, refusal.kind === "resident");
+        applyActive(token, { kind: "busy", busy: { sessionId: null, chat: null, retry, limit: refusal.kind, target, parked: order.map((id, at) => ({ sessionId: id, chat: chats[at] ?? null, finishing: !rows.includes(id) })) } });
+      });
     }
-    // the kept chat stays on screen; its lease went with the attempt (and a stop may have left zeta another chat
-    // attached), so it is opened again: zeta takes back its own parked chat, never refused
-    if (attempt?.kept) { setSelectedId(attempt.kept); setRouteRefresh((value) => value + 1); }
   }, [applyActive, client, setSwap, settleStop]);
 
   const applyPendingCreateMode = useCallback(async (ready: ReadyState, enabled: boolean) => {
