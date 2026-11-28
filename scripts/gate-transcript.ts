@@ -1,6 +1,6 @@
 import type { Browser, Page } from "playwright";
 import { type GateWait, writeControl } from "./gate-diagnostics";
-import { assertChatInsets } from "./gate-geometry";
+import { assertChatInsets, assertHeaderHitAreas } from "./gate-geometry";
 
 export async function waitForIdleTurn(
   page: Page,
@@ -73,6 +73,7 @@ export async function gateTranscript(
   await checkTableGeometry(1440, false);
   await checkTableGeometry(390, true);
   await assertChatInsets(page);
+  await assertHeaderHitAreas(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   const markdownText = await markdown.innerText();
   if (markdownText.includes("# Rendered markdown") || markdownText.includes("* first item"))

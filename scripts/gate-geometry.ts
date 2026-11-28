@@ -6,8 +6,10 @@ const focusRing = 4;
 // 390 chat: user bubbles and tool rows share the composer's side edges (>= 12 px), and a tool status is never cut.
 export async function assertChatInsets(page: Page) {
   const geometry = await page.evaluate(() => {
-    const transcript = [...document.querySelectorAll<HTMLElement>(".transcript")].find((element) => !element.closest(".page-chat-docked"));
-    const composer = document.querySelector<HTMLElement>('[data-part="composer"]')?.getBoundingClientRect();
+    // the visible composer and the transcript of the same surface (the main pane, or the open page chat sheet)
+    const composerElement = [...document.querySelectorAll<HTMLElement>('[data-part="composer"]')].find((element) => element.getBoundingClientRect().height > 0 && getComputedStyle(element).visibility === "visible");
+    const transcript = composerElement?.closest(".page-chat-surface, .main-pane")?.querySelector<HTMLElement>(".transcript");
+    const composer = composerElement?.getBoundingClientRect();
     const edges = (element: Element) => { const box = element.getBoundingClientRect(); return { left: Math.round(box.left), right: Math.round(innerWidth - box.right) }; };
     const rows = (selector: string) => [...(transcript?.querySelectorAll(selector) ?? [])].filter((element) => element.getBoundingClientRect().height > 0);
     return {
@@ -52,5 +54,21 @@ export async function assertAgentsBackInPanel(page: Page) {
   });
   if (!geometry || geometry.back.top - focusRing < geometry.panel.top || geometry.back.left - focusRing < geometry.panel.left || geometry.back.right + focusRing > geometry.panel.right)
     throw new Error(`agents "all runs" button or its focus ring is outside the detail panel: ${JSON.stringify(geometry)}`);
+  return geometry;
+}
+
+// narrow chat header: each button's ::after hit area stays inside the header, so it never covers the transcript under it.
+export async function assertHeaderHitAreas(page: Page) {
+  const geometry = await page.evaluate(() => {
+    const header = document.querySelector(".chat-header")?.getBoundingClientRect();
+    const buttons = [...document.querySelectorAll<HTMLElement>(".chat-header button")].filter((button) => button.getBoundingClientRect().height > 0).map((button) => {
+      const box = button.getBoundingClientRect();
+      const after = getComputedStyle(button, "::after");
+      return { label: button.textContent?.trim() ?? "", top: box.top - parseFloat(after.top), bottom: box.bottom - parseFloat(after.bottom) };
+    });
+    return header && { headerTop: header.top, headerBottom: header.bottom, buttons };
+  });
+  if (!geometry || !geometry.buttons.length || geometry.buttons.some((button) => button.top < geometry.headerTop - 0.5 || button.bottom > geometry.headerBottom + 0.5))
+    throw new Error(`chat header hit areas reach outside the header: ${JSON.stringify(geometry)}`);
   return geometry;
 }
