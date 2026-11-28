@@ -4,6 +4,7 @@ import asyncio
 import os
 from pathlib import Path
 
+from proof_home import private_proof_home
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
 from zeta.agent import resume_child, runner
 from zeta.protocol.types import (
@@ -53,7 +54,7 @@ class OfflineChildBackend:
 
 
 def make_server() -> ZetaServer:
-    home = Path(os.environ["ZETA_HOME"])
+    home = private_proof_home()
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     advance(home, expected_epoch=0)
     child = OfflineChildBackend(cwd / "provider-online")
