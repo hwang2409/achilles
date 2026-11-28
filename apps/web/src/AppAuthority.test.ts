@@ -1548,6 +1548,23 @@ test("the chat header counts running background tasks and its list cancels one: 
     // nothing runs now: the chip goes, the open list stays
     expect(tasksChip(app)?.textContent ?? null).toBeNull();
     expect(writes.filter((write) => write === "background_task_cancel")).toHaveLength(1);
+    // the cancel button and the chip are gone: focus stays in the list, then returns to the header, never the body
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("background tasks in this chat"));
+    await click(within(dialog).getByRole("button", { name: "close" }));
+    expect(document.activeElement?.textContent).toBe("Agents");
+  });
+});
+
+test("a failed background task read is read again when the turn ends, so the chip comes back", async () => {
+  let reads = 0;
+  const rpc: Options["rpc"] = { run_work_list: () => ++reads === 1 ? { error: { code: -32004, message: "fixture busy" } } : { result: { tasks: [task("600", {})], todo: [] } } };
+  await withApp("controller", { attached: true, rpc }, async (app, _writes, _requests, emit) => {
+    await waitFor(() => expect(reads).toBe(1));
+    await act(async () => {});
+    expect(tasksChip(app)?.textContent ?? null).toBeNull();
+    await act(async () => { emit({ jsonrpc: "2.0", method: "event", params: { event: "agent_end", session_id: "session" } }); });
+    await waitFor(() => expect(tasksChip(app)?.textContent ?? null).toBe("1 task"));
+    expect(reads).toBe(2);
   });
 });
 

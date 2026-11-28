@@ -3,7 +3,7 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { useNow } from "../agents/AgentRunDetail";
 import { displayControl, duration } from "../agents/childControls";
 import { wrapTab } from "../keyboard";
-import { onTaskUpdate } from "../zeta/turnEnd";
+import { onRunEnd, onTaskUpdate } from "../zeta/turnEnd";
 import "../settings-dialog.css";
 import "./background-tasks.css";
 
@@ -28,7 +28,8 @@ function taskRow(value: unknown, at: number): Task | undefined {
 /**
  * This chat's background tasks while `sessionId` is attached to this tab's controller: zeta answers run_work_list and
  * background_task_cancel only for the caller's own active session, never for an observer. null: no list (an older
- * zeta, an observer, another tab holds the chat, or the read failed). Each background_task_updated event rereads it.
+ * zeta, an observer, another tab holds the chat, or the read failed). Each background_task_updated event rereads it, and
+ * the end of a turn rereads it after a failed read, so one timeout does not hide the chip while a task runs.
  */
 export function useBackgroundTasks(client: ZetaClient | null, sessionId: string | undefined, enabled: boolean) {
   const [tasks, setTasks] = useState<Task[] | null>(null);
@@ -36,19 +37,22 @@ export function useBackgroundTasks(client: ZetaClient | null, sessionId: string 
     setTasks(null);
     if (!client || !sessionId || !enabled) return;
     let current = new AbortController();
+    let failed = false;
     const read = () => {
       current.abort();
       const { signal } = current = new AbortController();
       client.request("run_work_list", { session_id: sessionId }, { signal, timeoutMs: 5000 }).then((result) => {
         if (signal.aborted) return;
+        failed = false;
         const rows = (result as { tasks?: unknown } | null)?.tasks;
         const at = performance.now();
         setTasks(Array.isArray(rows) ? rows.flatMap((row) => taskRow(row, at) ?? []) : null);
-      }, () => { if (!signal.aborted) setTasks(null); });
+      }, () => { if (!signal.aborted) { failed = true; setTasks(null); } });
     };
     read();
     const stop = onTaskUpdate(client, (id) => { if (id === sessionId) read(); });
-    return () => { stop(); current.abort(); };
+    const stopEnd = onRunEnd(client, (id) => { if (id === sessionId && failed) read(); });
+    return () => { stop(); stopEnd(); current.abort(); };
   }, [client, sessionId, enabled]);
   const replace = (row: Task) => setTasks((rows) => rows && rows.map((one) => one.id === row.id ? row : one));
   return { tasks, running: tasks?.filter(live).length ?? 0, replace };
@@ -58,6 +62,7 @@ export function BackgroundTasks({ client, sessionId, list, opener, onClose }: {
   client: ZetaClient | null; sessionId: string; list: ReturnType<typeof useBackgroundTasks>; opener: HTMLElement | null; onClose(): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
   const tasks = list.tasks ?? [];
@@ -65,7 +70,8 @@ export function BackgroundTasks({ client, sessionId, list, opener, onClose }: {
   useLayoutEffect(() => {
     const node = dialog.current;
     node?.showModal();
-    return () => { node?.close(); opener?.focus(); };
+    // the chip that opened the list goes away when nothing runs; focus then returns to the header's first action
+    return () => { node?.close(); (opener?.isConnected ? opener : document.querySelector<HTMLElement>(".chat-header .chat-actions button"))?.focus(); };
   }, []);
   const cancel = async (task: Task) => {
     if (!client || pending) return;
@@ -78,13 +84,15 @@ export function BackgroundTasks({ client, sessionId, list, opener, onClose }: {
     } catch (failure) {
       setError(`could not cancel: ${(failure as Error)?.message || "zeta did not answer"}`);
     } finally { setPending(null); }
+    // a canceled row loses its cancel button; keep focus in the list instead of on the page body
+    requestAnimationFrame(() => { if (!dialog.current?.contains(document.activeElement)) heading.current?.focus(); });
   };
   return <dialog ref={dialog} className="settings-dialog chat-tasks" aria-labelledby="chat-tasks-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }}
     onClick={(event) => { if (event.target === dialog.current) onClose(); }}
     onKeyDown={(event) => wrapTab(event, event.currentTarget)}>
     <div className="settings-panel">
-      <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="chat-tasks-title">background tasks in this chat</h2></div>
+      <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="chat-tasks-title" ref={heading} tabIndex={-1}>background tasks in this chat</h2></div>
         <div><button type="button" onClick={onClose}>close</button></div></div>
       <div className="settings-content">
         {error && <p role="alert">{error}</p>}
